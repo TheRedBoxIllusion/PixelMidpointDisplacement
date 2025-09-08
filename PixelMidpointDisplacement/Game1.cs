@@ -23,7 +23,7 @@ namespace PixelMidpointDisplacement
 
 
         PhysicsEngine physicsEngine;
-        List<PhysicsObject> physicsObjects = new List<PhysicsObject>();
+        
 
         Player player;
 
@@ -43,7 +43,7 @@ namespace PixelMidpointDisplacement
             physicsEngine = new PhysicsEngine(worldContext);
 
             player = new Player(worldContext);
-            physicsObjects.Add(player);
+            worldContext.physicsObjects.Add(player);
 
 
         }
@@ -76,6 +76,7 @@ namespace PixelMidpointDisplacement
 
 
             worldContext.generateWorld((300, 300));
+            worldContext.updatePixelsPerBlock(16);
 
             playerSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
             collisionSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
@@ -101,20 +102,20 @@ namespace PixelMidpointDisplacement
             player.inputUpdate(horizontalAcceleration, jumpAcceleration, gameTime.ElapsedGameTime.TotalSeconds);
 
 
-            for (int i = 0; i < physicsObjects.Count; i++)
+            for (int i = 0; i < worldContext.physicsObjects.Count; i++)
             {
                 //General Physics simulations
                 //Order: Acceleration, velocity then location
-                physicsObjects[i].isOnGround = false;
-                physicsEngine.addGravity(physicsObjects[i]);
-                physicsEngine.computeAccelerationWithAirResistance(physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
-                physicsEngine.detectBlockCollisions(physicsObjects[i]);
-                physicsEngine.computeAccelerationToVelocity(physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
-                physicsEngine.applyVelocityToPosition(physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                worldContext.physicsObjects[i].isOnGround = false;
+                physicsEngine.addGravity(worldContext.physicsObjects[i]);
+                physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
+                physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
                 //Reset acceleration to be calculated next frame
-                physicsObjects[i].accelerationX = 0;
-                physicsObjects[i].accelerationY = 0;
+                worldContext.physicsObjects[i].accelerationX = 0;
+                worldContext.physicsObjects[i].accelerationY = 0;
             }
 
             worldContext.screenSpaceOffset = (-(int)player.x + _graphics.GraphicsDevice.Viewport.Width / 2 - (int)(player.width * worldContext.pixelsPerBlock),
@@ -254,13 +255,16 @@ namespace PixelMidpointDisplacement
         0.00325};
 
         //Smaller means the blocks are also smaller...
-        double frequency = 0.045;
+        double frequency = 0.0045;
 
         //Higher means more solid
         double blockThreshold = 0.9;
-        double decreasePerY = 0.01;
+        double decreasePerY = 0.005;
         double maximumThreshold = 0.9;//Only decreasing so...
-        double minimumThreshold = 0.48;
+        double minimumThreshold = 0.42;
+        //The effect of the absolute y value (from the top of the map) and the relative y value (from the surface)
+        double absoluteYHeightWeight = 0.1;
+        double relativeYHeightWeight = 1;
 
         int vectorCount = 6;
         double vectorAngleOffset = (Math.PI);
@@ -422,7 +426,8 @@ namespace PixelMidpointDisplacement
 
         private double changeThresholdByDepth(double blockThreshold, double changePerY, (double x, double y) position, double maximumThreshold, double minimumThreshold)
         {
-            blockThreshold = blockThreshold - changePerY * (position.y - surfaceHeight[(int)position.x]);
+            double calculatedYWeight = position.y * absoluteYHeightWeight + (position.y - surfaceHeight[(int)position.x]) * relativeYHeightWeight;
+            blockThreshold = blockThreshold - changePerY * calculatedYWeight;
             if (blockThreshold > maximumThreshold)
             {
                 blockThreshold = maximumThreshold;
@@ -440,13 +445,14 @@ namespace PixelMidpointDisplacement
     public class WorldContext {
         public int[,] worldArray { get; set; }
         public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
-        public int pixelsPerBlock { get; set; } = 16;
+        public int pixelsPerBlock { get; set; } = 4;
 
         Block[] blockIds = new Block[4];
 
         public (int x, int y) screenSpaceOffset { get; set; }
 
-        
+        public List<PhysicsObject> physicsObjects = new List<PhysicsObject>();
+
         public void generateWorld((int width, int height) worldDimensions) {
             
             worldArray = new int[worldDimensions.width, worldDimensions.height];
@@ -468,6 +474,13 @@ namespace PixelMidpointDisplacement
 
         public Block getBlockFromID(int ID) {
             return blockIds[ID];
+        }
+
+        public void updatePixelsPerBlock(int newPixelsPerBlock) {
+            pixelsPerBlock = newPixelsPerBlock;
+            foreach (PhysicsObject obj in physicsObjects) {
+                obj.recalculateCollider();
+            }
         }
         
         public void deleteBlock(int x, int y) {
@@ -551,8 +564,8 @@ namespace PixelMidpointDisplacement
         public double blockSizeInMeters { get; } = 0.6; //The pixel size in meters can be found by taking this value and dividing it by pixelsPerBlock
         WorldContext wc;
 
-        int horizontalOverlapMin = 5;
-        int verticalOverlapMin = 5;
+        int horizontalOverlapMin = 2;
+        int verticalOverlapMin = 2;
 
         double gravity = 25;
 
@@ -865,6 +878,10 @@ namespace PixelMidpointDisplacement
         {
 
         }
+
+        public void recalculateCollider() {
+            collider = new Rectangle(0, 0, (int)(width * worldContext.pixelsPerBlock), (int)(height * worldContext.pixelsPerBlock));
+        }
     }
 
     public class Player : PhysicsObject
@@ -878,7 +895,7 @@ namespace PixelMidpointDisplacement
             //It's weird because k is unitless, however the fact that I'm in the world of pixels/second means that realistic drag coefficients don't work very well. 
             //I think it's because v^2 has a massive change with the pixel to block ratio. My math's is probably just wrong, so I'll merely account for it by using unrealistic numbers
             kX = 8;
-            kY = 0.01;
+            kY = 0.05;
             
 
             width = 0.9;
