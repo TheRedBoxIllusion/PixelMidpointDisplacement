@@ -27,13 +27,15 @@ namespace PixelMidpointDisplacement
 
         Player player;
 
+        int digSize = 1;
+
         public Game1()
         {
             _graphics = new GraphicsDeviceManager(this);
             Content.RootDirectory = "Content";
             IsMouseVisible = true;
 
-            this.TargetElapsedTime = TimeSpan.FromSeconds(1d / 120d);
+            this.TargetElapsedTime = TimeSpan.FromSeconds(1d / 180d);
 
             worldContext = new WorldContext();
             
@@ -93,32 +95,10 @@ namespace PixelMidpointDisplacement
             //of the physics engine
 
 
-            double horizontalAcceleration = 1; //The acceleration in m/s^-2
-            double jumpAcceleration = 8;
+            double horizontalAcceleration = 4; //The acceleration in m/s^-2
+            double jumpAcceleration = 12;
 
-            if (Keyboard.GetState().IsKeyDown(Keys.D))
-            {
-
-                player.accelerationX += horizontalAcceleration / gameTime.ElapsedGameTime.TotalSeconds;
-            }
-            if (Keyboard.GetState().IsKeyDown(Keys.A))
-            {
-                player.accelerationX -= horizontalAcceleration / gameTime.ElapsedGameTime.TotalSeconds;
-            }
-            if (Keyboard.GetState().IsKeyDown(Keys.W))
-            {
-                if (player.isOnGround)
-                {
-                    player.accelerationY += jumpAcceleration / gameTime.ElapsedGameTime.TotalSeconds;
-                }
-            }
-            if (Keyboard.GetState().IsKeyDown(Keys.R))
-            {
-                player.x = 10;
-                player.y = 10;
-                player.velocityX = 0;
-                player.velocityY = 0;
-            }
+            player.inputUpdate(horizontalAcceleration, jumpAcceleration, gameTime.ElapsedGameTime.TotalSeconds);
 
 
             for (int i = 0; i < physicsObjects.Count; i++)
@@ -141,6 +121,10 @@ namespace PixelMidpointDisplacement
                                               -(int)player.y + _graphics.GraphicsDevice.Viewport.Height / 2 - (int)(player.height * worldContext.pixelsPerBlock));
 
             //Digging system
+            if (Mouse.GetState().ScrollWheelValue/120 != digSize-1) {
+                digSize = Mouse.GetState().ScrollWheelValue/120 + 1;
+                
+            }
             if (Mouse.GetState().LeftButton == ButtonState.Pressed)
             {
                 //Find the mouses position on screen, then use the screenoffset to find it's coordinate in grid space
@@ -149,13 +133,23 @@ namespace PixelMidpointDisplacement
                 double mouseXPixelSpace = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
                 double mouseYPixelSpace = Mouse.GetState().Y - worldContext.screenSpaceOffset.y;
 
-                
 
-                int mouseXGridSpace = (int)Math.Floor(mouseXPixelSpace/worldContext.pixelsPerBlock);
+
+                int mouseXGridSpace = (int)Math.Floor(mouseXPixelSpace / worldContext.pixelsPerBlock);
                 int mouseYGridSpace = (int)Math.Floor(mouseYPixelSpace / worldContext.pixelsPerBlock);
-                
+
                 //Delete Block at that location
-                worldContext.deleteBlock(mouseXGridSpace, mouseYGridSpace);
+                for (int x = 0; x < digSize; x++) {
+                    for (int y = 0; y < digSize; y++)
+                    {
+                        int usedX = x - (int)Math.Floor(digSize / 2.0);
+                        int usedY = y - (int)Math.Floor(digSize / 2.0);
+                        if (mouseXGridSpace + usedX > 0 && mouseXGridSpace + usedX < worldContext.worldArray.GetLength(0) && mouseYGridSpace + usedY > 0 && mouseYGridSpace + usedY < worldContext.worldArray.GetLength(1))
+                        {
+                            worldContext.deleteBlock(mouseXGridSpace + usedX, mouseYGridSpace + usedY);
+                        }
+                    }
+                }
 
             }
             else if (Mouse.GetState().RightButton == ButtonState.Pressed)
@@ -233,17 +227,18 @@ namespace PixelMidpointDisplacement
         }
     }
 
-    public class WorldContext {
-        public int[,] worldArray { get; set; }
-        public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
-        public int pixelsPerBlock { get; set; } = 16;
+    public class WorldGenerator {
+        WorldContext worldContext;
+
+        int[,] worldArray;
+        int[] surfaceHeight;
 
         double[,] perlinNoiseArray;
         BlockGenerationVariables[,] brownianMotionArray;
 
 
         Block[,] oreArray;
-        Block[] blockIds = new Block[4];
+        
 
         //Perlin Noise Variables:
         int noiseIterations = 8;
@@ -258,6 +253,7 @@ namespace PixelMidpointDisplacement
         0.0075,
         0.00325};
 
+        //Smaller means the blocks are also smaller...
         double frequency = 0.045;
 
         //Higher means more solid
@@ -270,16 +266,18 @@ namespace PixelMidpointDisplacement
         double vectorAngleOffset = (Math.PI);
 
         //SeededBrownianMotion Variables:
-        BlockGenerationVariables[] ores = new BlockGenerationVariables[3]; //n-1 where n is the number of blockIds
+        BlockGenerationVariables[] ores = {
+        new BlockGenerationVariables(1, new Block(1), 8, 360),
+        new BlockGenerationVariables(0.1, new Block(2), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
+        new BlockGenerationVariables(0.4, new Block(3), 2, 40)
+        }; //n-1 where n is the number of blockIds
         int maxAttempts = 15;
 
-        public (int x, int y) screenSpaceOffset { get; set; }
-
-        public Block[,] getOreArray()
-        {
-            return oreArray;
+    public WorldGenerator(WorldContext wc) {
+            worldContext = wc;
         }
-        public void generateWorld((int width, int height) worldDimensions) {
+
+        public int[,] generateWorld((int width, int height) worldDimensions) {
             perlinNoiseArray = new double[worldDimensions.width, worldDimensions.height];
             brownianMotionArray = new BlockGenerationVariables[worldDimensions.width, worldDimensions.height];
             worldArray = new int[worldDimensions.width, worldDimensions.height];
@@ -287,7 +285,7 @@ namespace PixelMidpointDisplacement
             surfaceHeight = new int[worldDimensions.width];
 
 
-            List<(double, double)> initialPoints = new List<(double, double)>() { (0, 900), ((pixelsPerBlock * worldArray.GetLength(0) / 2), 100), (pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
+            List<(double, double)> initialPoints = new List<(double, double)>() { (0, 900), ((worldContext.pixelsPerBlock * worldArray.GetLength(0) / 2), 100), (worldContext.pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
 
             MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 400, 1, 10, 70);
 
@@ -296,31 +294,21 @@ namespace PixelMidpointDisplacement
             perlinNoise(worldDimensions, noiseIterations, octaveWeights, frequency, vectorCount, vectorAngleOffset);
             seededBrownianMotion(ores, maxAttempts);
             combineAlgorithms(blockThreshold, decreasePerY, maximumThreshold, minimumThreshold);
-            
 
-
-
-            
+            return worldArray;
         }
 
-        public void generateIDsFromTextureList(Texture2D[] textureList) {
-            blockIds[0] = new Block(textureList[0]);
-            blockIds[1] = new Block(textureList[1]);
-            blockIds[2] = new Block(textureList[2]);
-            blockIds[3] = new Block(textureList[3]);
-
-            ores = new BlockGenerationVariables[]{
-                new BlockGenerationVariables(1, new Block(1), 8, 360),
-            new BlockGenerationVariables(0.1, new Block(2), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
-            new BlockGenerationVariables(0.4, new Block(3), 2, 40)
-            }
-            ;
+        public int[] getSurfaceHeight() {
+            return surfaceHeight;
         }
 
-        public Block getBlockFromID(int ID) {
-            return blockIds[ID];
+        public Block[,] getOreArray()
+        {
+            return oreArray;
         }
-        public void pointsToBlocks(List<(double x, double y) > pointList) {
+
+        private void pointsToBlocks(List<(double x, double y)> pointList)
+        {
             //Convert each point to within the grid-coordinates, then set the worldArray to 1 wherever each lands
             //Improved implementation: check if the distance between the points is greater than the pixels per block, then interpolate
 
@@ -330,20 +318,23 @@ namespace PixelMidpointDisplacement
 
             int numOfInterpolations = 0;
 
-            if (distanceBetweenPoints > Math.Sqrt(2) * pixelsPerBlock) {
-                numOfInterpolations = (int)(distanceBetweenPoints / pixelsPerBlock) - 1;
+            if (distanceBetweenPoints > Math.Sqrt(2) * worldContext.pixelsPerBlock)
+            {
+                numOfInterpolations = (int)(distanceBetweenPoints / worldContext.pixelsPerBlock) - 1;
             }
 
-            for (int i = 0; i < pointList.Count; i++) {
-                
-                int gridX = (int)Math.Floor(pointList[i].x/pixelsPerBlock);
-                int gridY = (int)Math.Floor(pointList[i].y / pixelsPerBlock);
+            for (int i = 0; i < pointList.Count; i++)
+            {
+
+                int gridX = (int)Math.Floor(pointList[i].x / worldContext.pixelsPerBlock);
+                int gridY = (int)Math.Floor(pointList[i].y / worldContext.pixelsPerBlock);
 
                 if (gridX < 0)
                 {
                     gridX = 0;
                 }
-                else if (gridX >= worldArray.GetLength(0)) {
+                else if (gridX >= worldArray.GetLength(0))
+                {
                     gridX = worldArray.GetLength(0) - 1;
                 }
                 if (gridY < 0)
@@ -355,7 +346,8 @@ namespace PixelMidpointDisplacement
                     gridY = worldArray.GetLength(1) - 1;
                 }
 
-                if (surfaceHeight[gridX] == null || surfaceHeight[gridX] < gridY) {
+                if (surfaceHeight[gridX] == null || surfaceHeight[gridX] < gridY)
+                {
                     surfaceHeight[gridX] = gridY;
                 }
 
@@ -368,14 +360,14 @@ namespace PixelMidpointDisplacement
         }
 
         //Code from the perlin noise caves:
-        public void perlinNoise((int width, int height) worldDimensions, int perlinNoiseIterations, double[] octaveWeights, double frequency, int vectorCount, double vectorAngleOffset)
+        private void perlinNoise((int width, int height) worldDimensions, int perlinNoiseIterations, double[] octaveWeights, double frequency, int vectorCount, double vectorAngleOffset)
         {
             PerlinNoise pn = new PerlinNoise(worldDimensions, perlinNoiseIterations, vectorCount, vectorAngleOffset);
             int[] g = generateRandomIntArray();
             perlinNoiseArray = pn.generatePerlinNoise(g, worldDimensions, octaveWeights, frequency);
         }
 
-        public int[] generateRandomIntArray()
+        private int[] generateRandomIntArray()
         {
             int[] initialArray = new int[256];
             List<int> sortedArray = new List<int>();
@@ -400,13 +392,13 @@ namespace PixelMidpointDisplacement
 
             return outputArray;
         }
-        public void seededBrownianMotion(BlockGenerationVariables[] oresArray, int attemptCount)
+        private void seededBrownianMotion(BlockGenerationVariables[] oresArray, int attemptCount)
         {
             SeededBrownianMotion sbm = new SeededBrownianMotion();
             brownianMotionArray = sbm.seededBrownianMotion(brownianMotionArray, oresArray);
             brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, attemptCount);
         }
-        public void combineAlgorithms(double blockThreshold, double changePerY, double maximumThreshold, double minimumThreshold)
+        private void combineAlgorithms(double blockThreshold, double changePerY, double maximumThreshold, double minimumThreshold)
         {
             for (int x = 0; x < worldArray.GetLength(0); x++)
             {
@@ -416,7 +408,7 @@ namespace PixelMidpointDisplacement
                     { //If it's above the block threshold, set the block to be air, 
                         worldArray[x, y] = 0;
                     }
-                    else if (brownianMotionArray[x, y] != null && worldArray[x,y] == 1) //If the brownian motion defined it, and it's solid from the midpoint generation
+                    else if (brownianMotionArray[x, y] != null && worldArray[x, y] == 1) //If the brownian motion defined it, and it's solid from the midpoint generation
                     {
                         worldArray[x, y] = brownianMotionArray[x, y].block.ID;
                     }
@@ -428,7 +420,7 @@ namespace PixelMidpointDisplacement
             }
         }
 
-        public double changeThresholdByDepth(double blockThreshold, double changePerY, (double x, double y) position, double maximumThreshold, double minimumThreshold)
+        private double changeThresholdByDepth(double blockThreshold, double changePerY, (double x, double y) position, double maximumThreshold, double minimumThreshold)
         {
             blockThreshold = blockThreshold - changePerY * (position.y - surfaceHeight[(int)position.x]);
             if (blockThreshold > maximumThreshold)
@@ -443,6 +435,41 @@ namespace PixelMidpointDisplacement
             return blockThreshold;
         }
 
+    }
+
+    public class WorldContext {
+        public int[,] worldArray { get; set; }
+        public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
+        public int pixelsPerBlock { get; set; } = 16;
+
+        Block[] blockIds = new Block[4];
+
+        public (int x, int y) screenSpaceOffset { get; set; }
+
+        
+        public void generateWorld((int width, int height) worldDimensions) {
+            
+            worldArray = new int[worldDimensions.width, worldDimensions.height];
+            
+            surfaceHeight = new int[worldDimensions.width];
+
+            WorldGenerator worldGenerator = new WorldGenerator(this);
+            
+            worldArray = worldGenerator.generateWorld(worldDimensions);
+            surfaceHeight = worldGenerator.getSurfaceHeight();
+        }
+
+        public void generateIDsFromTextureList(Texture2D[] textureList) {
+            blockIds[0] = new Block(textureList[0]);
+            blockIds[1] = new Block(textureList[1]);
+            blockIds[2] = new Block(textureList[2]);
+            blockIds[3] = new Block(textureList[3]);
+        }
+
+        public Block getBlockFromID(int ID) {
+            return blockIds[ID];
+        }
+        
         public void deleteBlock(int x, int y) {
             if (worldArray[x, y] != 0)
             {
@@ -527,6 +554,8 @@ namespace PixelMidpointDisplacement
         int horizontalOverlapMin = 5;
         int verticalOverlapMin = 5;
 
+        double gravity = 25;
+
 
         public PhysicsEngine(WorldContext worldContext)
         {
@@ -578,7 +607,7 @@ namespace PixelMidpointDisplacement
 
         public void addGravity(PhysicsObject entity)
         {
-            entity.accelerationY -= 20;
+            entity.accelerationY -= gravity;
         }
 
         public void applyVelocityToPosition(PhysicsObject entity, double timeElapsed)
@@ -848,12 +877,40 @@ namespace PixelMidpointDisplacement
             y = 10.0;
             //It's weird because k is unitless, however the fact that I'm in the world of pixels/second means that realistic drag coefficients don't work very well. 
             //I think it's because v^2 has a massive change with the pixel to block ratio. My math's is probably just wrong, so I'll merely account for it by using unrealistic numbers
-            kX = 3;
+            kX = 8;
             kY = 0.01;
+            
 
-            width = 1.1;
+            width = 0.9;
             height = 2;
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
+
+        }
+
+        public void inputUpdate(double horizontalAcceleration, double jumpAcceleration, double elapsedTime) {
+            if (Keyboard.GetState().IsKeyDown(Keys.D))
+            {
+
+                accelerationX += horizontalAcceleration / elapsedTime;
+            }
+            if (Keyboard.GetState().IsKeyDown(Keys.A))
+            {
+                accelerationX -= horizontalAcceleration / elapsedTime;
+            }
+            if (Keyboard.GetState().IsKeyDown(Keys.W))
+            {
+                if (isOnGround)
+                {
+                    accelerationY += jumpAcceleration / elapsedTime;
+                }
+            }
+            if (Keyboard.GetState().IsKeyDown(Keys.R))
+            {
+                x = 10;
+                y = 10;
+                velocityX = 0;
+                velocityY = 0;
+            }
 
         }
     }
