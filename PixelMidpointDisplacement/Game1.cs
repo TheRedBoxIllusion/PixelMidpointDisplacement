@@ -3,7 +3,11 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
+using Vector2 = Microsoft.Xna.Framework.Vector2;
+
+
 
 namespace PixelMidpointDisplacement
 {
@@ -13,9 +17,7 @@ namespace PixelMidpointDisplacement
         private SpriteBatch _spriteBatch;
 
         WorldContext worldContext;
-
-        Texture2D blackBlock;
-        Texture2D whiteBlock;
+        
         Texture2D playerSprite;
         Texture2D collisionSprite;
 
@@ -34,7 +36,7 @@ namespace PixelMidpointDisplacement
             this.TargetElapsedTime = TimeSpan.FromSeconds(1d / 120d);
 
             worldContext = new WorldContext();
-            worldContext.generateWorld(100, 100);
+            
 
             physicsEngine = new PhysicsEngine(worldContext);
 
@@ -50,18 +52,6 @@ namespace PixelMidpointDisplacement
             _graphics.PreferredBackBufferWidth = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width;
             _graphics.ApplyChanges();
 
-
-            blackBlock = new Texture2D(_graphics.GraphicsDevice, 1, 1);
-            whiteBlock = new Texture2D(_graphics.GraphicsDevice, 1, 1);
-            playerSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
-            collisionSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
-
-
-            blackBlock.SetData<Color>(new Color[] { Color.Black });
-            whiteBlock.SetData<Color>(new Color[] { Color.White });
-            playerSprite.SetData<Color>(new Color[] { Color.Red });
-            collisionSprite.SetData<Color>(new Color[] { Color.Green });
-
             base.Initialize();
         }
 
@@ -69,6 +59,27 @@ namespace PixelMidpointDisplacement
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 
+            //Block Textures
+            Texture2D airTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1); ;
+            Texture2D stoneTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
+            Texture2D blueBlockTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
+            Texture2D crimsonBlockTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
+
+            stoneTexture.SetData<Color>(new Color[] { Color.Black });
+            airTexture.SetData<Color>(new Color[] { Color.White });
+            blueBlockTexture.SetData<Color>(new Color[] { Color.Blue });
+            crimsonBlockTexture.SetData<Color>(new Color[] { Color.Crimson });
+
+            worldContext.generateIDsFromTextureList(new Texture2D[]{airTexture, stoneTexture, blueBlockTexture, crimsonBlockTexture});
+
+
+            worldContext.generateWorld((300, 300));
+
+            playerSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
+            collisionSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
+
+            playerSprite.SetData<Color>(new Color[] { Color.Red });
+            collisionSprite.SetData<Color>(new Color[] { Color.Green });
             // TODO: use this.Content to load your game content here
         }
 
@@ -129,6 +140,42 @@ namespace PixelMidpointDisplacement
             worldContext.screenSpaceOffset = (-(int)player.x + _graphics.GraphicsDevice.Viewport.Width / 2 - (int)(player.width * worldContext.pixelsPerBlock),
                                               -(int)player.y + _graphics.GraphicsDevice.Viewport.Height / 2 - (int)(player.height * worldContext.pixelsPerBlock));
 
+            //Digging system
+            if (Mouse.GetState().LeftButton == ButtonState.Pressed)
+            {
+                //Find the mouses position on screen, then use the screenoffset to find it's coordinate in grid space
+                //Set the block at that location to equal 0
+
+                double mouseXPixelSpace = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
+                double mouseYPixelSpace = Mouse.GetState().Y - worldContext.screenSpaceOffset.y;
+
+                
+
+                int mouseXGridSpace = (int)Math.Floor(mouseXPixelSpace/worldContext.pixelsPerBlock);
+                int mouseYGridSpace = (int)Math.Floor(mouseYPixelSpace / worldContext.pixelsPerBlock);
+                
+                //Delete Block at that location
+                worldContext.deleteBlock(mouseXGridSpace, mouseYGridSpace);
+
+            }
+            else if (Mouse.GetState().RightButton == ButtonState.Pressed)
+            {
+                //Find the mouses position on screen, then use the screenoffset to find it's coordinate in grid space
+                //Set the block at that location to equal 0
+
+                double mouseXPixelSpace = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
+                double mouseYPixelSpace = Mouse.GetState().Y - worldContext.screenSpaceOffset.y;
+
+
+
+                int mouseXGridSpace = (int)Math.Floor(mouseXPixelSpace / worldContext.pixelsPerBlock);
+                int mouseYGridSpace = (int)Math.Floor(mouseYPixelSpace / worldContext.pixelsPerBlock);
+
+                //Delete Block at that location
+                worldContext.addBlock(mouseXGridSpace, mouseYGridSpace, 1);
+
+            }
+
             base.Update(gameTime);
         }
 
@@ -142,14 +189,7 @@ namespace PixelMidpointDisplacement
             {
                 for (int y = 0; y < tempWorldArray.GetLength(1); y++)
                 {
-                    if (tempWorldArray[x, y] == 0)
-                    {
-                        _spriteBatch.Draw(whiteBlock, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), Color.White);
-                    }
-                    else
-                    {
-                        _spriteBatch.Draw(blackBlock, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), Color.White);
-                    }
+                    _spriteBatch.Draw(worldContext.getBlockFromID(tempWorldArray[x,y]).texture, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), Color.White);
                 }
             }
 
@@ -182,7 +222,6 @@ namespace PixelMidpointDisplacement
                     Rectangle blockRect = new Rectangle(x * p, y * p, p, p);
                     if (blockRect.Intersects(entityCollider) && worldContext.worldArray[x, y] != 0)
                     {
-
                         _spriteBatch.Draw(collisionSprite, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, p, p), Color.White);
                     }
                     _spriteBatch.Draw(playerSprite, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, p, 2), Color.White);
@@ -196,22 +235,92 @@ namespace PixelMidpointDisplacement
 
     public class WorldContext {
         public int[,] worldArray { get; set; }
+        public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
         public int pixelsPerBlock { get; set; } = 16;
 
+        double[,] perlinNoiseArray;
+        BlockGenerationVariables[,] brownianMotionArray;
+
+
+        Block[,] oreArray;
+        Block[] blockIds = new Block[4];
+
+        //Perlin Noise Variables:
+        int noiseIterations = 8;
+
+        double[] octaveWeights = {
+        5,
+        0.9,
+        0.055,
+        0.05,
+        0.02,
+        0.015,
+        0.0075,
+        0.00325};
+
+        double frequency = 0.045;
+
+        //Higher means more solid
+        double blockThreshold = 0.9;
+        double decreasePerY = 0.01;
+        double maximumThreshold = 0.9;//Only decreasing so...
+        double minimumThreshold = 0.48;
+
+        int vectorCount = 6;
+        double vectorAngleOffset = (Math.PI);
+
+        //SeededBrownianMotion Variables:
+        BlockGenerationVariables[] ores = new BlockGenerationVariables[3]; //n-1 where n is the number of blockIds
+        int maxAttempts = 15;
+
         public (int x, int y) screenSpaceOffset { get; set; }
-        public void generateWorld(int worldX, int worldY) {
-            worldArray = new int[worldX, worldY];
 
-            
+        public Block[,] getOreArray()
+        {
+            return oreArray;
+        }
+        public void generateWorld((int width, int height) worldDimensions) {
+            perlinNoiseArray = new double[worldDimensions.width, worldDimensions.height];
+            brownianMotionArray = new BlockGenerationVariables[worldDimensions.width, worldDimensions.height];
+            worldArray = new int[worldDimensions.width, worldDimensions.height];
+            oreArray = new Block[worldDimensions.width, worldDimensions.height];
+            surfaceHeight = new int[worldDimensions.width];
 
-            List<(double, double)> initialPoints = new List<(double, double)>() { (0, 900), ((pixelsPerBlock * worldArray.GetLength(0)/2), 100), (pixelsPerBlock * worldArray.GetLength(0), 900)}; //Start/end Points must be divisible by the pixelsPerBlock value
 
-            MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 250, 1.3, 8, 70);
+            List<(double, double)> initialPoints = new List<(double, double)>() { (0, 900), ((pixelsPerBlock * worldArray.GetLength(0) / 2), 100), (pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
+
+            MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 400, 1, 10, 70);
 
             pointsToBlocks(mda.midpointAlgorithm());
+
+            perlinNoise(worldDimensions, noiseIterations, octaveWeights, frequency, vectorCount, vectorAngleOffset);
+            seededBrownianMotion(ores, maxAttempts);
+            combineAlgorithms(blockThreshold, decreasePerY, maximumThreshold, minimumThreshold);
+            
+
+
+
+            
         }
-        
-        public void pointsToBlocks(List<(double x, double y)> pointList) {
+
+        public void generateIDsFromTextureList(Texture2D[] textureList) {
+            blockIds[0] = new Block(textureList[0]);
+            blockIds[1] = new Block(textureList[1]);
+            blockIds[2] = new Block(textureList[2]);
+            blockIds[3] = new Block(textureList[3]);
+
+            ores = new BlockGenerationVariables[]{
+                new BlockGenerationVariables(1, new Block(1), 8, 360),
+            new BlockGenerationVariables(0.1, new Block(2), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
+            new BlockGenerationVariables(0.4, new Block(3), 2, 40)
+            }
+            ;
+        }
+
+        public Block getBlockFromID(int ID) {
+            return blockIds[ID];
+        }
+        public void pointsToBlocks(List<(double x, double y) > pointList) {
             //Convert each point to within the grid-coordinates, then set the worldArray to 1 wherever each lands
             //Improved implementation: check if the distance between the points is greater than the pixels per block, then interpolate
 
@@ -246,6 +355,10 @@ namespace PixelMidpointDisplacement
                     gridY = worldArray.GetLength(1) - 1;
                 }
 
+                if (surfaceHeight[gridX] == null || surfaceHeight[gridX] < gridY) {
+                    surfaceHeight[gridX] = gridY;
+                }
+
                 for (int y = gridY; y < worldArray.GetLength(1); y++)
                 {
                     worldArray[gridX, y] = 1;
@@ -254,6 +367,94 @@ namespace PixelMidpointDisplacement
 
         }
 
+        //Code from the perlin noise caves:
+        public void perlinNoise((int width, int height) worldDimensions, int perlinNoiseIterations, double[] octaveWeights, double frequency, int vectorCount, double vectorAngleOffset)
+        {
+            PerlinNoise pn = new PerlinNoise(worldDimensions, perlinNoiseIterations, vectorCount, vectorAngleOffset);
+            int[] g = generateRandomIntArray();
+            perlinNoiseArray = pn.generatePerlinNoise(g, worldDimensions, octaveWeights, frequency);
+        }
+
+        public int[] generateRandomIntArray()
+        {
+            int[] initialArray = new int[256];
+            List<int> sortedArray = new List<int>();
+
+            for (int i = 0; i < initialArray.Count(); i++)
+            {
+                sortedArray.Add(i);
+            }
+            for (int i = 0; i < initialArray.Count(); i++)
+            {
+                Random r = new Random();
+                int rIndex = r.Next(0, sortedArray.Count());
+                initialArray[i] = sortedArray[rIndex];
+                sortedArray.RemoveAt(rIndex);
+            }
+
+            int[] outputArray = new int[initialArray.Count() * 2];
+            for (int i = 0; i < outputArray.Count(); i++)
+            {
+                outputArray[i] = initialArray[i % 255];
+            }
+
+            return outputArray;
+        }
+        public void seededBrownianMotion(BlockGenerationVariables[] oresArray, int attemptCount)
+        {
+            SeededBrownianMotion sbm = new SeededBrownianMotion();
+            brownianMotionArray = sbm.seededBrownianMotion(brownianMotionArray, oresArray);
+            brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, attemptCount);
+        }
+        public void combineAlgorithms(double blockThreshold, double changePerY, double maximumThreshold, double minimumThreshold)
+        {
+            for (int x = 0; x < worldArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < worldArray.GetLength(1); y++)
+                {
+                    if (perlinNoiseArray[x, y] > changeThresholdByDepth(blockThreshold, changePerY, (x, y), maximumThreshold, minimumThreshold))
+                    { //If it's above the block threshold, set the block to be air, 
+                        worldArray[x, y] = 0;
+                    }
+                    else if (brownianMotionArray[x, y] != null && worldArray[x,y] == 1) //If the brownian motion defined it, and it's solid from the midpoint generation
+                    {
+                        worldArray[x, y] = brownianMotionArray[x, y].block.ID;
+                    }
+                    else
+                    {
+                        worldArray[x, y] = 0;
+                    }
+                }
+            }
+        }
+
+        public double changeThresholdByDepth(double blockThreshold, double changePerY, (double x, double y) position, double maximumThreshold, double minimumThreshold)
+        {
+            blockThreshold = blockThreshold - changePerY * (position.y - surfaceHeight[(int)position.x]);
+            if (blockThreshold > maximumThreshold)
+            {
+                blockThreshold = maximumThreshold;
+            }
+            else if (blockThreshold < minimumThreshold)
+            {
+                blockThreshold = minimumThreshold;
+            }
+
+            return blockThreshold;
+        }
+
+        public void deleteBlock(int x, int y) {
+            if (worldArray[x, y] != 0)
+            {
+                worldArray[x, y] = 0;
+            }
+        }
+        public void addBlock(int x, int y, int ID) {
+            if (worldArray[x, y] == 0)
+            {
+                worldArray[x, y] = ID;
+            }
+        }
     }
 
     public class MidpointDisplacementAlgorithm
@@ -360,9 +561,9 @@ namespace PixelMidpointDisplacement
             entity.velocityX += (entity.accelerationX) * timeElapsed;
             entity.velocityY += (entity.accelerationY) * timeElapsed;
 
-            System.Diagnostics.Debug.WriteLine(entity.accelerationY * timeElapsed);
+            
 
-            if (helpDebug) { System.Diagnostics.Debug.WriteLine(entity.velocityX); }
+           
             //Sets the velocity to 0 if it is below a threshold. Reduces excessive sliding and causes the drag function to actually reach a halt
             if ((entity.velocityX > 0 && entity.velocityX < entity.minVelocityX) || (entity.velocityX < 0 && entity.velocityX > -entity.minVelocityX))
             {
@@ -377,14 +578,14 @@ namespace PixelMidpointDisplacement
 
         public void addGravity(PhysicsObject entity)
         {
-            entity.accelerationY -= 9.8;
+            entity.accelerationY -= 20;
         }
 
         public void applyVelocityToPosition(PhysicsObject entity, double timeElapsed)
         {
             //Adds the velocity * time passed to the x and y variables of the entity. Y is -velocity as the y-axis is flipped from in real life (Up is negative in screen space)
             //Converts the velocity into pixel space. This allows for realistic m/s calculations in the actual physics function and then converted to pixel space for the location
-            System.Diagnostics.Debug.WriteLine(entity.velocityY + ", " + entity.accelerationY);
+            
             entity.updateLocation(entity.velocityX * timeElapsed * (wc.pixelsPerBlock / blockSizeInMeters), -entity.velocityY * timeElapsed * (wc.pixelsPerBlock / blockSizeInMeters));
         }
 
@@ -439,11 +640,11 @@ namespace PixelMidpointDisplacement
                                 if (((Math.Sign(collisionNormal.x) != Math.Sign(entity.velocityX) && entity.velocityX != 0) || (Math.Sign(collisionNormal.x) != Math.Sign(entity.accelerationX) && entity.accelerationX != 0)) && collisionNormal.x != 0)
                                 {
                                     helpDebug = true;
-                                    System.Diagnostics.Debug.WriteLine(entity.x + ", " + entity.velocityX + ", " + entity.accelerationX);
+                                    
 
                                     entity.velocityX -= (1 + entity.bounceCoefficient) * entity.velocityX;
                                     entity.accelerationX -= entity.accelerationX;
-                                    System.Diagnostics.Debug.WriteLine(entity.x + ", " + entity.velocityX + ", " + entity.accelerationX);
+                                    
                                     if (Math.Sign(collisionNormal.x) > 0)
                                     {
                                         entity.x = blockRect.Right - 1;
@@ -452,7 +653,7 @@ namespace PixelMidpointDisplacement
                                     {
                                         entity.x = blockRect.Left - entityCollider.Width + 1;
                                     }
-                                    System.Diagnostics.Debug.WriteLine(entity.x);
+                                    
                                 }
 
                             }
@@ -572,7 +773,6 @@ namespace PixelMidpointDisplacement
                     }
                 }
             }
-            System.Diagnostics.Debug.WriteLine("Has returned a (0,0) collision normal from " + approximateCollisionDirection.x + ", " + approximateCollisionDirection.y);
             return collisionNormal;
         }
 
@@ -598,6 +798,9 @@ namespace PixelMidpointDisplacement
         public double minVelocityY { get; set; }
 
         public Rectangle collider { get; set; }
+
+        public double width { get; set; }
+        public double height { get; set; }
 
         public WorldContext worldContext;
 
@@ -637,10 +840,10 @@ namespace PixelMidpointDisplacement
 
     public class Player : PhysicsObject
     {
-        public double width = 0.9;
-        public double height = 2;
+        
         public Player(WorldContext wc) : base(wc)
         {
+
             x = 10.0;
             y = 10.0;
             //It's weird because k is unitless, however the fact that I'm in the world of pixels/second means that realistic drag coefficients don't work very well. 
@@ -648,7 +851,551 @@ namespace PixelMidpointDisplacement
             kX = 3;
             kY = 0.01;
 
+            width = 1.1;
+            height = 2;
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
+
         }
+    }
+
+    public class Block
+    {
+        public Texture2D texture;
+        int emmissiveStrength;
+        public int ID;
+
+        public Block(Texture2D texture)
+        {
+            this.texture = texture;
+        }
+        public Block(Texture2D texture, int emmissiveStrength)
+        {
+            this.texture = texture;
+            this.emmissiveStrength = emmissiveStrength;
+        }
+        public Block(int ID) {
+            this.ID = ID;
+        }
+        
+        public Block(Block b)
+        {
+            texture = b.texture;
+            emmissiveStrength = b.emmissiveStrength;
+            ID = b.ID;
+        }
+    }
+
+    public class BlockGenerationVariables
+    {
+        public double seedDensity;
+        public Block block;
+        public int maxSingleSpread;
+        public int currentSingleSpread;
+        public int oreVeinSpread;
+
+        public int identifier;
+
+        public List<BlockGenerationVariables> veinList = new List<BlockGenerationVariables>();
+
+        public (double north, double northEast, double east, double southEast, double south, double southWest, double west, double northWest) directionWeights = (0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125); //Perfectly weighted as default
+        public BlockGenerationVariables(double seedDensity, Block block, int maxSingleSpread, int oreVeinSpread, (double north, double northEast, double east, double southEast, double south, double southWest, double west, double northWest) directionWeights)
+        {
+            this.seedDensity = seedDensity;
+            this.block = block;
+            this.maxSingleSpread = maxSingleSpread;
+            this.currentSingleSpread = maxSingleSpread;
+            this.oreVeinSpread = oreVeinSpread;
+            this.directionWeights = directionWeights;
+
+        }
+
+        public BlockGenerationVariables(double seedDensity, Block block, int maxSingleSpread, int oreVeinSpread)
+        {
+            this.seedDensity = seedDensity;
+            this.block = block;
+            this.maxSingleSpread = maxSingleSpread;
+            this.currentSingleSpread = maxSingleSpread;
+            this.oreVeinSpread = oreVeinSpread;
+        }
+
+        public BlockGenerationVariables(BlockGenerationVariables blockVariables)
+        {
+            seedDensity = blockVariables.seedDensity;
+            block = blockVariables.block;
+            maxSingleSpread = blockVariables.maxSingleSpread;
+            currentSingleSpread = blockVariables.maxSingleSpread;
+            oreVeinSpread = blockVariables.oreVeinSpread;
+            directionWeights = blockVariables.directionWeights;
+            veinList = blockVariables.veinList;
+            identifier = blockVariables.identifier + 2;
+        }
+
+        public void hasSpread()
+        {
+            currentSingleSpread -= 1;
+            oreVeinSpread -= 1;
+        }
+
+        public void hasSpreadVein(int oreVeinSpread)
+        {
+            this.oreVeinSpread = oreVeinSpread;
+        }
+
+        public void initialiseVeinList(BlockGenerationVariables thisBlock)
+        {
+            veinList = new List<BlockGenerationVariables>();
+            veinList.Add(thisBlock);
+        }
+
+        public void updateVeinList(BlockGenerationVariables newBlock)
+        {
+            if (!veinList.Contains(newBlock))
+            {
+                veinList.Add(newBlock);
+            }
+        }
+
+    }
+
+    public class PerlinNoise
+    {
+        List<double[,]> pixelOctaves = new List<double[,]>();
+
+        Vector2[] randomisedUnitVectors;
+
+        double vectorAngleOffset;
+        public PerlinNoise((int outputSizeX, int outputSizeY) outputDimensions, int octaveCount, int vectorCount, double vectorAngleOffset)
+        {
+            randomisedUnitVectors = new Vector2[vectorCount];
+            this.vectorAngleOffset = vectorAngleOffset;
+            for (int octaves = 0; octaves < octaveCount; octaves++)
+            {
+                pixelOctaves.Add(new double[outputDimensions.outputSizeX, outputDimensions.outputSizeY]);
+            }
+        }
+
+        public void randomiseVectorArray(int[] g)
+        {
+            double radiansPerIndex = 2 * Math.PI / randomisedUnitVectors.Count();
+
+            for (int i = 0; i < randomisedUnitVectors.Count(); i++)
+            {
+                randomisedUnitVectors[i] = new Vector2((float)Math.Cos(radiansPerIndex * g[i] + vectorAngleOffset), (float)Math.Sin(radiansPerIndex * g[i] + vectorAngleOffset));
+            }
+        }
+
+
+        public double[,] generatePerlinNoise(int[] g, (int noiseOutputSizeX, int noiseOutputSizeY) outputDimensions, double[] octaveWeights, double frequency)
+        {
+            double[,] noiseOutput = new double[outputDimensions.noiseOutputSizeX, outputDimensions.noiseOutputSizeY];
+
+            randomiseVectorArray(g);
+
+            for (int i = 0; i < pixelOctaves.Count(); i++)
+            {
+                //pixelOctaves[i] = randomlyInitialisePixelArray(pixelOctaves[i]);
+                pixelOctaves[i] = perlinAlgorithm(pixelOctaves[i], frequency * Math.Pow(2, i), g);
+                noiseOutput = addNoiseToOutput(noiseOutput, pixelOctaves[i], octaveWeights[i]);
+            }
+
+
+            return noiseOutput;
+        }
+
+        public double[,] addNoiseToOutput(double[,] currentNoise, double[,] newNoise, double octaveWeight)
+        {
+            double[,] cumulatedNoise = new double[currentNoise.GetLength(0), currentNoise.GetLength(1)];
+
+            for (int x = 0; x < currentNoise.GetLength(0); x++)
+            {
+                for (int y = 0; y < currentNoise.GetLength(1); y++)
+                {
+                    double cumulateNoise = currentNoise[x, y] + octaveWeight * newNoise[x, y];
+                    double boundedNoise = cumulateNoise / (1 + octaveWeight);
+                    cumulatedNoise[x, y] = boundedNoise;
+
+                }
+            }
+
+            return cumulatedNoise;
+        }
+        public double[,] perlinAlgorithm(double[,] pixels, double frequency, int[] g)
+        {
+            for (int x = 0; x < pixels.GetLength(0); x++)
+            {
+                for (int y = 0; y < pixels.GetLength(1); y++)
+                {
+
+                    //Multiply the location by a small 'frequency' value
+                    Vector2 location = new Vector2((float)frequency * x, (float)frequency * y);
+
+                    int X = (int)Math.Floor(location.X) % 255;
+                    int Y = (int)Math.Floor(location.Y) % 255;
+
+                    float xlocal = (float)(location.X - Math.Floor(location.X));
+                    float ylocal = (float)(location.Y - Math.Floor(location.Y));
+
+                    Vector2 topLeft = new Vector2(xlocal, ylocal);
+                    Vector2 topRight = new Vector2(xlocal - 1, ylocal);
+                    Vector2 bottomLeft = new Vector2(xlocal, ylocal - 1);
+                    Vector2 bottomRight = new Vector2(xlocal - 1, ylocal - 1);
+
+
+                    int topLeftValue = g[g[X] + Y];
+                    int topRightValue = g[g[X + 1] + Y];
+                    int bottomLeftValue = g[g[X] + Y + 1];
+                    int bottomRightValue = g[g[X + 1] + Y + 1];
+
+                    double dotTopLeft = Vector2.Dot(topLeft, getConstantVector(topLeftValue));
+                    double dotTopRight = Vector2.Dot(topRight, getConstantVector(topRightValue));
+                    double dotBottomLeft = Vector2.Dot(bottomLeft, getConstantVector(bottomLeftValue));
+                    double dotBottomRight = Vector2.Dot(bottomRight, getConstantVector(bottomRightValue));
+
+
+
+                    double xf = fadeFunction(xlocal);
+                    double yf = fadeFunction(ylocal);
+
+                    double noise = Lerp(xf,
+                    Lerp(yf, dotTopLeft, dotBottomLeft),
+                    Lerp(yf, dotTopRight, dotBottomRight));
+
+                    if (noise > 1)
+                    {
+                        Console.WriteLine("At this pixel-");
+                        Console.WriteLine("Noise: " + noise);
+                        Console.WriteLine("xf & yf: " + xf + ", " + yf);
+                    }
+
+                    pixels[x, y] = (noise + 1) / 2;
+                }
+            }
+
+            return pixels;
+        }
+
+        public Vector2 getConstantVector(int value)
+        {
+            Vector2 constantVector;
+
+            constantVector = randomisedUnitVectors[value % randomisedUnitVectors.Count()];
+
+            return constantVector;
+        }
+        public double[] dotProduct(System.Numerics.Vector2[,] unitSquareVector, System.Numerics.Vector2[,] differenceVector)
+        {
+            //A method returning a list of dot products in English reading order
+            double[] dotProducts = new double[4];
+
+            //Both vector arrays are 2x2 but it is easier to read and implement using for loops
+            for (int y = 0; y < unitSquareVector.GetLength(0); y++)
+            {
+                for (int x = 0; x < unitSquareVector.GetLength(1); x++)
+                {
+                    dotProducts[x + 2 * y] = Vector2.Dot(unitSquareVector[x, y], differenceVector[x, y]);
+                }
+            }
+
+            return dotProducts;
+        }
+
+        public double fadeFunction(double t)
+        {
+            //Perlins improved fade function: 6^t5 -15t^4 +10t^3
+            double fadeFunctionValue = 6.0 * Math.Pow(t, 5) - 15.0 * Math.Pow(t, 4) + 10.0 * Math.Pow(t, 3);
+            return fadeFunctionValue;
+        }
+
+        public double Lerp(double t, double v1, double v2)
+        {
+            double lerp = v1 + t * (v2 - v1);
+
+            return lerp;
+        }
+
+    }
+
+    public class SeededBrownianMotion
+    {
+        public BlockGenerationVariables[,] seededBrownianMotion(BlockGenerationVariables[,] worldArray, BlockGenerationVariables[] ores)
+        {
+            BlockGenerationVariables[,] seededArray = new BlockGenerationVariables[worldArray.GetLength(0), worldArray.GetLength(1)];
+            seededArray = seedArray(worldArray, ores);
+            //seededArray = BrownianAlgorithm(seededArray);
+            return seededArray;
+        }
+
+        public BlockGenerationVariables[,] seedArray(BlockGenerationVariables[,] worldArray, BlockGenerationVariables[] ores)
+        {
+            //Generate a random number of seeds for each ore, depending on it's seedDensity, 
+            //then randomly distribute them inside the world Array
+            foreach (BlockGenerationVariables ore in ores)
+            {
+                int numberOfSeeds = (int)((ore.seedDensity / 100) * worldArray.Length);
+                for (int i = 0; i < numberOfSeeds; i++)
+                {
+                    Random r = new Random();
+                    int seedX = r.Next(0, worldArray.GetLength(0) - 1);
+                    int seedY = r.Next(0, worldArray.GetLength(1) - 1);
+                    //Creates a new class with the same parameters. If it directly equals it just passes a pointer
+                    BlockGenerationVariables newBlock = new BlockGenerationVariables(ore);
+                    newBlock.initialiseVeinList(newBlock); //Add itself to the Veinlist Array
+                    newBlock.identifier = i;
+                    worldArray[seedX, seedY] = newBlock;
+                }
+            }
+
+            return worldArray;
+        }
+
+        public BlockGenerationVariables[,] brownianAlgorithm(BlockGenerationVariables[,] worldArray, int attemptCount)
+        {
+            //It would probably be more efficient to have a seperate array containing only the non-null blocks but I don't know a
+            //readable way of doing it (ironic with the line break)
+            int attempts = 0;
+
+            while (attempts < attemptCount) //Runs until no changes have been made in that iteration.
+            {
+                Console.WriteLine("Iterated!");
+                bool hasChangedTheArray = false;
+                //Read everything from the worldArray but write to the tempArray then equalise at the end
+                BlockGenerationVariables[,] tempArray = worldArray.Clone() as BlockGenerationVariables[,];
+
+                for (int x = 0; x < worldArray.GetLength(0); x++)
+                {
+                    for (int y = 0; y < worldArray.GetLength(1); y++)
+                    {
+                        (BlockGenerationVariables[,] outputArray, bool hasChanged) output = brownianMotion(worldArray, tempArray, x, y);
+                        tempArray = output.outputArray;
+                        if (output.hasChanged && !hasChangedTheArray)
+                        {
+                            hasChangedTheArray = true;
+                        }
+                    }
+
+                }
+
+                worldArray = tempArray.Clone() as BlockGenerationVariables[,];
+                if (!hasChangedTheArray)
+                {
+                    attempts += 1;
+                }
+            }
+
+            fill(worldArray);
+
+            return worldArray;
+        }
+
+        public (BlockGenerationVariables[,], bool) brownianMotion(BlockGenerationVariables[,] worldArray, BlockGenerationVariables[,] tempArray, int x, int y)
+        {
+            bool hasChanged = false;
+            if (worldArray[x, y] != null)
+            {
+                BlockGenerationVariables block = worldArray[x, y];
+                if (block.currentSingleSpread > 0 && block.oreVeinSpread > 0) //If the block/vein is allowed to spread
+                {
+                    Random r = new Random();
+                    double rValue = r.NextDouble();
+                    if (rValue <= block.directionWeights.north)
+                    {
+                        if (y - 1 >= 0)
+                        {
+                            if (tempArray[x, y - 1] == null)
+                            {
+                                tempArray[x, y - 1] = spreadBlock(worldArray, tempArray, (x, y));
+                                hasChanged = true;
+                            }
+
+                        }
+                    }
+                    else if (rValue < block.directionWeights.north + block.directionWeights.northEast)
+                    {
+                        if (x + 1 < worldArray.GetLength(0) && y - 1 >= 0)
+                        {
+                            if (tempArray[x + 1, y - 1] == null)
+                            {
+                                tempArray[x + 1, y - 1] = spreadBlock(worldArray, tempArray, (x, y));
+                                hasChanged = true;
+                            }
+                        }
+
+                    }
+                    else if (rValue < (block.directionWeights.north + block.directionWeights.northEast + block.directionWeights.east))
+                    {
+                        if (x + 1 < worldArray.GetLength(0))
+                        {
+                            if (tempArray[x + 1, y] == null)
+                            {
+                                tempArray[x + 1, y] = spreadBlock(worldArray, tempArray, (x, y));
+                                hasChanged = true;
+                            }
+                        }
+
+                    }
+                    else if (rValue < (block.directionWeights.north + block.directionWeights.northEast + block.directionWeights.east + block.directionWeights.southEast))
+                    {
+                        if (y + 1 < worldArray.GetLength(1) && x + 1 < worldArray.GetLength(0)) //Make sure the block is inside the array bounds
+                        {
+                            if (tempArray[x + 1, y + 1] == null)
+                            {
+                                tempArray[x + 1, y + 1] = spreadBlock(worldArray, tempArray, (x, y));
+                                hasChanged = true;
+                            }
+                        }
+
+                    }
+
+                    else if (rValue < (block.directionWeights.north + block.directionWeights.northEast + block.directionWeights.east + block.directionWeights.southEast + block.directionWeights.south))
+                    {
+                        if (y + 1 < worldArray.GetLength(1)) //Make sure the block is inside the array bounds
+                        {
+                            if (tempArray[x, y + 1] == null)
+                            {
+                                tempArray[x, y + 1] = spreadBlock(worldArray, tempArray, (x, y));
+                                hasChanged = true;
+                            }
+                        }
+
+                    }
+                    else if (rValue < (block.directionWeights.north + block.directionWeights.northEast + block.directionWeights.east + block.directionWeights.southEast + block.directionWeights.south + block.directionWeights.southWest))
+                    {
+                        if (y + 1 < worldArray.GetLength(1) && x - 1 >= 0) //Make sure the block is inside the array bounds
+                        {
+                            if (tempArray[x - 1, y + 1] == null)
+                            {
+                                tempArray[x - 1, y + 1] = spreadBlock(worldArray, tempArray, (x, y));
+                                hasChanged = true;
+                            }
+                        }
+
+                    }
+                    else if (rValue < (block.directionWeights.north + block.directionWeights.northEast + block.directionWeights.east + block.directionWeights.southEast + block.directionWeights.south + block.directionWeights.southWest + block.directionWeights.west))
+                    {
+                        if (x - 1 >= 0) //Make sure the block is inside the array bounds
+                        {
+                            if (tempArray[x - 1, y] == null)
+                            {
+                                tempArray[x - 1, y] = spreadBlock(worldArray, tempArray, (x, y));
+                                hasChanged = true;
+                            }
+                        }
+
+                    }
+                    else
+                    {
+                        if (x - 1 >= 0 && y - 1 >= 0) //Make sure the block is inside the array bounds
+                        {
+                            if (tempArray[x - 1, y - 1] == null)
+                            {
+                                tempArray[x - 1, y - 1] = spreadBlock(worldArray, tempArray, (x, y));
+                                hasChanged = true;
+                            }
+                        }
+
+                    }
+                }
+            }
+            return (tempArray, hasChanged);
+        }
+
+        public BlockGenerationVariables spreadBlock(BlockGenerationVariables[,] worldArray, BlockGenerationVariables[,] tempArray, (int x, int y) location)
+        {
+            int x = location.x;
+            int y = location.y;
+            foreach (BlockGenerationVariables b in worldArray[x, y].veinList)
+            {
+                b.oreVeinSpread -= 1;    //Sychronise the updated ore size across all the blocks in the vein
+            }
+            tempArray[x, y].currentSingleSpread -= 1;
+            BlockGenerationVariables newBlock = new BlockGenerationVariables(worldArray[x, y]);
+            newBlock.updateVeinList(newBlock);
+            return newBlock;
+        }
+
+        public Block[,] fill(Block[,] blockArray)
+        {
+            for (int x = 0; x < blockArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < blockArray.GetLength(1); y++)
+                {
+                    if (blockArray[x, y] == null)
+                    {
+                        List<Block> blocks = new List<Block>();
+                        List<int> blockCount = new List<int>();
+                        for (int xLocal = x - 1; xLocal <= x + 1; xLocal++)
+                        {
+                            for (int yLocal = y - 1; yLocal <= y + 1; yLocal++)
+                            {
+                                if (xLocal >= 0 && yLocal >= 0 && xLocal < blockArray.GetLength(0) && yLocal < blockArray.GetLength(1))
+                                    if (blockArray[xLocal, yLocal] != null)
+                                    {
+                                        if (blocks.Contains(blockArray[xLocal, yLocal]))
+                                        {
+                                            blockCount[blocks.FindIndex(u => u.texture == blockArray[xLocal, yLocal].texture)] += 1;
+                                        }
+                                        else
+                                        {
+                                            blocks.Add(blockArray[xLocal, yLocal]);
+                                            blockCount.Add(1);
+                                        }
+                                    }
+                            }
+                        }
+                        if (blocks.Count != 0)
+                        {
+                            blockArray[x, y] = blocks[blockCount.IndexOf(blockCount.Max())];
+                        }
+
+                    }
+                }
+            }
+
+            return blockArray;
+        }
+
+        public BlockGenerationVariables[,] fill(BlockGenerationVariables[,] blockArray)
+        {
+            for (int x = 0; x < blockArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < blockArray.GetLength(1); y++)
+                {
+                    if (blockArray[x, y] == null)
+                    {
+                        List<Block> blocks = new List<Block>();
+                        List<BlockGenerationVariables> blockVariables = new List<BlockGenerationVariables>();
+                        List<int> blockCount = new List<int>();
+                        for (int xLocal = x - 1; xLocal <= x + 1; xLocal++)
+                        {
+                            for (int yLocal = y - 1; yLocal <= y + 1; yLocal++)
+                            {
+                                if (xLocal >= 0 && yLocal >= 0 && xLocal < blockArray.GetLength(0) && yLocal < blockArray.GetLength(1))
+                                    if (blockArray[xLocal, yLocal] != null)
+                                    {
+                                        if (blocks.Contains(blockArray[xLocal, yLocal].block))
+                                        {
+                                            blockCount[blocks.FindIndex(u => u.texture == blockArray[xLocal, yLocal].block.texture)] += 1;
+                                        }
+                                        else
+                                        {
+                                            blocks.Add(blockArray[xLocal, yLocal].block);
+                                            blockVariables.Add(blockArray[xLocal, yLocal]);
+                                            blockCount.Add(1);
+                                        }
+                                    }
+                            }
+                        }
+                        if (blocks.Count != 0)
+                        {
+                            blockArray[x, y] = blockVariables[blockCount.IndexOf(blockCount.Max())];
+                        }
+
+                    }
+                }
+            }
+
+            return blockArray;
+        }
+
     }
 }
