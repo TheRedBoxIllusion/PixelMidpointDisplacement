@@ -5,9 +5,24 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using Vector2 = Microsoft.Xna.Framework.Vector2;
 
-
+/*
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Things to do:
+ * 
+ * Completely modularise the different segments                                     - In Progress
+ * - Physics engine
+ * - Different noise algorithms
+ * 
+ * Lighting engine                                                                  - Needs to be started
+ * -Emissive blocks and the light levels array
+ * 
+ * Optimise the drawing system                                                      - Completed
+ * -Only draw blocks that are present on the screen
+ *      - Determined by the screen offset (or the player position), the pixelsPerBlock and the window size
+ */
 
 namespace PixelMidpointDisplacement
 {
@@ -28,6 +43,8 @@ namespace PixelMidpointDisplacement
         Player player;
 
         int digSize = 1;
+
+        int frameCount = 0;
 
         public Game1()
         {
@@ -75,7 +92,7 @@ namespace PixelMidpointDisplacement
             worldContext.generateIDsFromTextureList(new Texture2D[]{airTexture, stoneTexture, blueBlockTexture, crimsonBlockTexture});
 
 
-            worldContext.generateWorld((300, 300));
+            worldContext.generateWorld((400, 800));
             worldContext.updatePixelsPerBlock(16);
 
             playerSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
@@ -88,6 +105,7 @@ namespace PixelMidpointDisplacement
 
         protected override void Update(GameTime gameTime)
         {
+            
             if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
@@ -118,13 +136,42 @@ namespace PixelMidpointDisplacement
                 worldContext.physicsObjects[i].accelerationY = 0;
             }
 
+
             worldContext.screenSpaceOffset = (-(int)player.x + _graphics.GraphicsDevice.Viewport.Width / 2 - (int)(player.width * worldContext.pixelsPerBlock),
                                               -(int)player.y + _graphics.GraphicsDevice.Viewport.Height / 2 - (int)(player.height * worldContext.pixelsPerBlock));
 
+            //Bind the world to exist such that: the offset does not exceed either sides of the world array when converted to pixel space
+            //When the player's offset is greater than -1/2 screen dimensions
+            //When the player's offset is lesser than -1/2 screen dimensions + worldDimension * pixelsPerBlock
+            /*
+            if (worldContext.screenSpaceOffset.x > -1 / 2.0 * _graphics.PreferredBackBufferWidth)
+            {
+                worldContext.screenSpaceOffset = ((int)(-1 / 2.0 * _graphics.PreferredBackBufferWidth), worldContext.screenSpaceOffset.y);
+            }
+            else if (worldContext.screenSpaceOffset.x < -1 / 2.0 * _graphics.GraphicsDevice.Viewport.Width + worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock) {
+                worldContext.screenSpaceOffset = ((int)(-1 / 2.0 * _graphics.GraphicsDevice.Viewport.Width) + worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock, worldContext.screenSpaceOffset.y);
+            }*/
+            if (worldContext.screenSpaceOffset.x > -(int)(player.width * worldContext.pixelsPerBlock) - 5) {
+                worldContext.screenSpaceOffset = (-(int)(player.width * worldContext.pixelsPerBlock) - 5, worldContext.screenSpaceOffset.y);
+            } else if (worldContext.screenSpaceOffset.x < (-(int)worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Width - (int)(player.width * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock/2){
+                worldContext.screenSpaceOffset = ((-(int)worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Width - (int)(player.width * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock/2, worldContext.screenSpaceOffset.y);
+            }
+
+            if (worldContext.screenSpaceOffset.y > -(int)(player.height * worldContext.pixelsPerBlock) - 5)
+            {
+                worldContext.screenSpaceOffset = (worldContext.screenSpaceOffset.x, -(int)(player.height * worldContext.pixelsPerBlock) - 5);
+            }
+            else if (worldContext.screenSpaceOffset.y < (-(int)worldContext.worldArray.GetLength(1) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Height - (int)(player.height * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock / 2)
+            {
+                worldContext.screenSpaceOffset = (worldContext.screenSpaceOffset.x, (-(int)worldContext.worldArray.GetLength(1) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Height - (int)(player.height * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock / 2);
+            }
+            
+
             //Digging system
-            if (Mouse.GetState().ScrollWheelValue/120 != digSize-1) {
-                digSize = Mouse.GetState().ScrollWheelValue/120 + 1;
-                
+            if (Mouse.GetState().ScrollWheelValue / 120 != digSize - 1)
+            {
+                digSize = Mouse.GetState().ScrollWheelValue / 120 + 1;
+
             }
             if (Mouse.GetState().LeftButton == ButtonState.Pressed)
             {
@@ -180,11 +227,18 @@ namespace PixelMidpointDisplacement
             int[,] tempWorldArray = worldContext.worldArray;
 
             _spriteBatch.Begin();
-            for (int x = 0; x < tempWorldArray.GetLength(0); x++)
+
+            
+            //Draw the screen based on the visible blocks
+            //The range: screenOffset - screenOffset + screenDimension
+            for (int x = ((int)-worldContext.screenSpaceOffset.x - _graphics.GraphicsDevice.Viewport.Width) /worldContext.pixelsPerBlock - 1; x < ((int)-worldContext.screenSpaceOffset.x + _graphics.GraphicsDevice.Viewport.Width) / worldContext.pixelsPerBlock + 1; x++)
             {
-                for (int y = 0; y < tempWorldArray.GetLength(1); y++)
+                for (int y = ((int)-worldContext.screenSpaceOffset.y - _graphics.GraphicsDevice.Viewport.Height) / worldContext.pixelsPerBlock - 1; y < ((int)-worldContext.screenSpaceOffset.y + _graphics.GraphicsDevice.Viewport.Height) / worldContext.pixelsPerBlock + 1; y++)
                 {
-                    _spriteBatch.Draw(worldContext.getBlockFromID(tempWorldArray[x,y]).texture, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), Color.White);
+                    if (x > 0 && y > 0 && x < tempWorldArray.GetLength(0) && y < tempWorldArray.GetLength(1))
+                    {
+                        _spriteBatch.Draw(worldContext.getBlockFromID(tempWorldArray[x, y]).texture, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), Color.White);
+                    }
                 }
             }
 
@@ -255,13 +309,13 @@ namespace PixelMidpointDisplacement
         0.00325};
 
         //Smaller means the blocks are also smaller...
-        double frequency = 0.0045;
+        double frequency = 0.025;
 
         //Higher means more solid
         double blockThreshold = 0.9;
         double decreasePerY = 0.005;
         double maximumThreshold = 0.9;//Only decreasing so...
-        double minimumThreshold = 0.42;
+        double minimumThreshold = 0.48;
         //The effect of the absolute y value (from the top of the map) and the relative y value (from the surface)
         double absoluteYHeightWeight = 0.1;
         double relativeYHeightWeight = 1;
