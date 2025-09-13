@@ -1,0 +1,17 @@
+﻿Spawnpoint x & y in pixels: The initial spawnpoint of the player. In later versions this might be recomputed to spawn the player directly on the nearest piece of viable ground													(int)
+10
+10
+kX & kY: The coefficient of friction for the player. As there is no ground friction at the moment, this; combined with acceleration values, defines the players max velocities in both directions								(double)
+8
+0.05
+width and breadth: This defines the dimensions of the player in terms of blocks.																																				(double)
+0.9
+2
+Emmissive strength: How brightly the player emmits light. The brighter it is the further it will effect																															(int)
+500
+Max emmissive strength: The maximum value that the light emmitted by the player can reach. This is useful for only lighting up dark areas a certain amount																		(int)
+125
+Horizontal acceleration: This is how much the player accelerates sideways when there is an input. In ms^-2																														(double)
+4
+Jump acceleration: How much acceleration the player produces when they jump																																						(double)
+12

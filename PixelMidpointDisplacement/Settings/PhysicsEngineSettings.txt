@@ -1,0 +1,4 @@
+﻿block size in meters:			(double)
+0.6
+gravity:						(double)
+25

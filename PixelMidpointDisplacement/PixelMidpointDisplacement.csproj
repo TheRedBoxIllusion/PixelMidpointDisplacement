@@ -13,6 +13,27 @@
   <ItemGroup>
     <None Remove="Icon.ico" />
     <None Remove="Icon.bmp" />
+    <None Remove="Settings\LightingSystemSettings.txt" />
+    <None Remove="Settings\PhysicsEngineSettings.txt" />
+    <None Remove="Settings\PlayerSettings.txt" />
+    <None Remove="Settings\WorldContextSettings.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Settings\LightingSystemSettings.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Settings\PhysicsEngineSettings.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Settings\PlayerSettings.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Settings\WorldContextSettings.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Settings\WorldGenerationVariables.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Icon.ico">

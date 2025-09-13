@@ -1,0 +1,15 @@
+﻿Sunlight vector direction the format x y																		(double)
+0.9
+1
+Sun brightness																									(int)
+1024
+Shadow brightness																								(int)
+200
+Darkest value																									(int)
+0
+sunlight distance scalar																						(double)
+0.8
+emmissive blocks distance scalar - A lower value means the light penetrates further								(double)
+0.2
+Accumulate light																								(bool)
+false

@@ -1,10 +1,13 @@
 ﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using Vector2 = Microsoft.Xna.Framework.Vector2;
 
@@ -18,6 +21,12 @@ using Vector2 = Microsoft.Xna.Framework.Vector2;
  * 
  * Lighting engine                                                                  - Needs to be started
  * -Emissive blocks and the light levels array
+ * - Implement a global surface illumination by using a 'background' array
+ *   that defines where the surface 'air' blocks are. Then using a vector for direction, calculate
+ *   the light ray cast below the surface by the sunlight
+ *   -> can be done two ways. A vector calculated from the top of the world. This would provide shadows from mountain tops
+ *      if there's the appropriate direction. This wouldn't work too well with things like floating islands that would cast massive shadows
+ *      So perhaps contemplate some hygens principle into the equation I guess after a certain distance
  * 
  * Optimise the drawing system                                                      - Completed
  * -Only draw blocks that are present on the screen
@@ -37,7 +46,9 @@ namespace PixelMidpointDisplacement
         Texture2D collisionSprite;
 
 
-        PhysicsEngine physicsEngine;
+        EngineController engineController;
+
+        SpriteFont ariel;
         
 
         Player player;
@@ -45,6 +56,8 @@ namespace PixelMidpointDisplacement
         int digSize = 1;
 
         int frameCount = 0;
+
+        string playerAcceleration;
 
         public Game1()
         {
@@ -54,10 +67,12 @@ namespace PixelMidpointDisplacement
 
             this.TargetElapsedTime = TimeSpan.FromSeconds(1d / 180d);
 
-            worldContext = new WorldContext();
-            
+            engineController = new EngineController();
 
-            physicsEngine = new PhysicsEngine(worldContext);
+            worldContext = new WorldContext(engineController);
+            engineController.initialiseEngines(worldContext);
+
+            
 
             player = new Player(worldContext);
             worldContext.physicsObjects.Add(player);
@@ -78,22 +93,24 @@ namespace PixelMidpointDisplacement
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 
+            ariel = Content.Load<SpriteFont>("ariel");
+
             //Block Textures
             Texture2D airTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1); ;
             Texture2D stoneTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
             Texture2D blueBlockTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
             Texture2D crimsonBlockTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
 
-            stoneTexture.SetData<Color>(new Color[] { Color.Black });
+            stoneTexture.SetData<Color>(new Color[] { Color.Brown });
             airTexture.SetData<Color>(new Color[] { Color.White });
             blueBlockTexture.SetData<Color>(new Color[] { Color.Blue });
-            crimsonBlockTexture.SetData<Color>(new Color[] { Color.Crimson });
+            crimsonBlockTexture.SetData<Color>(new Color[] { Color.Lime });
 
             worldContext.generateIDsFromTextureList(new Texture2D[]{airTexture, stoneTexture, blueBlockTexture, crimsonBlockTexture});
 
 
             worldContext.generateWorld((400, 800));
-            worldContext.updatePixelsPerBlock(16);
+            
 
             playerSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
             collisionSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
@@ -114,27 +131,30 @@ namespace PixelMidpointDisplacement
             //of the physics engine
 
 
-            double horizontalAcceleration = 4; //The acceleration in m/s^-2
-            double jumpAcceleration = 12;
+            
 
-            player.inputUpdate(horizontalAcceleration, jumpAcceleration, gameTime.ElapsedGameTime.TotalSeconds);
+            player.inputUpdate(gameTime.ElapsedGameTime.TotalSeconds);
 
+            
 
-            for (int i = 0; i < worldContext.physicsObjects.Count; i++)
-            {
-                //General Physics simulations
-                //Order: Acceleration, velocity then location
-                worldContext.physicsObjects[i].isOnGround = false;
-                physicsEngine.addGravity(worldContext.physicsObjects[i]);
-                physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
-                physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
-                physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
-                physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                for (int i = 0; i < worldContext.physicsObjects.Count; i++)
+                {
+                    //General Physics simulations
+                    //Order: Acceleration, velocity then location
+                    worldContext.physicsObjects[i].isOnGround = false;
+                    engineController.physicsEngine.addGravity(worldContext.physicsObjects[i]);
+                    engineController.physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                    engineController.physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
+                    engineController.physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                    engineController.physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
                 //Reset acceleration to be calculated next frame
-                worldContext.physicsObjects[i].accelerationX = 0;
-                worldContext.physicsObjects[i].accelerationY = 0;
-            }
+                playerAcceleration = worldContext.physicsObjects[i].accelerationX + ", " + worldContext.physicsObjects[i].accelerationY;
+
+
+                    worldContext.physicsObjects[i].accelerationX = 0;
+                    worldContext.physicsObjects[i].accelerationY = 0;
+                }
 
 
             worldContext.screenSpaceOffset = (-(int)player.x + _graphics.GraphicsDevice.Viewport.Width / 2 - (int)(player.width * worldContext.pixelsPerBlock),
@@ -237,12 +257,39 @@ namespace PixelMidpointDisplacement
                 {
                     if (x > 0 && y > 0 && x < tempWorldArray.GetLength(0) && y < tempWorldArray.GetLength(1))
                     {
-                        _spriteBatch.Draw(worldContext.getBlockFromID(tempWorldArray[x, y]).texture, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), Color.White);
+                        int lightValue = worldContext.lightArray[x, y];
+                        if (lightValue > 255) {
+                            lightValue = 255;
+                        }
+                            Color lightLevel = new Color(lightValue, lightValue, lightValue);
+                            _spriteBatch.Draw(worldContext.getBlockFromID(tempWorldArray[x, y]).texture, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), lightLevel);
+                        
                     }
                 }
             }
 
+            _spriteBatch.DrawString(ariel, (int)player.x/worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10, 10), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
+            
+            
+            if (Mouse.GetState().MiddleButton == ButtonState.Pressed) {
+                double mouseXPixelSpace = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
+                double mouseYPixelSpace = Mouse.GetState().Y - worldContext.screenSpaceOffset.y;
 
+
+
+                int mouseXGridSpace = (int)Math.Floor(mouseXPixelSpace / worldContext.pixelsPerBlock);
+                int mouseYGridSpace = (int)Math.Floor(mouseYPixelSpace / worldContext.pixelsPerBlock);
+                string debugInfo;
+                debugInfo = mouseXGridSpace + ", " + mouseYGridSpace;
+                debugInfo += " | " + worldContext.worldArray[mouseXGridSpace, mouseYGridSpace];
+                debugInfo += " | " + worldContext.lightArray[mouseXGridSpace, mouseYGridSpace];
+                debugInfo += " | " + worldContext.surfaceBlocks.Contains((mouseXGridSpace, mouseYGridSpace));
+
+                _spriteBatch.DrawString(ariel, debugInfo, new Vector2(_graphics.GraphicsDevice.Viewport.Width / 2, 20), Color.BlueViolet);
+                
+            }
             _spriteBatch.Draw(playerSprite, new Rectangle((int)player.x + worldContext.screenSpaceOffset.x, (int)player.y + worldContext.screenSpaceOffset.y, (int)(player.width * worldContext.pixelsPerBlock), (int)(player.height * worldContext.pixelsPerBlock)), Color.White);
 
 
@@ -287,6 +334,7 @@ namespace PixelMidpointDisplacement
 
         int[,] worldArray;
         int[] surfaceHeight;
+        List<(int x, int y)> surfaceBlocks = new List<(int x, int y)>(); //This list contains all the blocks facing the surface, not only the ones that are highest. Eg. cliff faces
 
         double[,] perlinNoiseArray;
         BlockGenerationVariables[,] brownianMotionArray;
@@ -311,14 +359,25 @@ namespace PixelMidpointDisplacement
         //Smaller means the blocks are also smaller...
         double frequency = 0.025;
 
-        //Higher means more solid
-        double blockThreshold = 0.9;
-        double decreasePerY = 0.005;
-        double maximumThreshold = 0.9;//Only decreasing so...
-        double minimumThreshold = 0.48;
-        //The effect of the absolute y value (from the top of the map) and the relative y value (from the surface)
-        double absoluteYHeightWeight = 0.1;
-        double relativeYHeightWeight = 1;
+        //BlockThresholdValues:
+        //Initial block threshold
+        //Maximum Y that these variables are used for
+        //Threshold decrease per y value
+        //Maximum threshold
+        //Minimum threshold
+        //Weight of the absolute y value
+        //Weight of the relative y value
+        List<BlockThresholdValues> blockThresholdVariables = new List<BlockThresholdValues>(){
+            new BlockThresholdValues(0.9, 0, 0.005, 0.9, 0.48, 0, 1),
+            new BlockThresholdValues(0.9, 130, 0.005, 0.9, 0.48, 0.3, 1),
+
+            new BlockThresholdValues(0.9, 150, 0.01, 0.9, 0.48, 1, 0),
+           
+            new BlockThresholdValues(0.9, 200, 0.005, 0.9, 0.48, 0.2, 1),
+            new BlockThresholdValues(0.9, 210, 0.005, 0.9, 0.48, 0, 1)
+        };
+        
+        
 
         int vectorCount = 6;
         double vectorAngleOffset = (Math.PI);
@@ -333,6 +392,31 @@ namespace PixelMidpointDisplacement
 
     public WorldGenerator(WorldContext wc) {
             worldContext = wc;
+
+            //Load a select few variables pertaining mostly to the perlin noise caves
+            //Not all important variables can be loaded (or aren't) just due to the complexity of the system
+            loadSettings();
+        }
+
+        private void loadSettings() {
+            //Load octave count and octave weights, 
+            //Load frequency
+            //Load vector count and offset
+            //Load ore generation density I guess. There's too many variables to actually make a settings file for the world generation. Just due to the complexity and number of... well numbers
+            StreamReader sr = new StreamReader(worldContext.runtimePath + "Settings\\WorldGenerationVariables.txt");
+            sr.ReadLine();
+            noiseIterations = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            octaveWeights = new double[noiseIterations];
+            for (int i = 0; i < noiseIterations; i++) {
+                octaveWeights[i] = Convert.ToDouble(sr.ReadLine());
+            }
+            sr.ReadLine();
+            frequency = Convert.ToDouble(sr.ReadLine());
+            sr.ReadLine();
+            vectorCount = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            vectorAngleOffset = Convert.ToDouble(sr.ReadLine());
         }
 
         public int[,] generateWorld((int width, int height) worldDimensions) {
@@ -342,22 +426,34 @@ namespace PixelMidpointDisplacement
             oreArray = new Block[worldDimensions.width, worldDimensions.height];
             surfaceHeight = new int[worldDimensions.width];
 
+            for (int x = 0; x < worldDimensions.width; x++) {
+                surfaceHeight[x] = worldDimensions.height;
+            }
+
 
             List<(double, double)> initialPoints = new List<(double, double)>() { (0, 900), ((worldContext.pixelsPerBlock * worldArray.GetLength(0) / 2), 100), (worldContext.pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
 
             MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 400, 1, 10, 70);
 
             pointsToBlocks(mda.midpointAlgorithm());
+            
 
             perlinNoise(worldDimensions, noiseIterations, octaveWeights, frequency, vectorCount, vectorAngleOffset);
             seededBrownianMotion(ores, maxAttempts);
-            combineAlgorithms(blockThreshold, decreasePerY, maximumThreshold, minimumThreshold);
+            combineAlgorithms(blockThresholdVariables);
+
+            calculateSurfaceBlocks();
 
             return worldArray;
         }
 
         public int[] getSurfaceHeight() {
             return surfaceHeight;
+        }
+
+        public List<(int x, int y)> getSurfaceBlocks()
+        {
+            return surfaceBlocks;
         }
 
         public Block[,] getOreArray()
@@ -404,15 +500,81 @@ namespace PixelMidpointDisplacement
                     gridY = worldArray.GetLength(1) - 1;
                 }
 
-                if (surfaceHeight[gridX] == null || surfaceHeight[gridX] < gridY)
-                {
-                    surfaceHeight[gridX] = gridY;
-                }
-
                 for (int y = gridY; y < worldArray.GetLength(1); y++)
                 {
                     worldArray[gridX, y] = 1;
                 }
+            }
+
+        }
+
+        private void calculateSurfaceBlocks() {
+            for (int x = 0; x < surfaceHeight.Length; x++)
+            {
+                
+                    surfaceBlocks.Add((x, surfaceHeight[x]));
+                    if (x == 1)
+                    {
+                        System.Diagnostics.Debug.WriteLine(surfaceHeight[x]);
+                    }
+                    int y = surfaceHeight[x] + 1;
+                    bool isStillSurface = true;
+                    while (isStillSurface)
+                    {
+                        isStillSurface = addSurfaceBlock(x, y);
+                        
+                        if (!isStillSurface && x >=0 && y >= 0 && x < worldArray.GetLength(0) && y < worldArray.GetLength(1)) {
+                            //System.Diagnostics.Debug.WriteLine("Added an extra block right below at:" + x + ", " + y);
+                            surfaceBlocks.Add((x, y)); //If it has determined that a block is no longer on the surface, add the block right below: corners
+                        }
+                        y++;
+                }
+                
+            }
+            
+        }
+
+        private bool addSurfaceBlock(int x, int y) {
+            if (y >= 0 && y < worldArray.GetLength(1) && x > 0 && x < worldArray.GetLength(0) - 1)
+            { //If either side of the block is exposed to air, then add it to the surfaceBlocks list. However, make sure to account for
+              //Letting boundary blocks still be checked
+                if (worldArray[x - 1, y] == 0 || worldArray[x + 1, y] == 0)
+                {
+                    surfaceBlocks.Add((x, y));
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            else if (x == 0 && y >= 0 && y < worldArray.GetLength(1))
+            {
+                if (worldArray[x + 1, y] == 0)
+                {
+                    surfaceBlocks.Add((x, y));
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            else if (x == worldArray.GetLength(0) - 1 && y >= 0 && y < worldArray.GetLength(1))
+            {
+                if (worldArray[x - 1, y] == 0)
+                {
+                    surfaceBlocks.Add((x, y));
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
             }
 
         }
@@ -456,19 +618,26 @@ namespace PixelMidpointDisplacement
             brownianMotionArray = sbm.seededBrownianMotion(brownianMotionArray, oresArray);
             brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, attemptCount);
         }
-        private void combineAlgorithms(double blockThreshold, double changePerY, double maximumThreshold, double minimumThreshold)
+        private void combineAlgorithms(List<BlockThresholdValues> blockThresholdVariables)
         {
             for (int x = 0; x < worldArray.GetLength(0); x++)
             {
                 for (int y = 0; y < worldArray.GetLength(1); y++)
                 {
-                    if (perlinNoiseArray[x, y] > changeThresholdByDepth(blockThreshold, changePerY, (x, y), maximumThreshold, minimumThreshold))
+                    if (perlinNoiseArray[x, y] > changeThresholdByDepth(blockThresholdVariables, (x,y)))
                     { //If it's above the block threshold, set the block to be air, 
                         worldArray[x, y] = 0;
                     }
                     else if (brownianMotionArray[x, y] != null && worldArray[x, y] == 1) //If the brownian motion defined it, and it's solid from the midpoint generation
                     {
                         worldArray[x, y] = brownianMotionArray[x, y].block.ID;
+                        if (worldArray[x, y] != 0)
+                        {
+                            if (surfaceHeight[x] == null || surfaceHeight[x] > y)
+                            {
+                                surfaceHeight[x] = y;
+                            }
+                        }
                     }
                     else
                     {
@@ -478,17 +647,26 @@ namespace PixelMidpointDisplacement
             }
         }
 
-        private double changeThresholdByDepth(double blockThreshold, double changePerY, (double x, double y) position, double maximumThreshold, double minimumThreshold)
+        private double changeThresholdByDepth(List<BlockThresholdValues> blockThresholdVariables, (double x, double y) position)
         {
-            double calculatedYWeight = position.y * absoluteYHeightWeight + (position.y - surfaceHeight[(int)position.x]) * relativeYHeightWeight;
-            blockThreshold = blockThreshold - changePerY * calculatedYWeight;
-            if (blockThreshold > maximumThreshold)
+            double blockThreshold = 1;
+
+            for (int i = blockThresholdVariables.Count - 1; i >= 0; i--)
             {
-                blockThreshold = maximumThreshold;
-            }
-            else if (blockThreshold < minimumThreshold)
-            {
-                blockThreshold = minimumThreshold;
+                if (position.y >= blockThresholdVariables[i].maximumY)
+                {
+                    double calculatedYWeight = position.y * blockThresholdVariables[i].absoluteYHeightWeight + (position.y - surfaceHeight[(int)position.x]) * blockThresholdVariables[i].relativeYHeightWeight;
+                    blockThreshold = blockThresholdVariables[i].blockThreshold - blockThresholdVariables[i].decreasePerY * calculatedYWeight;
+                    if (blockThreshold > blockThresholdVariables[i].maximumThreshold)
+                    {
+                        blockThreshold = blockThresholdVariables[i].maximumThreshold;
+                    }
+                    else if (blockThreshold < blockThresholdVariables[i].minimumThreshold)
+                    {
+                        blockThreshold = blockThresholdVariables[i].minimumThreshold;
+                    }
+                    break;
+                }
             }
 
             return blockThreshold;
@@ -496,10 +674,316 @@ namespace PixelMidpointDisplacement
 
     }
 
+    public class LightingSystem
+    {
+        public int[,] lightArray { get; set; }
+        WorldContext wc;
+        Vector2 lightDirection = new Vector2(0.9f, 1);
+        int sunBrightness = 1024;
+        int shadowBrightness = 200;
+        int darkestLight = 0;
+
+        double scalar = 0.8;
+        double emmissiveScalar = 0.5;
+
+        bool accummulateLight = true;
+
+        public LightingSystem(WorldContext worldContext)
+        {
+            wc = worldContext;
+
+            //Load settings from file
+            loadSettings();
+        }
+
+        private void loadSettings() {
+            StreamReader sr = new StreamReader(wc.runtimePath + "Settings\\LightingSystemSettings.txt");
+            sr.ReadLine();
+            double sunlightX = Convert.ToDouble(sr.ReadLine());
+            double sunlightY = Convert.ToDouble(sr.ReadLine());
+            lightDirection = new Vector2((float)sunlightX, (float)sunlightY);
+            sr.ReadLine();
+            sunBrightness = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            shadowBrightness = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            darkestLight = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            scalar = Convert.ToDouble(sr.ReadLine());
+            sr.ReadLine();
+            emmissiveScalar = Convert.ToDouble(sr.ReadLine());
+            sr.ReadLine();
+            accummulateLight = Convert.ToBoolean(sr.ReadLine());
+        }
+
+        
+        public void generateSunlight(int[,] worldArray, int[] surfaceLevel)
+        {
+            for (int startingX = 0; startingX < lightArray.GetLength(0); startingX++)
+            {
+                calculateLightRay(startingX, 0, worldArray, surfaceLevel);
+            }
+            if (lightDirection.X > 0)
+            {
+                for (int startingY = 0; startingY < surfaceLevel[0]; startingY++)
+                {
+                    calculateLightRay(0, startingY, worldArray, surfaceLevel);
+                }
+            }
+            else if (lightDirection.X < 0)
+            {
+                for (int startingY = 0; startingY < surfaceLevel[worldArray.GetLength(0) - 1]; startingY++)
+                {
+                    calculateLightRay(worldArray.GetLength(1) - 1, startingY, worldArray,  surfaceLevel);
+                }
+            }
+            
+        }
+        public void calculateLightRay(int startingX, int startingY, int[,] worldArray, int[] surfaceLevel)
+        {
+            int stepCount = 0;
+            bool hasCollidedWithABlock = false;
+            while (!hasCollidedWithABlock)
+            {
+                int x = startingX + (int)(stepCount * lightDirection.X);
+                int y = startingY + (int)(stepCount * lightDirection.Y);
+                if (x >= 0 && x < worldArray.GetLength(0) && y >= 0 && y < worldArray.GetLength(1))
+                {
+                    if (worldArray[x, y] == 0)
+                    {
+                        int xCheck = (int)Math.Round(x - lightDirection.X);
+                        int yCheck = (int)Math.Round(y - lightDirection.Y);
+                        if (xCheck >= 0 && xCheck < worldArray.GetLength(0) && yCheck >= 0 && yCheck < worldArray.GetLength(1))
+                        {
+                            if (worldArray[xCheck, y] == 0 || worldArray[x, yCheck] == 0)
+                            {
+                                lightArray[x, y] = sunBrightness;
+                            }
+                            else
+                            {
+                                hasCollidedWithABlock = true;
+                            }
+                        }
+                        else
+                        {
+                            lightArray[x, y] = sunBrightness;
+                        }
+
+
+                    }
+                    else
+                    {
+                        hasCollidedWithABlock = true;
+                    }
+                }
+                else { hasCollidedWithABlock = true; }
+                stepCount++;
+            }
+
+        }
+
+        public int[,] initialiseLight((int width, int height) worldDimensions, int[] surfaceLevel) {
+            lightArray = new int[worldDimensions.width, worldDimensions.height];
+            for (int x = 0; x < lightArray.GetLength(0); x++) {
+                for (int y = 0; y < lightArray.GetLength(1); y++) {
+                    lightArray[x, y] = darkestLight;
+                }
+            }
+
+            for (int x = 0; x < lightArray.GetLength(0); x++) {
+                for (int y = 0; y < surfaceLevel[x]; y++) {
+                    lightArray[x, y] = shadowBrightness;
+                }
+            }
+
+            return lightArray;
+        }
+
+        public void calculateSurfaceLight(int[,] worldArray, List<(int x, int y)> surfaceLevel) {
+            //From i = P/4 * Pi * r^2
+            //r = Sqrt(P/0.9 * 4 * PI)
+            
+            int maxDepthSunlight = (int)Math.Sqrt(sunBrightness/25 * 4 * Math.PI);
+            //int maxDepthShadow = (int)Math.Sqrt(shadowBrightness / 25 * 4 * Math.PI);
+            
+            for (int i = 0; i < surfaceLevel.Count; i++) {
+                int lastX = (int)Math.Round(surfaceLevel[i].x - lightDirection.X);
+                int lastY = (int)Math.Round(surfaceLevel[i].y - lightDirection.Y);
+                
+                if (lastX >= 0 && lastY >= 0 && lastX < lightArray.GetLength(0) && lastY < lightArray.GetLength(1))
+                {
+
+                    int surfaceBrightness = lightArray[lastX, lastY];
+                        for (int j = 0; j < maxDepthSunlight; j++)
+                        {
+                            int lightLevel;
+                            if (j != 0)
+                            {
+                                lightLevel = (int)(surfaceBrightness / (4 * Math.PI * Math.Pow(j, 2)));
+                            }
+                            else {
+                                lightLevel = surfaceBrightness;
+                            }
+                            int changedX = (int)Math.Round(surfaceLevel[i].x + lightDirection.X * j);
+                            int changedY = (int)Math.Round(surfaceLevel[i].y + lightDirection.Y * j);
+                            if (changedX >= 0 && changedY >= 0 && changedX < lightArray.GetLength(0) && changedY < lightArray.GetLength(1))
+                            {
+                                if (worldArray[changedX, changedY] != 0 && lightArray[changedX, changedY] < lightLevel/scalar)
+                                {
+                                    lightArray[changedX, changedY] = (int)(lightLevel/scalar);
+                                }
+                            }
+                            
+                        }
+                    
+                }
+            }
+
+            
+        }
+
+        public int[,] calculateLightMap(int emmissiveness) {
+            int maxImpact = (int)(Math.Sqrt(emmissiveness / 25 * 4 * Math.PI)/emmissiveScalar);
+            
+            int[,] lightMap = new int[maxImpact, maxImpact]; //I think I can technically shorten this to being a singular array only the width of the max impact and just 'rotate' it around to account for it's sphereical influence. However this sounds horrid so I won't
+            for (int x = 0; x < maxImpact; x++) {
+                for (int y = 0; y < maxImpact; y++) {
+                    lightMap[x, y] = 0;
+                }
+            }
+            for (int x = 0; x <  maxImpact; x++)
+            {
+                for (int y = 0; y <  maxImpact; y++)
+                {
+                    int distance = (int)Math.Sqrt(Math.Pow(x - maxImpact / 2, 2) + Math.Pow(y - maxImpact / 2, 2));
+                    if (distance <= maxImpact) {
+                        int intensity = emmissiveness;
+                        if (distance != 0)
+                        {
+                            intensity = (int)((emmissiveness / (4 * Math.PI * Math.Pow(distance * emmissiveScalar, 2))));
+                            if (intensity > emmissiveness) { intensity = emmissiveness; }
+                        }
+                        
+                            lightMap[x, y] = intensity;
+                    }
+                }
+            }
+            return lightMap;
+        }
+    
+        public void movedLight(int lightX, int lightY, int xChange, int yChange, int[,] lightMap, int emmissiveMax)
+        {
+            int[,] newLightMap = new int[lightMap.GetLength(0) + Math.Abs(xChange), lightMap.GetLength(1) + Math.Abs(yChange)];
+
+
+            for (int x = 0; x < newLightMap.GetLength(0); x++)
+            {
+                for (int y = 0; y < newLightMap.GetLength(1); y++)
+                {
+                    newLightMap[x, y] = 0;
+                }
+                
+            }
+
+           
+            int addAtX = 0;
+            int addAtY = 0;
+            int subtractAtX = 0;
+            int subtractAtY = 0;
+
+            if (xChange != 0 && xChange > 0)
+            {
+                addAtX = 1;
+                subtractAtX = 0;
+            }
+            else if (xChange != 0 && xChange < 0) {
+                addAtX = 0;
+                subtractAtX = 1;
+            }
+            if (yChange != 0 && yChange > 0)
+            {
+                addAtY = 1;
+                subtractAtY = 0;
+            }
+            else if (yChange != 0 && yChange < 0)
+            {
+                addAtY = 0;
+                subtractAtY = 1;
+            }
+
+            newLightMap = add2DArray(lightMap, newLightMap, addAtX, addAtY, 1);
+            if (!accummulateLight) { newLightMap = add2DArray(lightMap, newLightMap, subtractAtX, subtractAtY, -1); }
+
+
+            //Add the newLightMap to the lightMap array
+            lightArray = add2DArray(newLightMap, lightArray, lightX - (int)Math.Floor(lightMap.GetLength(0)/2.0) - subtractAtX, lightY - (int)Math.Floor(lightMap.GetLength(1) / 2.0) - subtractAtY, 1, emmissiveMax);
+
+        }
+
+        private int[,] add2DArray(int[,] sourceArray, int[,] arrayToBeAddedTo, int xOffset, int yOffset, int valueMultiplier) {
+            for (int x = 0; x < sourceArray.GetLength(0); x++) {
+                for (int y = 0; y < sourceArray.GetLength(1); y++) {
+                    if(x + xOffset >= 0 && x + xOffset < arrayToBeAddedTo.GetLength(0) && y + yOffset >= 0 && y + yOffset < arrayToBeAddedTo.GetLength(1))
+                    arrayToBeAddedTo[x + xOffset, y + yOffset] += valueMultiplier * sourceArray[x, y];
+                }
+            }
+            return arrayToBeAddedTo;
+        }
+        private int[,] add2DArray(int[,] sourceArray, int[,] arrayToBeAddedTo, int xOffset, int yOffset, int valueMultiplier, int maxLightValue)
+        {
+            for (int x = 0; x < sourceArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < sourceArray.GetLength(1); y++)
+                {
+                    if (x + xOffset >= 0 && x + xOffset < arrayToBeAddedTo.GetLength(0) && y + yOffset >= 0 && y + yOffset < arrayToBeAddedTo.GetLength(1))
+                    {
+                        if (arrayToBeAddedTo[x + xOffset, y + yOffset] + valueMultiplier * sourceArray[x,y] > maxLightValue && accummulateLight)
+                        {
+                            sourceArray[x,y] = (maxLightValue - arrayToBeAddedTo[x + xOffset, y + yOffset])/valueMultiplier;
+                            if (sourceArray[x, y] < 0) {
+                                sourceArray[x, y] = 0;
+                            }
+                        }
+                        arrayToBeAddedTo[x + xOffset, y + yOffset] += valueMultiplier * sourceArray[x, y];
+                        
+                    }
+                }
+            }
+            return arrayToBeAddedTo;
+        }
+    }
+
+    public class EngineController {
+        public LightingSystem lightingSystem;
+        public PhysicsEngine physicsEngine;
+
+        public void initialiseEngines(WorldContext wc) {
+            lightingSystem = new LightingSystem(wc);
+            physicsEngine = new PhysicsEngine(wc);
+        }
+
+    }
+
     public class WorldContext {
+        /*
+         * A class that is passed to all gametime objects. This class contains the arrays that define the world, scaling and any other contextual information required by objects
+         * 
+         * ==========================================
+         * World Context Settings:
+         * 
+         * - initial pixels per block
+         * - pixels per block after world generation
+         */
+
         public int[,] worldArray { get; set; }
         public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
-        public int pixelsPerBlock { get; set; } = 4;
+
+        public List<(int x, int y)> surfaceBlocks { get; set; }
+
+        public int[,] lightArray { get; set; }
+        public int pixelsPerBlock { get; set; } = 4; //Overwritten by the settings file
+
+        int pixelsPerBlockAfterGeneration;
 
         Block[] blockIds = new Block[4];
 
@@ -507,16 +991,57 @@ namespace PixelMidpointDisplacement
 
         public List<PhysicsObject> physicsObjects = new List<PhysicsObject>();
 
+        public EngineController engineController;
+
+        public string runtimePath { get; set; }
+
+        public WorldContext(EngineController engineController) {
+            this.engineController = engineController;
+
+
+            runtimePath = AppDomain.CurrentDomain.BaseDirectory;
+            System.Diagnostics.Debug.WriteLine(runtimePath);
+
+
+            //Load settings from file
+            loadSettings();
+        }
+
+        private void loadSettings() {
+            StreamReader sr = new StreamReader(runtimePath + "Settings\\WorldContextSettings.txt");
+            sr.ReadLine();
+            pixelsPerBlock = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            pixelsPerBlockAfterGeneration = Convert.ToInt32(sr.ReadLine());
+        }
+        
         public void generateWorld((int width, int height) worldDimensions) {
             
             worldArray = new int[worldDimensions.width, worldDimensions.height];
+
+            lightArray = new int[worldDimensions.width, worldDimensions.height];
             
             surfaceHeight = new int[worldDimensions.width];
+
+            surfaceBlocks = new List<(int x, int y)>();
+
+            
+
 
             WorldGenerator worldGenerator = new WorldGenerator(this);
             
             worldArray = worldGenerator.generateWorld(worldDimensions);
             surfaceHeight = worldGenerator.getSurfaceHeight();
+            surfaceBlocks = worldGenerator.getSurfaceBlocks();
+            
+
+            
+            lightArray = engineController.lightingSystem.initialiseLight(worldDimensions, surfaceHeight);
+            engineController.lightingSystem.generateSunlight(worldArray, surfaceHeight);
+            engineController.lightingSystem.calculateSurfaceLight(worldArray, surfaceBlocks);
+
+            updatePixelsPerBlock(pixelsPerBlockAfterGeneration);
+
         }
 
         public void generateIDsFromTextureList(Texture2D[] textureList) {
@@ -611,23 +1136,46 @@ namespace PixelMidpointDisplacement
 
     public class PhysicsEngine
     {
-        //Current bug: When the player collides with a block horizontally, there's a singular frame where they aren't colliding
-        //anymore, allowing this annoying rubberbanding visual. Using a basic visual of the collision, it is considered to be
-        //colliding with the horizontal block. So it's something else weird.
+        /*
+         * A self contained engine that calculates kinematic physics
+         * 
+         * 
+         * =========================================================
+         * Settings file:
+         * 
+         * - blockSizeInMeters
+         * - Gravity
+         */
+
+
         bool helpDebug = false;
-        public double blockSizeInMeters { get; } = 0.6; //The pixel size in meters can be found by taking this value and dividing it by pixelsPerBlock
+        public double blockSizeInMeters { get; set; } //The pixel size in meters can be found by taking this value and dividing it by pixelsPerBlock
         WorldContext wc;
 
         int horizontalOverlapMin = 2;
         int verticalOverlapMin = 2;
 
-        double gravity = 25;
+        double gravity;
 
 
         public PhysicsEngine(WorldContext worldContext)
         {
             wc = worldContext;
+
+
+            //Load txt file and read the values to define important variables
+            loadSettings();
         }
+
+        private void loadSettings() {
+            StreamReader sr = new StreamReader(wc.runtimePath + "Settings\\PhysicsEngineSettings.txt");
+            sr.ReadLine();
+            blockSizeInMeters = Convert.ToDouble(sr.ReadLine());
+            sr.ReadLine();
+            gravity = Convert.ToDouble(sr.ReadLine());
+            sr.Close();
+        }
+
         public void computeAccelerationWithAirResistance(PhysicsObject entity, double timeElapsed)
         {
             int directionalityX;
@@ -922,13 +1470,14 @@ namespace PixelMidpointDisplacement
             worldContext = wc;
         }
 
-        public void updateLocation(double xChange, double yChange)
+        public virtual void updateLocation(double xChange, double yChange)
         {
             x += xChange;
             y += yChange;
+            
         }
 
-        public void onBlockCollision(int blockX, int blockY)
+        public virtual void onBlockCollision(int blockX, int blockY)
         {
 
         }
@@ -940,9 +1489,20 @@ namespace PixelMidpointDisplacement
 
     public class Player : PhysicsObject
     {
-        
+        int emmissiveStrength = 500;
+        int emmissiveMax = 125;
+        int[,] lightMap;
+
+        int initialX = 1000;
+        int initialY = 10;
+
+        double horizontalAcceleration = 4; //The acceleration in m/s^-2
+        double jumpAcceleration = 12;
+
+
         public Player(WorldContext wc) : base(wc)
         {
+            loadSettings();
 
             x = 10.0;
             y = 10.0;
@@ -956,9 +1516,37 @@ namespace PixelMidpointDisplacement
             height = 2;
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
 
+            lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
+            System.Diagnostics.Debug.WriteLine(lightMap.GetLength(0));
+
+            
         }
 
-        public void inputUpdate(double horizontalAcceleration, double jumpAcceleration, double elapsedTime) {
+        private void loadSettings() {
+            StreamReader sr = new StreamReader(worldContext.runtimePath + "Settings\\PlayerSettings.txt");
+            sr.ReadLine();
+            initialX = Convert.ToInt32(sr.ReadLine());
+            initialY = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            kX = Convert.ToDouble(sr.ReadLine());
+            kY = Convert.ToDouble(sr.ReadLine());
+            sr.ReadLine();
+            width = Convert.ToDouble(sr.ReadLine());
+            height = Convert.ToDouble(sr.ReadLine());
+            sr.ReadLine();
+            emmissiveStrength = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            emmissiveMax = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            horizontalAcceleration = Convert.ToDouble(sr.ReadLine());
+            sr.ReadLine();
+            jumpAcceleration = Convert.ToDouble(sr.ReadLine());
+
+
+
+        }
+
+        public void inputUpdate(double elapsedTime) {
             if (Keyboard.GetState().IsKeyDown(Keys.D))
             {
 
@@ -977,13 +1565,30 @@ namespace PixelMidpointDisplacement
             }
             if (Keyboard.GetState().IsKeyDown(Keys.R))
             {
-                x = 10;
-                y = 10;
+                x = initialX;
+                y = initialY;
                 velocityX = 0;
                 velocityY = 0;
             }
-
         }
+        public override void updateLocation(double xChange, double yChange) {
+            int xBlockChange = (int)(Math.Floor((x + xChange) / worldContext.pixelsPerBlock) - Math.Floor(x / worldContext.pixelsPerBlock));
+            int yBlockChange = (int)(Math.Floor((y + yChange) / worldContext.pixelsPerBlock) - Math.Floor(y / worldContext.pixelsPerBlock));
+
+            
+
+            if (xBlockChange >= 1 || xBlockChange <= -1 || yBlockChange >= 1 || yBlockChange <= -1)
+            {
+                worldContext.engineController.lightingSystem.movedLight((int)Math.Floor(((x) / worldContext.pixelsPerBlock)) + collider.Width/(2 * worldContext.pixelsPerBlock), (int)Math.Floor((y) / worldContext.pixelsPerBlock), xBlockChange, yBlockChange, lightMap, emmissiveMax);
+            }
+
+            base.updateLocation(xChange, yChange);
+
+            
+            
+            
+        }
+        
     }
 
     public class Block
@@ -1085,6 +1690,27 @@ namespace PixelMidpointDisplacement
 
     }
 
+    public class BlockThresholdValues {
+        //Higher means more solid
+        public double blockThreshold;
+        public double maximumY;
+        public double decreasePerY;
+        public double maximumThreshold;
+        public double minimumThreshold;
+        //The effect of the absolute y value (from the top of the map) and the relative y value (from the surface)
+        public double absoluteYHeightWeight;
+        public double relativeYHeightWeight;
+
+        public BlockThresholdValues(double blockThreshold, double maximumY, double decreasePerY, double maximumThreshold, double minimumThreshold, double absoluteYHeightWeight, double relativeYHeightWeight) {
+            this.blockThreshold = blockThreshold;
+            this.maximumY = maximumY;
+            this.decreasePerY = decreasePerY;
+            this.maximumThreshold = maximumThreshold;
+            this.minimumThreshold = minimumThreshold;
+            this.absoluteYHeightWeight = absoluteYHeightWeight;
+            this.relativeYHeightWeight = relativeYHeightWeight;
+        }
+    }
     public class PerlinNoise
     {
         List<double[,]> pixelOctaves = new List<double[,]>();
@@ -1498,6 +2124,8 @@ namespace PixelMidpointDisplacement
                             for (int yLocal = y - 1; yLocal <= y + 1; yLocal++)
                             {
                                 if (xLocal >= 0 && yLocal >= 0 && xLocal < blockArray.GetLength(0) && yLocal < blockArray.GetLength(1))
+                                {
+
                                     if (blockArray[xLocal, yLocal] != null)
                                     {
                                         if (blocks.Contains(blockArray[xLocal, yLocal].block))
@@ -1511,13 +2139,13 @@ namespace PixelMidpointDisplacement
                                             blockCount.Add(1);
                                         }
                                     }
+                                }
                             }
                         }
                         if (blocks.Count != 0)
                         {
                             blockArray[x, y] = blockVariables[blockCount.IndexOf(blockCount.Max())];
                         }
-
                     }
                 }
             }
@@ -1526,4 +2154,6 @@ namespace PixelMidpointDisplacement
         }
 
     }
+
+    
 }
