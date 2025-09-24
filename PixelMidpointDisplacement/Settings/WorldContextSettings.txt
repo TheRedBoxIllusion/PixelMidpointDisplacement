@@ -1,4 +1,4 @@
 ﻿initial pixels per block - Impacts world generation									(int)
 4
 pixels per block for runtime - Impacts physics engine and actual gameplay			(int)
-16
+32

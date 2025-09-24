@@ -45,6 +45,8 @@ namespace PixelMidpointDisplacement
         Texture2D playerSprite;
         Texture2D collisionSprite;
 
+        Texture2D blockSpriteSheet;
+
 
         EngineController engineController;
 
@@ -94,28 +96,18 @@ namespace PixelMidpointDisplacement
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 
             ariel = Content.Load<SpriteFont>("ariel");
+            blockSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockSpriteSheet.png");
 
-            //Block Textures
-            Texture2D airTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1); ;
-            Texture2D stoneTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
-            Texture2D blueBlockTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
-            Texture2D crimsonBlockTexture = new Texture2D(_graphics.GraphicsDevice, 1, 1);
-
-            stoneTexture.SetData<Color>(new Color[] { Color.Brown });
-            airTexture.SetData<Color>(new Color[] { Color.White });
-            blueBlockTexture.SetData<Color>(new Color[] { Color.Blue });
-            crimsonBlockTexture.SetData<Color>(new Color[] { Color.Lime });
-
-            worldContext.generateIDsFromTextureList(new Texture2D[]{airTexture, stoneTexture, blueBlockTexture, crimsonBlockTexture});
+            worldContext.generateIDsFromTextureList(new Rectangle[]{new Rectangle(0, 0, 0, 0), new Rectangle(0, 0, 32, 32), new Rectangle(0, 32, 32, 32), new Rectangle(0, 64, 32, 32)});
 
 
             worldContext.generateWorld((400, 800));
-            
 
-            playerSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
+
+            playerSprite = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\Player.png");
             collisionSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
 
-            playerSprite.SetData<Color>(new Color[] { Color.Red });
+            
             collisionSprite.SetData<Color>(new Color[] { Color.Green });
             // TODO: use this.Content to load your game content here
         }
@@ -142,8 +134,10 @@ namespace PixelMidpointDisplacement
                     //General Physics simulations
                     //Order: Acceleration, velocity then location
                     worldContext.physicsObjects[i].isOnGround = false;
+                    
                     engineController.physicsEngine.addGravity(worldContext.physicsObjects[i]);
                     engineController.physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                    
                     engineController.physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
                     engineController.physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
                     engineController.physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
@@ -246,7 +240,7 @@ namespace PixelMidpointDisplacement
             GraphicsDevice.Clear(Color.CornflowerBlue);
             int[,] tempWorldArray = worldContext.worldArray;
 
-            _spriteBatch.Begin();
+            _spriteBatch.Begin(SpriteSortMode.Deferred, null, SamplerState.PointClamp, null, null, null, null);
 
             
             //Draw the screen based on the visible blocks
@@ -262,7 +256,9 @@ namespace PixelMidpointDisplacement
                             lightValue = 255;
                         }
                             Color lightLevel = new Color(lightValue, lightValue, lightValue);
-                            _spriteBatch.Draw(worldContext.getBlockFromID(tempWorldArray[x, y]).texture, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), lightLevel);
+                            int blockID = (int)((byte)((tempWorldArray[x,y] >> 8) & 0xFF) | (byte)((tempWorldArray[x, y]) & 0xFF));
+                        Rectangle sourceRect = worldContext.getBlockFromID(blockID).textureSourceRectangle;//worldContext.getBlockFromID(blockID).getTexture(tempWorldArray[x,y]);
+                            _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), sourceRect, lightLevel);
                         
                     }
                 }
@@ -290,8 +286,9 @@ namespace PixelMidpointDisplacement
                 _spriteBatch.DrawString(ariel, debugInfo, new Vector2(_graphics.GraphicsDevice.Viewport.Width / 2, 20), Color.BlueViolet);
                 
             }
-            _spriteBatch.Draw(playerSprite, new Rectangle((int)player.x + worldContext.screenSpaceOffset.x, (int)player.y + worldContext.screenSpaceOffset.y, (int)(player.width * worldContext.pixelsPerBlock), (int)(player.height * worldContext.pixelsPerBlock)), Color.White);
-
+            
+                _spriteBatch.Draw(playerSprite, new Rectangle((int)player.x + worldContext.screenSpaceOffset.x, (int)player.y + worldContext.screenSpaceOffset.y,  (int)(player.width * worldContext.pixelsPerBlock), (int)(player.height * worldContext.pixelsPerBlock)), Color.White);
+            
 
             //drawCollisionBox();
 
@@ -882,10 +879,9 @@ namespace PixelMidpointDisplacement
                 {
                     newLightMap[x, y] = 0;
                 }
-                
             }
 
-           
+            
             int addAtX = 0;
             int addAtY = 0;
             int subtractAtX = 0;
@@ -975,6 +971,12 @@ namespace PixelMidpointDisplacement
          * - pixels per block after world generation
          */
 
+        /*
+         *  The worlrd array is an integer containing block data as follows: 
+         *  2 bytes store block ID (More than we really need, but having 2^16 possible IDs will be useful)
+         *  2 bytes can store individual data such as texture variation (grass for example can use 3 bits to store 
+         */
+
         public int[,] worldArray { get; set; }
         public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
 
@@ -1044,11 +1046,12 @@ namespace PixelMidpointDisplacement
 
         }
 
-        public void generateIDsFromTextureList(Texture2D[] textureList) {
-            blockIds[0] = new Block(textureList[0]);
-            blockIds[1] = new Block(textureList[1]);
-            blockIds[2] = new Block(textureList[2]);
-            blockIds[3] = new Block(textureList[3]);
+        public void generateIDsFromTextureList(Rectangle[] textureSourceList) {
+            blockIds[0] = new Block(textureSourceList[0]); //Air block
+            blockIds[1] = new Block(textureSourceList[1]); //Stone block
+            blockIds[2] = new Block(textureSourceList[3]); //Dirt block
+            blockIds[3] = new GrassBlock(textureSourceList[2]); //Grass block
+            
         }
 
         public Block getBlockFromID(int ID) {
@@ -1269,6 +1272,7 @@ namespace PixelMidpointDisplacement
                                     if (Math.Sign(collisionNormal.y) > 0)
                                     {
                                         entity.isOnGround = true;
+                                        
                                     }
 
                                     if (Math.Sign(collisionNormal.y) > 0)
@@ -1468,6 +1472,8 @@ namespace PixelMidpointDisplacement
             collider = new Rectangle(0, 0, wc.pixelsPerBlock, wc.pixelsPerBlock);
 
             worldContext = wc;
+
+            System.Diagnostics.Debug.WriteLine("Based?");
         }
 
         public virtual void updateLocation(double xChange, double yChange)
@@ -1493,6 +1499,8 @@ namespace PixelMidpointDisplacement
         int emmissiveMax = 125;
         int[,] lightMap;
 
+        public int playerDirection { get; set; }
+
         int initialX = 1000;
         int initialY = 10;
 
@@ -1504,57 +1512,50 @@ namespace PixelMidpointDisplacement
         {
             loadSettings();
 
-            x = 10.0;
-            y = 10.0;
-            //It's weird because k is unitless, however the fact that I'm in the world of pixels/second means that realistic drag coefficients don't work very well. 
-            //I think it's because v^2 has a massive change with the pixel to block ratio. My math's is probably just wrong, so I'll merely account for it by using unrealistic numbers
-            kX = 8;
-            kY = 0.05;
-            
-
-            width = 0.9;
-            height = 2;
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
 
             lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
-            System.Diagnostics.Debug.WriteLine(lightMap.GetLength(0));
 
-            
+            System.Diagnostics.Debug.WriteLine(initialX);
+            System.Diagnostics.Debug.WriteLine(x);
         }
 
         private void loadSettings() {
             StreamReader sr = new StreamReader(worldContext.runtimePath + "Settings\\PlayerSettings.txt");
             sr.ReadLine();
-            initialX = Convert.ToInt32(sr.ReadLine());
-            initialY = Convert.ToInt32(sr.ReadLine());
+            initialX = Convert.ToInt32(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(initialX);
+            initialY = Convert.ToInt32(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(initialY);
+            x = initialX;
+            y = initialY;
             sr.ReadLine();
-            kX = Convert.ToDouble(sr.ReadLine());
-            kY = Convert.ToDouble(sr.ReadLine());
+            kX = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(kX);
+            kY = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(kY);
             sr.ReadLine();
-            width = Convert.ToDouble(sr.ReadLine());
-            height = Convert.ToDouble(sr.ReadLine());
+            width = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(width);
+            height = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(height);
             sr.ReadLine();
-            emmissiveStrength = Convert.ToInt32(sr.ReadLine());
+            emmissiveStrength = Convert.ToInt32(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(emmissiveStrength);
             sr.ReadLine();
             emmissiveMax = Convert.ToInt32(sr.ReadLine());
             sr.ReadLine();
-            horizontalAcceleration = Convert.ToDouble(sr.ReadLine());
+            horizontalAcceleration = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(horizontalAcceleration);
             sr.ReadLine();
-            jumpAcceleration = Convert.ToDouble(sr.ReadLine());
-
-
-
+            jumpAcceleration = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(jumpAcceleration);
         }
 
         public void inputUpdate(double elapsedTime) {
             if (Keyboard.GetState().IsKeyDown(Keys.D))
             {
 
-                accelerationX += horizontalAcceleration / elapsedTime;
+                accelerationX += horizontalAcceleration;// / elapsedTime;
+                playerDirection = 1;
+                System.Diagnostics.Debug.WriteLine(horizontalAcceleration);
             }
             if (Keyboard.GetState().IsKeyDown(Keys.A))
             {
-                accelerationX -= horizontalAcceleration / elapsedTime;
+                accelerationX -= horizontalAcceleration;// / elapsedTime;
+                playerDirection = -1;
+                System.Diagnostics.Debug.WriteLine(playerDirection);
             }
             if (Keyboard.GetState().IsKeyDown(Keys.W))
             {
@@ -1583,27 +1584,23 @@ namespace PixelMidpointDisplacement
             }
 
             base.updateLocation(xChange, yChange);
-
-            
-            
-            
         }
         
     }
 
     public class Block
     {
-        public Texture2D texture;
-        int emmissiveStrength;
+        public Rectangle textureSourceRectangle;
+        public int emmissiveStrength;
         public int ID;
 
-        public Block(Texture2D texture)
+        public Block(Rectangle textureSourceRectangle)
         {
-            this.texture = texture;
+            this.textureSourceRectangle = textureSourceRectangle;
         }
-        public Block(Texture2D texture, int emmissiveStrength)
+        public Block(Rectangle textureSourceRectangle, int emmissiveStrength)
         {
-            this.texture = texture;
+            this.textureSourceRectangle = textureSourceRectangle;
             this.emmissiveStrength = emmissiveStrength;
         }
         public Block(int ID) {
@@ -1612,9 +1609,109 @@ namespace PixelMidpointDisplacement
         
         public Block(Block b)
         {
-            texture = b.texture;
+            textureSourceRectangle = b.textureSourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
+        }
+
+        public virtual Rectangle getTexture(int blockData) {
+            return textureSourceRectangle;
+        }
+
+        public virtual void setupInitialData(int[,] worldArray, (int x, int y) blockLocation) { }
+    }
+
+    public class GrassBlock : Block {
+
+        
+        public GrassBlock(Rectangle textureSourceRectangle) : base(textureSourceRectangle)
+        {
+            this.textureSourceRectangle = textureSourceRectangle;
+        }
+        public GrassBlock(Rectangle textureSourceRectangle, int emmissiveStrength) : base (textureSourceRectangle, emmissiveStrength)
+        {
+            this.textureSourceRectangle = textureSourceRectangle;
+            this.emmissiveStrength = emmissiveStrength;
+        }
+        public GrassBlock(int ID) : base (ID)
+        {
+            this.ID = ID;
+        }
+
+        public GrassBlock(Block b) : base (b)
+        {
+            textureSourceRectangle = b.textureSourceRectangle;
+            emmissiveStrength = b.emmissiveStrength;
+            ID = b.ID;
+        }
+
+        public override Rectangle getTexture(int blockData)
+        {
+            //Get the third byte, then get the first 3 binary digits, convert them to an integer, then based on that integer, determine the appropritate source rectangle, which will be an offset of the initial source rectangle. The x and y will be modulous/remainder of the int  
+            int x = 0;
+            int y = 0;
+
+            //Get the data that corrosponds to the texture;
+            byte textureData = (byte)((blockData >> 16) & 0xFF);
+
+            //get the first 3 bits, and convert them to an int that defines the index within the grid of grass textures;
+            string binaryIndex = ("00000" + ((textureData >> 2) & 1) + ((textureData >> 1) & 1) + ((textureData) & 1));
+            int index = Convert.ToInt32(binaryIndex, 2);
+
+            System.Diagnostics.Debug.WriteLine(index);
+
+            return new Rectangle(textureSourceRectangle.X + 32 * x, textureSourceRectangle.Y + 32 * y, 32, 32);
+        }
+
+        public override void setupInitialData(int[,] worldArray, (int x, int y) blockLocation)
+        {
+            //Set the appropriate texture for the block. If up and right is air, right corner, if up and left, left corner, if up, then up, if left, then left &c. should be 8 different blocks, so 3 bits 0-7
+            //Air by default has no data stored in it. for now...
+            bool emptyAbove = false;
+            
+            bool emptyRight = false;
+            bool emptyLeft = false;
+            if (worldArray[blockLocation.x, blockLocation.y - 1] == 0) {
+                emptyAbove = true;
+            }
+            
+            if (worldArray[blockLocation.x-1, blockLocation.y ] == 0)
+            {
+                emptyLeft = true;
+            }
+            if (worldArray[blockLocation.x + 1, blockLocation.y] == 0)
+            {
+                emptyRight = true;
+            }
+
+            //The sprite sheet will follow the order: |, |-, -, -|, |
+            int data = 0;
+            if (emptyLeft && !emptyAbove) {
+                data = 0;
+            }
+            else if (emptyAbove) {
+                if (emptyLeft)
+                {
+                    data = 1;
+                }
+                else if (emptyRight)
+                {
+                    data = 3;
+                }
+                else {
+                    data = 2;
+                }
+            }
+            if (emptyRight && !emptyAbove) {
+                data = 4;
+            }
+
+            System.Diagnostics.Debug.WriteLine(data + " was the initially set data");
+
+            //Because this function will set all the data, we don't have to account for the current
+            byte byteData = (byte)(data & 0xFF);
+            worldArray[blockLocation.x, blockLocation.y] |= byteData << 16;
+
         }
     }
 
@@ -2086,7 +2183,7 @@ namespace PixelMidpointDisplacement
                                     {
                                         if (blocks.Contains(blockArray[xLocal, yLocal]))
                                         {
-                                            blockCount[blocks.FindIndex(u => u.texture == blockArray[xLocal, yLocal].texture)] += 1;
+                                            blockCount[blocks.IndexOf(blockArray[xLocal, yLocal])] += 1;
                                         }
                                         else
                                         {
@@ -2130,7 +2227,7 @@ namespace PixelMidpointDisplacement
                                     {
                                         if (blocks.Contains(blockArray[xLocal, yLocal].block))
                                         {
-                                            blockCount[blocks.FindIndex(u => u.texture == blockArray[xLocal, yLocal].block.texture)] += 1;
+                                            blockCount[blocks.IndexOf(blockArray[xLocal, yLocal].block)] += 1;
                                         }
                                         else
                                         {

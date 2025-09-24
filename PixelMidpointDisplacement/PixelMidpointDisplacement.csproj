@@ -11,6 +11,8 @@
     <ApplicationIcon>Icon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <None Remove="Content\blockSpriteSheet.png" />
+    <None Remove="Content\Player.png" />
     <None Remove="Icon.ico" />
     <None Remove="Icon.bmp" />
     <None Remove="Settings\LightingSystemSettings.txt" />
@@ -19,6 +21,12 @@
     <None Remove="Settings\WorldContextSettings.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Content\blockSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\Player.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Settings\LightingSystemSettings.txt">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>

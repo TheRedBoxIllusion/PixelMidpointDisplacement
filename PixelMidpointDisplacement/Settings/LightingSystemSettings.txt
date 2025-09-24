@@ -12,4 +12,4 @@ sunlight distance scalar																						(double)
 emmissive blocks distance scalar - A lower value means the light penetrates further								(double)
 0.2
 Accumulate light																								(bool)
-false
+true

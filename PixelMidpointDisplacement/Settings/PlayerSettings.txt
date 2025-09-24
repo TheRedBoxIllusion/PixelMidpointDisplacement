@@ -5,13 +5,13 @@ kX & kY: The coefficient of friction for the player. As there is no ground frict
 8
 0.05
 width and breadth: This defines the dimensions of the player in terms of blocks.																																				(double)
-0.9
-2
+1.5
+3
 Emmissive strength: How brightly the player emmits light. The brighter it is the further it will effect																															(int)
 500
 Max emmissive strength: The maximum value that the light emmitted by the player can reach. This is useful for only lighting up dark areas a certain amount																		(int)
 125
 Horizontal acceleration: This is how much the player accelerates sideways when there is an input. In ms^-2																														(double)
-4
+600
 Jump acceleration: How much acceleration the player produces when they jump																																						(double)
 12
