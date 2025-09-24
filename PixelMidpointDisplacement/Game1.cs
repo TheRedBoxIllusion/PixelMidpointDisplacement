@@ -238,7 +238,7 @@ namespace PixelMidpointDisplacement
         protected override void Draw(GameTime gameTime)
         {
             GraphicsDevice.Clear(Color.CornflowerBlue);
-            int[,] tempWorldArray = worldContext.worldArray;
+            Block[,] tempWorldArray = worldContext.worldArray;
 
             _spriteBatch.Begin(SpriteSortMode.Deferred, null, SamplerState.PointClamp, null, null, null, null);
 
@@ -256,9 +256,11 @@ namespace PixelMidpointDisplacement
                             lightValue = 255;
                         }
                             Color lightLevel = new Color(lightValue, lightValue, lightValue);
-                            int blockID = (int)((byte)((tempWorldArray[x,y] >> 8) & 0xFF) | (byte)((tempWorldArray[x, y]) & 0xFF));
-                        Rectangle sourceRect = worldContext.getBlockFromID(blockID).textureSourceRectangle;//worldContext.getBlockFromID(blockID).getTexture(tempWorldArray[x,y]);
-                            _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), sourceRect, lightLevel);
+                        if (tempWorldArray[x, y] == null) {
+                            System.Diagnostics.Debug.WriteLine(x + ", " + y);
+                            System.Diagnostics.Debug.WriteLine(tempWorldArray.GetLength(0) + ", " + tempWorldArray.GetLength(1));
+                        }
+                            _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), tempWorldArray[x,y].sourceRectangle, lightLevel);
                         
                     }
                 }
@@ -313,7 +315,7 @@ namespace PixelMidpointDisplacement
                     Rectangle entityCollider = new Rectangle((int)player.x, (int)player.y, player.collider.Width, player.collider.Height);
 
                     Rectangle blockRect = new Rectangle(x * p, y * p, p, p);
-                    if (blockRect.Intersects(entityCollider) && worldContext.worldArray[x, y] != 0)
+                    if (blockRect.Intersects(entityCollider) && worldContext.worldArray[x, y].ID != 0)
                     {
                         _spriteBatch.Draw(collisionSprite, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, p, p), Color.White);
                     }
@@ -380,11 +382,12 @@ namespace PixelMidpointDisplacement
         double vectorAngleOffset = (Math.PI);
 
         //SeededBrownianMotion Variables:
-        BlockGenerationVariables[] ores = {
-        new BlockGenerationVariables(1, new Block(1), 8, 360),
-        new BlockGenerationVariables(0.1, new Block(2), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
-        new BlockGenerationVariables(0.4, new Block(3), 2, 40)
-        }; //n-1 where n is the number of blockIds
+        BlockGenerationVariables[] ores = new BlockGenerationVariables[]{
+            new BlockGenerationVariables(1, new Block(1), 8, 360),
+            new BlockGenerationVariables(0.1, new Block(2), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
+            new BlockGenerationVariables(0.4, new Block(3), 2, 40)
+            };
+        //n-1 where n is the number of blockIds
         int maxAttempts = 15;
 
     public WorldGenerator(WorldContext wc) {
@@ -977,7 +980,7 @@ namespace PixelMidpointDisplacement
          *  2 bytes can store individual data such as texture variation (grass for example can use 3 bits to store 
          */
 
-        public int[,] worldArray { get; set; }
+        public Block[,] worldArray { get; set; }
         public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
 
         public List<(int x, int y)> surfaceBlocks { get; set; }
@@ -1019,7 +1022,9 @@ namespace PixelMidpointDisplacement
         
         public void generateWorld((int width, int height) worldDimensions) {
             
-            worldArray = new int[worldDimensions.width, worldDimensions.height];
+            worldArray = new Block[worldDimensions.width, worldDimensions.height];
+
+            int[,] intWorldArray = new int[worldDimensions.width, worldDimensions.height];
 
             lightArray = new int[worldDimensions.width, worldDimensions.height];
             
@@ -1032,25 +1037,33 @@ namespace PixelMidpointDisplacement
 
             WorldGenerator worldGenerator = new WorldGenerator(this);
             
-            worldArray = worldGenerator.generateWorld(worldDimensions);
+            intWorldArray = worldGenerator.generateWorld(worldDimensions);
             surfaceHeight = worldGenerator.getSurfaceHeight();
             surfaceBlocks = worldGenerator.getSurfaceBlocks();
             
 
             
             lightArray = engineController.lightingSystem.initialiseLight(worldDimensions, surfaceHeight);
-            engineController.lightingSystem.generateSunlight(worldArray, surfaceHeight);
-            engineController.lightingSystem.calculateSurfaceLight(worldArray, surfaceBlocks);
+            engineController.lightingSystem.generateSunlight(intWorldArray, surfaceHeight);
+            engineController.lightingSystem.calculateSurfaceLight(intWorldArray, surfaceBlocks);
+
+
+            for (int x = 0; x < worldArray.GetLength(0); x++) {
+                for (int y = 0; y < worldArray.GetLength(1); y++)
+                {
+                    worldArray[x, y] = new Block(blockIds[intWorldArray[x,y]]);
+                }
+            }
 
             updatePixelsPerBlock(pixelsPerBlockAfterGeneration);
 
         }
 
         public void generateIDsFromTextureList(Rectangle[] textureSourceList) {
-            blockIds[0] = new Block(textureSourceList[0]); //Air block
-            blockIds[1] = new Block(textureSourceList[1]); //Stone block
-            blockIds[2] = new Block(textureSourceList[3]); //Dirt block
-            blockIds[3] = new GrassBlock(textureSourceList[2]); //Grass block
+            blockIds[0] = new Block(textureSourceList[0], 0); //Air block
+            blockIds[1] = new Block(textureSourceList[1], 1); //Stone block
+            blockIds[2] = new Block(textureSourceList[3], 2); //Dirt block
+            blockIds[3] = new GrassBlock(textureSourceList[2], 3); //Grass block
             
         }
 
@@ -1066,15 +1079,15 @@ namespace PixelMidpointDisplacement
         }
         
         public void deleteBlock(int x, int y) {
-            if (worldArray[x, y] != 0)
+            if (worldArray[x, y].ID != 0)
             {
-                worldArray[x, y] = 0;
+                worldArray[x, y] = new Block(blockIds[0]);
             }
         }
         public void addBlock(int x, int y, int ID) {
-            if (worldArray[x, y] == 0)
+            if (worldArray[x, y].ID == 0)
             {
-                worldArray[x, y] = ID;
+                worldArray[x, y] = new Block(blockIds[ID]);
             }
         }
     }
@@ -1247,7 +1260,7 @@ namespace PixelMidpointDisplacement
             int entityGridHeight = (int)Math.Ceiling((double)entity.collider.Height / wc.pixelsPerBlock);
 
             Rectangle entityCollider = new Rectangle((int)entity.x, (int)entity.y, entity.collider.Width, entity.collider.Height);
-            int[,] worldArray = wc.worldArray; //A temporary storage of an array to reduce external function calls
+            Block[,] worldArray = wc.worldArray; //A temporary storage of an array to reduce external function calls
 
             for (int x = entityLocationInGridX - 1; x < entityLocationInGridX + entityGridWidth + 1; x++)
             { //A range of x values on either side of the outer bounds of the entity
@@ -1255,7 +1268,7 @@ namespace PixelMidpointDisplacement
                 {
                     if (x >= 0 && y >= 0 && x < worldArray.GetLength(0) && y < worldArray.GetLength(1))
                     {
-                        if (worldArray[x, y] != 0) //In game implementation, air can either be null or have a special 'colliderless' block type 
+                        if (worldArray[x, y].ID != 0) //In game implementation, air can either be null or have a special 'colliderless' block type 
                         {
                             Rectangle blockRect = new Rectangle(x * wc.pixelsPerBlock, y * wc.pixelsPerBlock, wc.pixelsPerBlock, wc.pixelsPerBlock);
                             if (blockRect.Intersects(entityCollider))
@@ -1590,32 +1603,31 @@ namespace PixelMidpointDisplacement
 
     public class Block
     {
-        public Rectangle textureSourceRectangle;
+        public Rectangle sourceRectangle;
         public int emmissiveStrength;
         public int ID;
 
-        public Block(Rectangle textureSourceRectangle)
+        public Block(Rectangle textureSourceRectangle, int ID)
         {
-            this.textureSourceRectangle = textureSourceRectangle;
+            this.sourceRectangle = textureSourceRectangle;
+            this.ID = ID;
         }
-        public Block(Rectangle textureSourceRectangle, int emmissiveStrength)
+        public Block(Rectangle textureSourceRectangle, int emmissiveStrength, int ID)
         {
-            this.textureSourceRectangle = textureSourceRectangle;
+            this.sourceRectangle = textureSourceRectangle;
             this.emmissiveStrength = emmissiveStrength;
+            this.ID = ID;
         }
         public Block(int ID) {
             this.ID = ID;
+            
         }
         
         public Block(Block b)
         {
-            textureSourceRectangle = b.textureSourceRectangle;
+            sourceRectangle = b.sourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
-        }
-
-        public virtual Rectangle getTexture(int blockData) {
-            return textureSourceRectangle;
         }
 
         public virtual void setupInitialData(int[,] worldArray, (int x, int y) blockLocation) { }
@@ -1624,13 +1636,13 @@ namespace PixelMidpointDisplacement
     public class GrassBlock : Block {
 
         
-        public GrassBlock(Rectangle textureSourceRectangle) : base(textureSourceRectangle)
+        public GrassBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
         {
-            this.textureSourceRectangle = textureSourceRectangle;
+            this.sourceRectangle = textureSourceRectangle;
         }
-        public GrassBlock(Rectangle textureSourceRectangle, int emmissiveStrength) : base (textureSourceRectangle, emmissiveStrength)
+        public GrassBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base (textureSourceRectangle, emmissiveStrength, ID)
         {
-            this.textureSourceRectangle = textureSourceRectangle;
+            this.sourceRectangle = textureSourceRectangle;
             this.emmissiveStrength = emmissiveStrength;
         }
         public GrassBlock(int ID) : base (ID)
@@ -1640,78 +1652,9 @@ namespace PixelMidpointDisplacement
 
         public GrassBlock(Block b) : base (b)
         {
-            textureSourceRectangle = b.textureSourceRectangle;
+            sourceRectangle = b.sourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
-        }
-
-        public override Rectangle getTexture(int blockData)
-        {
-            //Get the third byte, then get the first 3 binary digits, convert them to an integer, then based on that integer, determine the appropritate source rectangle, which will be an offset of the initial source rectangle. The x and y will be modulous/remainder of the int  
-            int x = 0;
-            int y = 0;
-
-            //Get the data that corrosponds to the texture;
-            byte textureData = (byte)((blockData >> 16) & 0xFF);
-
-            //get the first 3 bits, and convert them to an int that defines the index within the grid of grass textures;
-            string binaryIndex = ("00000" + ((textureData >> 2) & 1) + ((textureData >> 1) & 1) + ((textureData) & 1));
-            int index = Convert.ToInt32(binaryIndex, 2);
-
-            System.Diagnostics.Debug.WriteLine(index);
-
-            return new Rectangle(textureSourceRectangle.X + 32 * x, textureSourceRectangle.Y + 32 * y, 32, 32);
-        }
-
-        public override void setupInitialData(int[,] worldArray, (int x, int y) blockLocation)
-        {
-            //Set the appropriate texture for the block. If up and right is air, right corner, if up and left, left corner, if up, then up, if left, then left &c. should be 8 different blocks, so 3 bits 0-7
-            //Air by default has no data stored in it. for now...
-            bool emptyAbove = false;
-            
-            bool emptyRight = false;
-            bool emptyLeft = false;
-            if (worldArray[blockLocation.x, blockLocation.y - 1] == 0) {
-                emptyAbove = true;
-            }
-            
-            if (worldArray[blockLocation.x-1, blockLocation.y ] == 0)
-            {
-                emptyLeft = true;
-            }
-            if (worldArray[blockLocation.x + 1, blockLocation.y] == 0)
-            {
-                emptyRight = true;
-            }
-
-            //The sprite sheet will follow the order: |, |-, -, -|, |
-            int data = 0;
-            if (emptyLeft && !emptyAbove) {
-                data = 0;
-            }
-            else if (emptyAbove) {
-                if (emptyLeft)
-                {
-                    data = 1;
-                }
-                else if (emptyRight)
-                {
-                    data = 3;
-                }
-                else {
-                    data = 2;
-                }
-            }
-            if (emptyRight && !emptyAbove) {
-                data = 4;
-            }
-
-            System.Diagnostics.Debug.WriteLine(data + " was the initially set data");
-
-            //Because this function will set all the data, we don't have to account for the current
-            byte byteData = (byte)(data & 0xFF);
-            worldArray[blockLocation.x, blockLocation.y] |= byteData << 16;
-
         }
     }
 
