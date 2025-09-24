@@ -383,8 +383,8 @@ namespace PixelMidpointDisplacement
 
         //SeededBrownianMotion Variables:
         BlockGenerationVariables[] ores = new BlockGenerationVariables[]{
-            new BlockGenerationVariables(1, new Block(1), 8, 360),
-            new BlockGenerationVariables(0.1, new Block(2), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
+            new BlockGenerationVariables(1, new Block(2), 8, 360),
+            new BlockGenerationVariables(0.1, new Block(1), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
             new BlockGenerationVariables(0.4, new Block(3), 2, 40)
             };
         //n-1 where n is the number of blockIds
@@ -1051,7 +1051,9 @@ namespace PixelMidpointDisplacement
             for (int x = 0; x < worldArray.GetLength(0); x++) {
                 for (int y = 0; y < worldArray.GetLength(1); y++)
                 {
-                    worldArray[x, y] = new Block(blockIds[intWorldArray[x,y]]);
+                    Block b = new Block(blockIds[intWorldArray[x,y]]);
+                    b.setupInitialData(intWorldArray, (x, y));
+                    worldArray[x, y] = b;
                 }
             }
 
@@ -1064,7 +1066,6 @@ namespace PixelMidpointDisplacement
             blockIds[1] = new Block(textureSourceList[1], 1); //Stone block
             blockIds[2] = new Block(textureSourceList[3], 2); //Dirt block
             blockIds[3] = new GrassBlock(textureSourceList[2], 3); //Grass block
-            
         }
 
         public Block getBlockFromID(int ID) {
@@ -1655,6 +1656,45 @@ namespace PixelMidpointDisplacement
             sourceRectangle = b.sourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
+        }
+
+        public override void setupInitialData(int[,] worldArray, (int x, int y) blockLocation)
+        {
+            bool emptyAbove = false;
+            bool emptyRight = false;
+            bool emptyLeft = false;
+
+            int xOffset = 2; //Set it to the default upwards block
+            //sprite sheet is as follows: |, |-, _, -|, |
+
+            if (worldArray[blockLocation.x, blockLocation.y - 1] == 0) {
+                emptyAbove = true;
+            }
+            if(worldArray[blockLocation.x - 1, blockLocation.y] == 0) {
+                emptyLeft = true;    
+            }
+            if (worldArray[blockLocation.x + 1, blockLocation.y] == 0)
+            {
+                emptyRight = true;
+            }
+            if (emptyRight && !emptyLeft && !emptyAbove)
+            {
+                xOffset = 4;
+            }
+            else if (emptyLeft && !emptyRight && !emptyAbove) {
+                xOffset = 0;
+            }
+
+            if (emptyAbove) {
+                if (emptyRight) {
+                    xOffset = 3;
+                }
+                else if (emptyLeft) {
+                    xOffset = 1;    
+                }
+            }
+
+            sourceRectangle = new Rectangle(sourceRectangle.X + xOffset * 32, sourceRectangle.Y, 32, 32);
         }
     }
 
