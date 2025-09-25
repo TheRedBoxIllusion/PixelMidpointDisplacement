@@ -33,6 +33,15 @@ using Vector2 = Microsoft.Xna.Framework.Vector2;
  *      - Determined by the screen offset (or the player position), the pixelsPerBlock and the window size
  */
 
+/*
+ * Block IDs for reference:
+ * Air
+ * Stone
+ * Dirt
+ * Grass
+ 
+ */
+
 namespace PixelMidpointDisplacement
 {
     public class Game1 : Game
@@ -383,9 +392,9 @@ namespace PixelMidpointDisplacement
 
         //SeededBrownianMotion Variables:
         BlockGenerationVariables[] ores = new BlockGenerationVariables[]{
-            new BlockGenerationVariables(1, new Block(2), 8, 360),
+            new BlockGenerationVariables(1, new Block(2), 8, 360), //Dirt
             new BlockGenerationVariables(0.1, new Block(1), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
-            new BlockGenerationVariables(0.4, new Block(3), 2, 40)
+            new BlockGenerationVariables(0.3, new Block(1), 6, 24)
             };
         //n-1 where n is the number of blockIds
         int maxAttempts = 15;
@@ -431,9 +440,9 @@ namespace PixelMidpointDisplacement
             }
 
 
-            List<(double, double)> initialPoints = new List<(double, double)>() { (0, 900), ((worldContext.pixelsPerBlock * worldArray.GetLength(0) / 2), 100), (worldContext.pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
+            List<(double, double)> initialPoints = new List<(double, double)>() { (0, 900), (worldContext.pixelsPerBlock * 0.25 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * 0.5 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock *  0.75 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
 
-            MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 400, 1, 10, 70);
+            MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 50, 1.2, 12, 30);
 
             pointsToBlocks(mda.midpointAlgorithm());
             
@@ -443,6 +452,8 @@ namespace PixelMidpointDisplacement
             combineAlgorithms(blockThresholdVariables);
 
             calculateSurfaceBlocks();
+
+            convertDirtToGrass();
 
             return worldArray;
         }
@@ -513,10 +524,7 @@ namespace PixelMidpointDisplacement
             {
                 
                     surfaceBlocks.Add((x, surfaceHeight[x]));
-                    if (x == 1)
-                    {
-                        System.Diagnostics.Debug.WriteLine(surfaceHeight[x]);
-                    }
+                    
                     int y = surfaceHeight[x] + 1;
                     bool isStillSurface = true;
                     while (isStillSurface)
@@ -577,6 +585,19 @@ namespace PixelMidpointDisplacement
                 return false;
             }
 
+        }
+
+        private void convertDirtToGrass() {
+            for (int i = 0; i < surfaceBlocks.Count; i++) {
+                if (surfaceBlocks[i].x > 0 && surfaceBlocks[i].y > 0 && surfaceBlocks[i].x < worldArray.GetLength(0)-1 && surfaceBlocks[i].y < worldArray.GetLength(1) - 1)
+                   
+                if (worldArray[surfaceBlocks[i].x - 1, surfaceBlocks[i].y] == 0 || worldArray[surfaceBlocks[i].x + 1, surfaceBlocks[i].y] == 0 || worldArray[surfaceBlocks[i].x, surfaceBlocks[i].y - 1] == 0) {
+                    //If the block is dirt and on the surface, convert it to grass
+                    if (worldArray[surfaceBlocks[i].x, surfaceBlocks[i].y] == 2) {
+                        worldArray[surfaceBlocks[i].x, surfaceBlocks[i].y] = 3; 
+                    }
+                }
+            }
         }
 
         //Code from the perlin noise caves:
@@ -1005,7 +1026,7 @@ namespace PixelMidpointDisplacement
 
 
             runtimePath = AppDomain.CurrentDomain.BaseDirectory;
-            System.Diagnostics.Debug.WriteLine(runtimePath);
+            
 
 
             //Load settings from file
@@ -1051,9 +1072,7 @@ namespace PixelMidpointDisplacement
             for (int x = 0; x < worldArray.GetLength(0); x++) {
                 for (int y = 0; y < worldArray.GetLength(1); y++)
                 {
-                    Block b = new Block(blockIds[intWorldArray[x,y]]);
-                    b.setupInitialData(intWorldArray, (x, y));
-                    worldArray[x, y] = b;
+                    generateInstanceFromID(intWorldArray, intWorldArray[x,y], x,  y);
                 }
             }
 
@@ -1061,11 +1080,23 @@ namespace PixelMidpointDisplacement
 
         }
 
+        public void generateInstanceFromID(int[,] intArray, int ID, int x, int y) {
+            if (ID == 0 || ID == 1 || ID == 2)
+            {
+                worldArray[x, y] = new Block(blockIds[ID]);
+            }
+            else if (ID == 3) {
+                worldArray[x, y] = new GrassBlock(blockIds[ID]);
+            }
+
+            worldArray[x, y].setupInitialData(intArray, (x, y));
+        }
+
         public void generateIDsFromTextureList(Rectangle[] textureSourceList) {
             blockIds[0] = new Block(textureSourceList[0], 0); //Air block
             blockIds[1] = new Block(textureSourceList[1], 1); //Stone block
-            blockIds[2] = new Block(textureSourceList[3], 2); //Dirt block
-            blockIds[3] = new GrassBlock(textureSourceList[2], 3); //Grass block
+            blockIds[2] = new Block(textureSourceList[2], 2); //Dirt block
+            blockIds[3] = new GrassBlock(textureSourceList[3], 3);//Grass block
         }
 
         public Block getBlockFromID(int ID) {
@@ -1487,7 +1518,7 @@ namespace PixelMidpointDisplacement
 
             worldContext = wc;
 
-            System.Diagnostics.Debug.WriteLine("Based?");
+            
         }
 
         public virtual void updateLocation(double xChange, double yChange)
@@ -1530,31 +1561,30 @@ namespace PixelMidpointDisplacement
 
             lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
 
-            System.Diagnostics.Debug.WriteLine(initialX);
-            System.Diagnostics.Debug.WriteLine(x);
+            
         }
 
         private void loadSettings() {
             StreamReader sr = new StreamReader(worldContext.runtimePath + "Settings\\PlayerSettings.txt");
             sr.ReadLine();
-            initialX = Convert.ToInt32(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(initialX);
-            initialY = Convert.ToInt32(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(initialY);
+            initialX = Convert.ToInt32(sr.ReadLine()); 
+            initialY = Convert.ToInt32(sr.ReadLine()); 
             x = initialX;
             y = initialY;
             sr.ReadLine();
-            kX = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(kX);
-            kY = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(kY);
+            kX = Convert.ToDouble(sr.ReadLine()); 
+            kY = Convert.ToDouble(sr.ReadLine()); 
             sr.ReadLine();
-            width = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(width);
-            height = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(height);
+            width = Convert.ToDouble(sr.ReadLine()); 
+            height = Convert.ToDouble(sr.ReadLine()); 
             sr.ReadLine();
-            emmissiveStrength = Convert.ToInt32(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(emmissiveStrength);
+            emmissiveStrength = Convert.ToInt32(sr.ReadLine()); 
             sr.ReadLine();
             emmissiveMax = Convert.ToInt32(sr.ReadLine());
             sr.ReadLine();
-            horizontalAcceleration = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(horizontalAcceleration);
+            horizontalAcceleration = Convert.ToDouble(sr.ReadLine()); 
             sr.ReadLine();
-            jumpAcceleration = Convert.ToDouble(sr.ReadLine()); System.Diagnostics.Debug.WriteLine(jumpAcceleration);
+            jumpAcceleration = Convert.ToDouble(sr.ReadLine());
         }
 
         public void inputUpdate(double elapsedTime) {
@@ -1563,13 +1593,12 @@ namespace PixelMidpointDisplacement
 
                 accelerationX += horizontalAcceleration;// / elapsedTime;
                 playerDirection = 1;
-                System.Diagnostics.Debug.WriteLine(horizontalAcceleration);
+                
             }
             if (Keyboard.GetState().IsKeyDown(Keys.A))
             {
                 accelerationX -= horizontalAcceleration;// / elapsedTime;
                 playerDirection = -1;
-                System.Diagnostics.Debug.WriteLine(playerDirection);
             }
             if (Keyboard.GetState().IsKeyDown(Keys.W))
             {
@@ -1667,33 +1696,45 @@ namespace PixelMidpointDisplacement
             int xOffset = 2; //Set it to the default upwards block
             //sprite sheet is as follows: |, |-, _, -|, |
 
-            if (worldArray[blockLocation.x, blockLocation.y - 1] == 0) {
-                emptyAbove = true;
-            }
-            if(worldArray[blockLocation.x - 1, blockLocation.y] == 0) {
-                emptyLeft = true;    
-            }
-            if (worldArray[blockLocation.x + 1, blockLocation.y] == 0)
+            if (blockLocation.x > 0 && blockLocation.y > 0 && blockLocation.x < worldArray.GetLength(0) - 1 && blockLocation.y < worldArray.GetLength(1) - 1)
             {
-                emptyRight = true;
-            }
-            if (emptyRight && !emptyLeft && !emptyAbove)
-            {
-                xOffset = 4;
-            }
-            else if (emptyLeft && !emptyRight && !emptyAbove) {
-                xOffset = 0;
-            }
 
-            if (emptyAbove) {
-                if (emptyRight) {
-                    xOffset = 3;
+
+
+                if (worldArray[blockLocation.x, blockLocation.y - 1] == 0)
+                {
+                    emptyAbove = true;
                 }
-                else if (emptyLeft) {
-                    xOffset = 1;    
+                if (worldArray[blockLocation.x - 1, blockLocation.y] == 0)
+                {
+                    emptyLeft = true;
+                }
+                if (worldArray[blockLocation.x + 1, blockLocation.y] == 0)
+                {
+                    emptyRight = true;
+                }
+                if (emptyRight && !emptyLeft && !emptyAbove)
+                {
+                    xOffset = 4;
+                }
+                else if (emptyLeft && !emptyRight && !emptyAbove)
+                {
+                    xOffset = 0;
+                }
+
+                if (emptyAbove)
+                {
+                    if (emptyRight)
+                    {
+                        xOffset = 3;
+                    }
+                    else if (emptyLeft)
+                    {
+                        xOffset = 1;
+                    }
                 }
             }
-
+            
             sourceRectangle = new Rectangle(sourceRectangle.X + xOffset * 32, sourceRectangle.Y, 32, 32);
         }
     }
