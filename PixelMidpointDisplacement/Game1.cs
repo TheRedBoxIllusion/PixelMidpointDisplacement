@@ -56,11 +56,31 @@ namespace PixelMidpointDisplacement
 
         Texture2D blockSpriteSheet;
 
+        Texture2D weaponSpriteSheet;
+
+        Texture2D blockItemSpriteSheet;
+
+        List<Texture2D> spriteSheetList = new List<Texture2D>();
+
 
         EngineController engineController;
 
+        AnimationController animationController;
+
         SpriteFont ariel;
-        
+
+        //++++++++++++++++++
+
+        bool writeToChat = false;
+
+        string chat;
+
+        string previousAddedCharacters = "";
+
+        double chatCountdown;
+
+        double timeSinceRepeatedLetter;
+        // ++++++++++++++++++++++
 
         Player player;
 
@@ -79,8 +99,9 @@ namespace PixelMidpointDisplacement
             this.TargetElapsedTime = TimeSpan.FromSeconds(1d / 180d);
 
             engineController = new EngineController();
+            animationController = new AnimationController();
 
-            worldContext = new WorldContext(engineController);
+            worldContext = new WorldContext(engineController, animationController);
             engineController.initialiseEngines(worldContext);
 
             
@@ -106,6 +127,12 @@ namespace PixelMidpointDisplacement
 
             ariel = Content.Load<SpriteFont>("ariel");
             blockSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockSpriteSheet.png");
+            weaponSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\weaponSpriteSheet.png");
+            blockItemSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockItemSpriteSheet.png");
+
+            spriteSheetList.Add(blockSpriteSheet);
+            spriteSheetList.Add(weaponSpriteSheet);
+            spriteSheetList.Add(blockItemSpriteSheet);
 
             worldContext.generateIDsFromTextureList(new Rectangle[]{new Rectangle(0, 0, 0, 0), new Rectangle(0, 0, 32, 32), new Rectangle(0, 32, 32, 32), new Rectangle(0, 64, 32, 32)});
 
@@ -118,7 +145,7 @@ namespace PixelMidpointDisplacement
 
             
             collisionSprite.SetData<Color>(new Color[] { Color.Green });
-            // TODO: use this.Content to load your game content here
+            
         }
 
         protected override void Update(GameTime gameTime)
@@ -127,32 +154,83 @@ namespace PixelMidpointDisplacement
             if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
-            //As the game's framerate changes, the small impulses caused by the added acceleration changes.
-            //So the added values must change with the elapsed game time. All other acceleration is properly controlled inside 
-            //of the physics engine
+            if (Keyboard.GetState().IsKeyDown(Keys.Enter) && chatCountdown < 2.7)
+            {
+                if (writeToChat)
+                {
+                    writeToChat = false;
+                    chatCountdown = 3;
+                    System.Diagnostics.Debug.WriteLine("Write to chat was disabled");
+                }
+                else
+                {
+                    writeToChat = true;
+                    chatCountdown = 3;
+                    chat = "";
+                    System.Diagnostics.Debug.WriteLine("write to chat was enabled");
+                }
+            }
+            if (writeToChat)
+            {
+                if (Keyboard.GetState().GetPressedKeys().Length != 0)
+                {
+                    Keys k = Keyboard.GetState().GetPressedKeys()[0];
+                    
+                    if (!(k.ToString().Equals("Enter")))
+                    {
+                        chatCountdown = 3;
+                        if (!k.ToString().Equals(previousAddedCharacters) || timeSinceRepeatedLetter < 0)
+                        {
+                            string stringToAdd = k.ToString();
+                            if (k.ToString().Equals("Space")) { stringToAdd = " "; }
+                            if (k.ToString().Equals("Back")) { stringToAdd = ""; chat = chat.Remove(chat.Length - 1); }
+                            if (k.ToString().Equals("OemPeriod")) { stringToAdd = "."; }
+
+                            previousAddedCharacters = k.ToString();
+                            chat += stringToAdd;
+
+                            if (chat.Length >= 75 && chat.Length%75 == 0) { chat = chat.Insert(chat.LastIndexOf(' ') + 1, "\n");}
+
+                            if (previousAddedCharacters.Equals(k.ToString()))
+                            {
+                                timeSinceRepeatedLetter = 0.2;
+                            }
+                            else
+                            {
+                                timeSinceRepeatedLetter = -0.1;
+                            }
+                        }
+                    }
+                    
+                }
+            }
+            chatCountdown -= gameTime.ElapsedGameTime.TotalSeconds;
+
+            if (!writeToChat)
+            {
+                player.inputUpdate(gameTime.ElapsedGameTime.TotalSeconds);
+            }
+            timeSinceRepeatedLetter -= gameTime.ElapsedGameTime.TotalSeconds;
 
 
-            
 
-            player.inputUpdate(gameTime.ElapsedGameTime.TotalSeconds);
 
-            
 
-                for (int i = 0; i < worldContext.physicsObjects.Count; i++)
+            for (int i = 0; i < worldContext.physicsObjects.Count; i++)
                 {
                     //General Physics simulations
                     //Order: Acceleration, velocity then location
                     worldContext.physicsObjects[i].isOnGround = false;
-                    
+
                     engineController.physicsEngine.addGravity(worldContext.physicsObjects[i]);
                     engineController.physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
-                    
+
                     engineController.physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
                     engineController.physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
                     engineController.physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
-                //Reset acceleration to be calculated next frame
-                playerAcceleration = worldContext.physicsObjects[i].accelerationX + ", " + worldContext.physicsObjects[i].accelerationY;
+                    //Reset acceleration to be calculated next frame
+                    playerAcceleration = worldContext.physicsObjects[i].accelerationX + ", " + worldContext.physicsObjects[i].accelerationY;
 
 
                     worldContext.physicsObjects[i].accelerationX = 0;
@@ -163,17 +241,6 @@ namespace PixelMidpointDisplacement
             worldContext.screenSpaceOffset = (-(int)player.x + _graphics.GraphicsDevice.Viewport.Width / 2 - (int)(player.width * worldContext.pixelsPerBlock),
                                               -(int)player.y + _graphics.GraphicsDevice.Viewport.Height / 2 - (int)(player.height * worldContext.pixelsPerBlock));
 
-            //Bind the world to exist such that: the offset does not exceed either sides of the world array when converted to pixel space
-            //When the player's offset is greater than -1/2 screen dimensions
-            //When the player's offset is lesser than -1/2 screen dimensions + worldDimension * pixelsPerBlock
-            /*
-            if (worldContext.screenSpaceOffset.x > -1 / 2.0 * _graphics.PreferredBackBufferWidth)
-            {
-                worldContext.screenSpaceOffset = ((int)(-1 / 2.0 * _graphics.PreferredBackBufferWidth), worldContext.screenSpaceOffset.y);
-            }
-            else if (worldContext.screenSpaceOffset.x < -1 / 2.0 * _graphics.GraphicsDevice.Viewport.Width + worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock) {
-                worldContext.screenSpaceOffset = ((int)(-1 / 2.0 * _graphics.GraphicsDevice.Viewport.Width) + worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock, worldContext.screenSpaceOffset.y);
-            }*/
             if (worldContext.screenSpaceOffset.x > -(int)(player.width * worldContext.pixelsPerBlock) - 5) {
                 worldContext.screenSpaceOffset = (-(int)(player.width * worldContext.pixelsPerBlock) - 5, worldContext.screenSpaceOffset.y);
             } else if (worldContext.screenSpaceOffset.x < (-(int)worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Width - (int)(player.width * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock/2){
@@ -196,7 +263,7 @@ namespace PixelMidpointDisplacement
                 digSize = Mouse.GetState().ScrollWheelValue / 120 + 1;
 
             }
-            if (Mouse.GetState().LeftButton == ButtonState.Pressed)
+            if (Mouse.GetState().RightButton == ButtonState.Pressed)
             {
                 //Find the mouses position on screen, then use the screenoffset to find it's coordinate in grid space
                 //Set the block at that location to equal 0
@@ -223,23 +290,8 @@ namespace PixelMidpointDisplacement
                 }
 
             }
-            else if (Mouse.GetState().RightButton == ButtonState.Pressed)
-            {
-                //Find the mouses position on screen, then use the screenoffset to find it's coordinate in grid space
-                //Set the block at that location to equal 0
 
-                double mouseXPixelSpace = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
-                double mouseYPixelSpace = Mouse.GetState().Y - worldContext.screenSpaceOffset.y;
-
-
-
-                int mouseXGridSpace = (int)Math.Floor(mouseXPixelSpace / worldContext.pixelsPerBlock);
-                int mouseYGridSpace = (int)Math.Floor(mouseYPixelSpace / worldContext.pixelsPerBlock);
-
-                //Delete Block at that location
-                worldContext.addBlock(mouseXGridSpace, mouseYGridSpace, 1);
-
-            }
+            animationController.tickAnimation(gameTime.ElapsedGameTime.TotalSeconds);
 
             base.Update(gameTime);
         }
@@ -278,8 +330,7 @@ namespace PixelMidpointDisplacement
             _spriteBatch.DrawString(ariel, (int)player.x/worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10, 10), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
-            
-            
+
             if (Mouse.GetState().MiddleButton == ButtonState.Pressed) {
                 double mouseXPixelSpace = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
                 double mouseYPixelSpace = Mouse.GetState().Y - worldContext.screenSpaceOffset.y;
@@ -297,9 +348,22 @@ namespace PixelMidpointDisplacement
                 _spriteBatch.DrawString(ariel, debugInfo, new Vector2(_graphics.GraphicsDevice.Viewport.Width / 2, 20), Color.BlueViolet);
                 
             }
-            
+
+            if (chatCountdown > 0 && chat != "") {
+                _spriteBatch.DrawString(ariel, chat, new Vector2(1000, 10), Color.BlueViolet);
+            }
+                
                 _spriteBatch.Draw(playerSprite, new Rectangle((int)player.x + worldContext.screenSpaceOffset.x, (int)player.y + worldContext.screenSpaceOffset.y,  (int)(player.width * worldContext.pixelsPerBlock), (int)(player.height * worldContext.pixelsPerBlock)), Color.White);
-            
+
+            for (int i = 0; i < animationController.animators.Count; i++)
+            {
+                Animator a = animationController.animators[i];
+                Item owner = a.owner;
+
+                System.Diagnostics.Debug.WriteLine(owner.owner == player);
+
+                _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)((player.x + worldContext.screenSpaceOffset.x) + a.currentPosition.xPos), (int)((player.y + worldContext.screenSpaceOffset.y) + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White,  owner.owner.playerDirection * (float)(a.currentPosition.rotation), new Vector2(owner.origin.X * owner.owner.playerDirection, owner.origin.Y), owner.spriteEffect | owner.owner.playerEffect, 0f);
+            }
 
             //drawCollisionBox();
 
@@ -411,7 +475,7 @@ namespace PixelMidpointDisplacement
             //Load octave count and octave weights, 
             //Load frequency
             //Load vector count and offset
-            //Load ore generation density I guess. There's too many variables to actually make a settings file for the world generation. Just due to the complexity and number of... well numbers
+            
             StreamReader sr = new StreamReader(worldContext.runtimePath + "Settings\\WorldGenerationVariables.txt");
             sr.ReadLine();
             noiseIterations = Convert.ToInt32(sr.ReadLine());
@@ -475,9 +539,6 @@ namespace PixelMidpointDisplacement
         private void pointsToBlocks(List<(double x, double y)> pointList)
         {
             //Convert each point to within the grid-coordinates, then set the worldArray to 1 wherever each lands
-            //Improved implementation: check if the distance between the points is greater than the pixels per block, then interpolate
-
-            //Have to flip the y value
 
             double distanceBetweenPoints = Math.Sqrt(Math.Pow(2, (pointList[0].x - pointList[1].x) + Math.Pow(2, pointList[0].y - pointList[1].y)));
 
@@ -532,7 +593,7 @@ namespace PixelMidpointDisplacement
                         isStillSurface = addSurfaceBlock(x, y);
                         
                         if (!isStillSurface && x >=0 && y >= 0 && x < worldArray.GetLength(0) && y < worldArray.GetLength(1)) {
-                            //System.Diagnostics.Debug.WriteLine("Added an extra block right below at:" + x + ", " + y);
+                          
                             surfaceBlocks.Add((x, y)); //If it has determined that a block is no longer on the surface, add the block right below: corners
                         }
                         y++;
@@ -825,7 +886,6 @@ namespace PixelMidpointDisplacement
             //r = Sqrt(P/0.9 * 4 * PI)
             
             int maxDepthSunlight = (int)Math.Sqrt(sunBrightness/25 * 4 * Math.PI);
-            //int maxDepthShadow = (int)Math.Sqrt(shadowBrightness / 25 * 4 * Math.PI);
             
             for (int i = 0; i < surfaceLevel.Count; i++) {
                 int lastX = (int)Math.Round(surfaceLevel[i].x - lightDirection.X);
@@ -976,12 +1036,49 @@ namespace PixelMidpointDisplacement
     public class EngineController {
         public LightingSystem lightingSystem;
         public PhysicsEngine physicsEngine;
+        public CollisionController collisionController;
+        public WorldContext worldContext;
+        
 
         public void initialiseEngines(WorldContext wc) {
+            worldContext = wc;
             lightingSystem = new LightingSystem(wc);
             physicsEngine = new PhysicsEngine(wc);
+            collisionController = new CollisionController();
         }
 
+      
+
+    }
+    public class CollisionController
+    {
+        public List<IActiveCollider> activeColliders;
+        public List<IPassiveCollider> passiveColliders;
+
+        public CollisionController() {
+            activeColliders = new List<IActiveCollider>();
+            passiveColliders = new List<IPassiveCollider>();
+        }
+
+        public void checkCollisions() {
+            if (activeColliders.Count != 0 && passiveColliders.Count != 0) {
+                for (int a = 0; a < activeColliders.Count; a++) {
+                    for (int p = 0; p < passiveColliders.Count; p++) {
+                        if (activeColliders[a].isActive && passiveColliders[p].isActive) {
+                            
+                        }
+                    }
+                } 
+            }
+        }
+
+        public void addActiveCollider(IActiveCollider collider)
+        {
+            if (!activeColliders.Contains(collider))
+            {
+                activeColliders.Add(collider);
+            }
+        }
     }
 
     public class WorldContext {
@@ -1019,10 +1116,13 @@ namespace PixelMidpointDisplacement
 
         public EngineController engineController;
 
+        public AnimationController animationController;
+
         public string runtimePath { get; set; }
 
-        public WorldContext(EngineController engineController) {
+        public WorldContext(EngineController engineController, AnimationController animationController) {
             this.engineController = engineController;
+            this.animationController = animationController;
 
 
             runtimePath = AppDomain.CurrentDomain.BaseDirectory;
@@ -1110,17 +1210,24 @@ namespace PixelMidpointDisplacement
             }
         }
         
-        public void deleteBlock(int x, int y) {
+        public bool deleteBlock(int x, int y) {
             if (worldArray[x, y].ID != 0)
             {
                 worldArray[x, y] = new Block(blockIds[0]);
+
+                return true;
             }
+
+            return false;
         }
-        public void addBlock(int x, int y, int ID) {
+        public bool addBlock(int x, int y, int ID) {
             if (worldArray[x, y].ID == 0)
             {
                 worldArray[x, y] = new Block(blockIds[ID]);
+                return true;
             }
+
+            return false;
         }
     }
 
@@ -1546,11 +1653,16 @@ namespace PixelMidpointDisplacement
 
         public int playerDirection { get; set; }
 
+
         int initialX = 1000;
         int initialY = 10;
 
         double horizontalAcceleration = 4; //The acceleration in m/s^-2
         double jumpAcceleration = 12;
+
+        Item mainHand;
+
+        public SpriteEffects playerEffect;
 
 
         public Player(WorldContext wc) : base(wc)
@@ -1559,9 +1671,9 @@ namespace PixelMidpointDisplacement
 
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
 
-            lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
+            mainHand = new BlockItem(1, worldContext.animationController, this);
 
-            
+            lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
         }
 
         private void loadSettings() {
@@ -1588,17 +1700,20 @@ namespace PixelMidpointDisplacement
         }
 
         public void inputUpdate(double elapsedTime) {
+            //Movement
             if (Keyboard.GetState().IsKeyDown(Keys.D))
             {
 
-                accelerationX += horizontalAcceleration;// / elapsedTime;
+                accelerationX += horizontalAcceleration;
                 playerDirection = 1;
+                playerEffect = SpriteEffects.None;
                 
             }
             if (Keyboard.GetState().IsKeyDown(Keys.A))
             {
-                accelerationX -= horizontalAcceleration;// / elapsedTime;
+                accelerationX -= horizontalAcceleration;
                 playerDirection = -1;
+                playerEffect = SpriteEffects.FlipHorizontally;
             }
             if (Keyboard.GetState().IsKeyDown(Keys.W))
             {
@@ -1613,6 +1728,26 @@ namespace PixelMidpointDisplacement
                 y = initialY;
                 velocityX = 0;
                 velocityY = 0;
+            }
+
+            //Item Swapping
+            if (Keyboard.GetState().IsKeyDown(Keys.D1))
+            {
+                System.Diagnostics.Debug.WriteLine(this);
+                mainHand = new Weapon(worldContext.animationController, this);
+                worldContext.engineController.collisionController.addActiveCollider((IActiveCollider)mainHand);
+            }
+            else if (Keyboard.GetState().IsKeyDown(Keys.D2)) {
+                mainHand = new BlockItem(1, worldContext.animationController, this);
+            }
+
+            ///Item Action
+            if (Mouse.GetState().LeftButton == ButtonState.Pressed)
+            {
+                if (mainHand != null)
+                {
+                    mainHand.onLeftClick();
+                }
             }
         }
         public override void updateLocation(double xChange, double yChange) {
@@ -1630,6 +1765,322 @@ namespace PixelMidpointDisplacement
         }
         
     }
+
+    public class Item
+    {
+        public Rectangle sourceRectangle;
+        public int spriteSheetID;
+
+        
+        public (int width, int height) drawDimensions;
+        public Animator itemAnimator;
+        public AnimationController animationController;
+        public Vector2 origin;
+        public double constantRotationOffset;
+
+        public SpriteEffects spriteEffect;
+
+        public int colliderWidth;
+        public int colliderHeight;
+
+        public Vector2 offsetFromEntity;
+
+        public Player owner;
+
+        public Item(Player owner) {
+            this.owner = owner;
+        }
+
+
+        public virtual void onLeftClick() { }
+        public virtual void animationFinished()
+        {
+            itemAnimator = null;
+        }
+    }
+
+    public class Weapon : Item, INonAxisAlignedActiveCollider
+    {
+
+        bool swungDownwardsLastIteration = false;
+
+        public Vector2[] rotatedPoints { get; set; }
+
+        public Vector2 rotationOrigin { get; set; }
+
+        public int colliderWidth { get; set; }
+
+        public int colliderHeight { get; set; }
+
+        public (double x, double y) location { get; set; }
+
+        new public Player owner { get; set; }
+
+        public Animator itemAnimator { get; set; }
+
+        public bool isActive { get; set; }
+
+        public bool hasCollided { get; set; }
+
+        public Weapon(AnimationController ac, Player owner) : base(owner)
+        {
+            spriteSheetID = 1;
+            animationController = ac;
+
+            this.owner = owner;
+
+            location = (owner.x, owner.y);
+
+            constantRotationOffset = -Math.PI / 4;
+
+            
+            origin = new Vector2(-2f, 18f);
+            rotationOrigin = new Vector2(-2, 18f);
+
+            sourceRectangle = new Rectangle(0, 0, 16, 16);
+            drawDimensions = (48, 48);
+
+
+
+            rotatedPoints = new Vector2[4];
+
+
+            colliderWidth = 4;
+            colliderHeight = 32;
+
+        }
+        //Adjusted to define the rectangular vertices only once, this should be a bit more efficient
+        public override void onLeftClick()
+        {
+            if (itemAnimator == null)
+            {
+                offsetFromEntity = new Vector2(owner.playerDirection * 8, 48);
+                isActive = true;
+                if (!swungDownwardsLastIteration)
+                {
+                    spriteEffect = SpriteEffects.None;
+                    origin = new Vector2(-2f, 18f);
+                    location = (owner.x - origin.X, owner.y - origin.Y);
+                    constantRotationOffset = -Math.PI / 4;
+
+                    float initialRotation = (float)0;
+                    itemAnimator = new Animator(animationController, this, 2, (0, 0, initialRotation), (0, 0, 0), constantRotationOffset, offsetFromEntity);
+                    swungDownwardsLastIteration = true;
+
+                    initialiseColliderVectors(1, initialRotation);
+
+
+                }
+                else
+                {
+
+                    spriteEffect = SpriteEffects.FlipVertically;
+                    origin = new Vector2(-2f, -2f);
+                    location = (owner.x - origin.X, owner.y - origin.Y);
+                    constantRotationOffset = Math.PI / 4;
+
+                    float initialRotation = (float)-Math.PI / 6;
+                    itemAnimator = new Animator(animationController, this, 0.15, (0, 0, initialRotation), (0, 0, -Math.PI / 2), constantRotationOffset, offsetFromEntity);
+                    swungDownwardsLastIteration = false;
+                    initialiseColliderVectors(-1, initialRotation);
+
+                }
+                animationController.addAnimator(itemAnimator);
+            }
+        }
+
+        public override void animationFinished()
+        {
+            isActive = false;
+            itemAnimator = null;
+        }
+
+        private void initialiseColliderVectors(int multiplier, float initialRotation)
+        {
+            rotatedPoints[0] = new Vector2(-colliderWidth, -colliderHeight) - rotationOrigin; //The rotation origin doesn't adjust with the origin that is used for drawing. This is because the drawing system and the collision system operate under different grid spacesgit
+            rotatedPoints[1] = new Vector2(0, -colliderHeight) - rotationOrigin;
+            rotatedPoints[2] = new Vector2(-colliderWidth, 0) - rotationOrigin;
+            rotatedPoints[3] = new Vector2(0, 0) - rotationOrigin;
+
+
+
+            rotatedPoints[0] *= multiplier;
+            rotatedPoints[1] *= multiplier;
+            rotatedPoints[2] *= multiplier;
+            rotatedPoints[3] *= multiplier;
+
+            ((INonAxisAlignedActiveCollider)this).calculateRotation(initialRotation);
+        }
+
+    }
+    
+    public class BlockItem : Item {
+        public int blockID;
+
+
+        int semiAnimationAdditions = 0;
+        int maxSemiAdditions = 3;
+        
+        
+        public BlockItem(int BlockID, AnimationController animationController, Player owner) : base(owner) {
+            blockID = BlockID;
+            this.animationController = animationController;
+            System.Diagnostics.Debug.WriteLine(owner + " is the given owner");
+            this.owner = owner;
+            System.Diagnostics.Debug.WriteLine(this.owner + " is the idea of the owner");
+
+            spriteSheetID = 2;
+
+            sourceRectangle = new Rectangle(0, 0, 8, 8);
+
+            
+
+            drawDimensions = (16, 16);
+
+            origin = new Vector2(-2, 18f);
+            constantRotationOffset = 0;
+
+            spriteEffect = SpriteEffects.None;
+            
+
+
+            
+        }
+
+        public override void onLeftClick()
+        {
+            if (itemAnimator == null) {
+                semiAnimationAdditions = 0;
+                offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
+                itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
+
+                animationController.addAnimator(itemAnimator);
+
+                int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
+                int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
+
+                owner.worldContext.addBlock(mouseX, mouseY, blockID);
+            }
+            if(semiAnimationAdditions < maxSemiAdditions ) {
+                int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
+                int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
+
+                if (owner.worldContext.addBlock(mouseX, mouseY, blockID))
+                {
+                    semiAnimationAdditions += 1;
+                }
+            }
+        }
+    }
+
+    public class Animator
+    {
+        public double duration;
+        public double elapsedTime;
+        public double maxDuration;
+        public (double xPos, double yPos, double rotation) initialPosition;
+        public (double xPos, double yPos, double rotation) currentPosition;
+        public (double xPos, double yPos, double rotation) finalPosition;
+
+        public Item owner;
+
+        public (double xPos, double yPos, double rotation) currentChange;
+        double constantRotationOffset;
+
+
+
+        public AnimationController animationController;
+
+        public Animator(AnimationController ac, Item owner, double duration, (double xPos, double yPos, double rotation) initialPosition, (double xPos, double yPos, double rotation) finalPosition, double constantRotationOffset, Vector2 constantPositionOffset)
+        {
+            animationController = ac;
+            this.owner = owner;
+
+            this.duration = 0;
+            maxDuration = duration;
+            initialPosition.rotation += constantRotationOffset;
+            finalPosition.rotation += constantRotationOffset;
+
+            initialPosition.xPos += constantPositionOffset.X;
+            finalPosition.xPos += constantPositionOffset.X;
+
+            initialPosition.yPos += constantPositionOffset.Y;
+            finalPosition.yPos += constantPositionOffset.Y;
+
+            this.constantRotationOffset = constantRotationOffset;
+
+
+            this.initialPosition = initialPosition;
+            currentPosition = initialPosition;
+            this.finalPosition = finalPosition;
+
+        }
+
+        public void tick(double elapsedTime)
+        {
+
+            duration += elapsedTime;
+            this.elapsedTime = elapsedTime;
+            if (duration >= maxDuration)
+            {
+                animationController.removeAnimator(this);
+                owner.animationFinished();
+            }
+
+            currentChange.xPos = linearInterpolation(initialPosition.xPos, finalPosition.xPos);
+            currentChange.yPos = linearInterpolation(initialPosition.yPos, finalPosition.yPos);
+            currentChange.rotation = linearInterpolation(initialPosition.rotation, finalPosition.rotation);
+
+
+
+            currentPosition = (currentPosition.xPos + currentChange.xPos, currentPosition.yPos + currentChange.yPos, currentPosition.rotation + currentChange.rotation);
+
+
+
+
+
+
+        }
+
+        public double linearInterpolation(double initialValue, double finalValue)
+        {
+            double difference = finalValue - initialValue;
+            double differencePerSecond = difference / maxDuration;
+            double linearlyInterpolatedValue = differencePerSecond * elapsedTime;// + initialValue; //Altered to calculate the change, then do the addition of the initial value when defining the current position. This allows for the change in a frame to be calculated for later efficiency purposes
+
+            return linearlyInterpolatedValue;
+        }
+
+    }
+
+    public class AnimationController
+    {
+        public List<Animator> animators;
+
+        public AnimationController()
+        {
+            animators = new List<Animator>();
+        }
+
+        public void addAnimator(Animator animator)
+        {
+            animators.Add(animator);
+
+        }
+        public void removeAnimator(Animator animator)
+        {
+            animators.Remove(animator);
+        }
+
+        public void tickAnimation(double elapsedTime)
+        {
+            for (int i = 0; i < animators.Count; i++)
+            {
+                animators[i].tick(elapsedTime);
+            }
+        }
+    }
+
 
     public class Block
     {
@@ -1739,6 +2190,193 @@ namespace PixelMidpointDisplacement
         }
     }
 
+
+    public interface ICollider
+    {
+        bool isActive { get; set; }
+
+
+        public void onCollision(ICollider otherCollider)
+        {
+
+        }
+    }
+
+    public interface IActiveCollider : ICollider
+    {
+
+        Player owner { get; set; }
+        public virtual void calculateCollision(IPassiveCollider externalCollider)
+        {
+
+        }
+    }
+
+    public interface INonAxisAlignedActiveCollider : IActiveCollider
+    {
+
+        public Vector2[] rotatedPoints { get; set; }
+
+        public Vector2 rotationOrigin { get; set; }
+
+        public int colliderWidth { get; set; }
+        public int colliderHeight { get; set; }
+
+        public (double x, double y) location { get; set; }
+
+        public Animator itemAnimator { get; set; }
+
+        public bool hasCollided { get; set; }
+
+
+
+        public void calculateCollision(IPassiveCollider externalCollider)
+        {
+
+            if (isActive)
+            {
+                nonAxisAlignedCollisionDetection(externalCollider);
+            }
+
+        }
+
+        public void nonAxisAlignedCollisionDetection(IPassiveCollider externalCollider)
+        {
+            hasCollided = false;
+            double theta = itemAnimator.currentPosition.rotation;
+
+
+            Rectangle externalColliderInLocalSpace = new Rectangle((int)(externalCollider.collider.Center.X - location.x), (int)(externalCollider.collider.Center.Y - location.y), externalCollider.collider.Width, externalCollider.collider.Height);
+
+
+            //find the direction of the secondary object and determine which axis to project onto. I can definitely project solely onto an x-y plane given that I'm working with rectangular colliders for now.
+            Vector2 seperatingAxis = calculateSeperationAxis(externalColliderInLocalSpace);
+            //From the seperating axis, project the collider's shadow onto that axis, then see if there's a gap between the closest points... How shall I do that. Based on the axis, I can tell 
+            //The center of the weapon is at 0,0 so that's to note. The seperating axis indicates what corner of the local and external colliders to use. I can take the weapons rectangle, then use a matrix transformation to rotate them, then find the point that has the greatest value along the seperating axis, which is also what it would be like projected, so i can ignore having to do vector dot products and merely take the appropriate component out of the transformed vectors.
+            calculateRotation((float)itemAnimator.currentChange.rotation);
+
+            //Multiply the vectors by the seperating axis to get the proj onto that axis, I can then take the largest (or most negative) one and use that for the shadow. But how do I determine if the two shadows are overlapping? I can get the shadow length,
+            //I can calculate the distance (based on the externalColliderInLocalSpace) it's shadow is literally just half the dimension in whatever axis, and the distance is the position of the collider in local space.
+
+            double shadow = 0;
+            for (int i = 0; i < rotatedPoints.Length; i++)
+            {
+
+                if (seperatingAxis.X != 0)
+                {
+                    if (shadow < rotatedPoints[i].X) shadow = rotatedPoints[i].X;
+                }
+                else if (seperatingAxis.Y != 0)
+                {
+                    if (shadow < rotatedPoints[i].Y) shadow = rotatedPoints[i].Y;
+                }
+            }
+
+
+
+
+            if (seperatingAxis.X != 0)
+            {
+                if (externalColliderInLocalSpace.X * seperatingAxis.X < shadow + externalColliderInLocalSpace.Width / 2)
+                {
+                    //Has collided
+                    System.Diagnostics.Debug.WriteLine("Collided in the X axis");
+                    hasCollided = true;
+                }
+            }
+            else if (seperatingAxis.Y != 0)
+            {
+                if (externalColliderInLocalSpace.Y * seperatingAxis.Y < shadow + externalColliderInLocalSpace.Height / 2)
+                {
+                    //Has collided
+                    System.Diagnostics.Debug.WriteLine("Collided in the Y axis");
+                    hasCollided = true;
+                }
+            }
+
+
+        }
+
+        public Vector2 calculateSeperationAxis(Rectangle externalColliderInLocalSpace)
+        {
+            Vector2 seperatingAxis;
+            if (externalColliderInLocalSpace.X > 0) //Is to the right
+            {
+                if (externalColliderInLocalSpace.Y > 0) //Is downwards
+                {
+                    //Determine which axis is overlapping more, then use that to determine the appropriate seperatingAxis. Ensure that it's the one with no/little overlap. EG using the x-axis for things on top of eachother will produce false positives
+                    if (externalColliderInLocalSpace.Y - externalColliderInLocalSpace.X > 0)
+                    { //Is more below than to the right. So use the y axis to determine collision.
+                        seperatingAxis = new Vector2(0, 1);
+                    }
+                    else
+                    {
+                        seperatingAxis = new Vector2(1, 0);
+                    }
+                }
+                else //Is upwards
+                {
+                    if (externalColliderInLocalSpace.X + externalColliderInLocalSpace.Y > 0) //More right than up
+                    {
+                        seperatingAxis = new Vector2(1, 0);
+                    }
+                    else
+                    {
+                        seperatingAxis = new Vector2(0, -1);
+                    }
+
+                }
+            }
+            else  //Is to the left
+            {
+                if (externalColliderInLocalSpace.Y > 0) //Is downwards
+                {
+                    //Determine which axis is overlapping more, then use that to determine the appropriate seperatingAxis. Ensure that it's the one with no/little overlap. EG using the x-axis for things on top of eachother will produce false positives
+                    if (externalColliderInLocalSpace.Y + externalColliderInLocalSpace.X > 0)
+                    { //Is more below than to the left. So use the y axis to determine collision.
+                        seperatingAxis = new Vector2(0, 1);
+                    }
+                    else
+                    {
+                        seperatingAxis = new Vector2(-1, 0);
+                    }
+                }
+                else //Is upwards
+                {
+                    if (externalColliderInLocalSpace.X - externalColliderInLocalSpace.Y < 0) //More left than up
+                    {
+                        seperatingAxis = new Vector2(-1, 0);
+                    }
+                    else
+                    {
+                        seperatingAxis = new Vector2(0, -1);
+                    }
+
+                }
+
+            }
+
+            return seperatingAxis;
+        }
+
+        public void calculateRotation(float rotation)
+        {
+            rotatedPoints[0] = Vector2.RotateAround(rotatedPoints[0], new Vector2(0, 0), rotation);
+            rotatedPoints[1] = Vector2.RotateAround(rotatedPoints[1], new Vector2(0, 0), rotation);
+            rotatedPoints[2] = Vector2.RotateAround(rotatedPoints[2], new Vector2(0, 0), rotation);
+            rotatedPoints[3] = Vector2.RotateAround(rotatedPoints[3], new Vector2(0, 0), rotation);
+        }
+
+
+    }
+
+    public interface IPassiveCollider : ICollider
+    {
+
+        Rectangle collider { get; set; }
+        //External colliders are colliders that don't compute their own collisions, they only react to collisions. Lets say that monsters have IExternalColliders, when the player collides with the monster, the collision function is run, but the monster doesn't also compute if it collided.
+        //I think this will just make it a bit easier to seperate player based colliders from entity colliders. Weapons, including arrows, will have actual colliders that compute collisions with external colliders. This way weapons can 
+    }
     public class BlockGenerationVariables
     {
         public double seedDensity;
