@@ -4,9 +4,9 @@
 kX & kY: The coefficient of friction for the player. As there is no ground friction at the moment, this; combined with acceleration values, defines the players max velocities in both directions								(double)
 8
 0.05
-width and breadth: This defines the dimensions of the player in terms of blocks.																																				(double)
+collider width and breadth: This defines the dimensions of the player in terms of blocks.																																				(double)
 0.8
-3
+2.7
 Emmissive strength: How brightly the player emmits light. The brighter it is the further it will effect																															(int)
 500
 Max emmissive strength: The maximum value that the light emmitted by the player can reach. This is useful for only lighting up dark areas a certain amount																		(int)

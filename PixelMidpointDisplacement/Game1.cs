@@ -51,12 +51,14 @@ namespace PixelMidpointDisplacement
 
         WorldContext worldContext;
         
-        Texture2D playerSprite;
+        //Texture2D playerSprite;
         Texture2D collisionSprite;
 
         Texture2D blockSpriteSheet;
 
         Texture2D weaponSpriteSheet;
+
+        Texture2D redTexture;
 
         Texture2D blockItemSpriteSheet;
 
@@ -104,6 +106,7 @@ namespace PixelMidpointDisplacement
             worldContext = new WorldContext(engineController, animationController);
             engineController.initialiseEngines(worldContext);
 
+            List<int> surfaceX = new List<int>();
             
 
             player = new Player(worldContext);
@@ -130,6 +133,9 @@ namespace PixelMidpointDisplacement
             weaponSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\weaponSpriteSheet.png");
             blockItemSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockItemSpriteSheet.png");
 
+            redTexture = new Texture2D(GraphicsDevice, 1, 1);
+            redTexture.SetData<Color>(new Color[]{ Color.Red});
+
             spriteSheetList.Add(blockSpriteSheet);
             spriteSheetList.Add(weaponSpriteSheet);
             spriteSheetList.Add(blockItemSpriteSheet);
@@ -140,7 +146,7 @@ namespace PixelMidpointDisplacement
             worldContext.generateWorld((400, 800));
 
 
-            playerSprite = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\Player.png");
+            player.setSpriteTexture(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png"));
             collisionSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
 
             
@@ -302,13 +308,13 @@ namespace PixelMidpointDisplacement
             Block[,] tempWorldArray = worldContext.worldArray;
 
             _spriteBatch.Begin(SpriteSortMode.Deferred, null, SamplerState.PointClamp, null, null, null, null);
-
+            int exposedBlockCount = 0;
             
             //Draw the screen based on the visible blocks
             //The range: screenOffset - screenOffset + screenDimension
-            for (int x = ((int)-worldContext.screenSpaceOffset.x - _graphics.GraphicsDevice.Viewport.Width) /worldContext.pixelsPerBlock - 1; x < ((int)-worldContext.screenSpaceOffset.x + _graphics.GraphicsDevice.Viewport.Width) / worldContext.pixelsPerBlock + 1; x++)
+            for (int x = ((int)-worldContext.screenSpaceOffset.x ) / worldContext.pixelsPerBlock - 1; x < ((int)-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / worldContext.pixelsPerBlock + 1; x++)
             {
-                for (int y = ((int)-worldContext.screenSpaceOffset.y - _graphics.GraphicsDevice.Viewport.Height) / worldContext.pixelsPerBlock - 1; y < ((int)-worldContext.screenSpaceOffset.y + _graphics.GraphicsDevice.Viewport.Height) / worldContext.pixelsPerBlock + 1; y++)
+                for (int y = ((int)-worldContext.screenSpaceOffset.y) / worldContext.pixelsPerBlock - 1; y < ((int)-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight) / worldContext.pixelsPerBlock + 1; y++)
                 {
                     if (x > 0 && y > 0 && x < tempWorldArray.GetLength(0) && y < tempWorldArray.GetLength(1))
                     {
@@ -317,13 +323,12 @@ namespace PixelMidpointDisplacement
                             lightValue = 255;
                         }
                             Color lightLevel = new Color(lightValue, lightValue, lightValue);
-                        if (tempWorldArray[x, y] == null) {
-                            System.Diagnostics.Debug.WriteLine(x + ", " + y);
-                            System.Diagnostics.Debug.WriteLine(tempWorldArray.GetLength(0) + ", " + tempWorldArray.GetLength(1));
+                        if (worldContext.exposedBlocks.ContainsKey((x, y)) && Mouse.GetState().MiddleButton == ButtonState.Pressed) {
+                            
+                            exposedBlockCount += 1;
                         }
-                            _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), tempWorldArray[x,y].sourceRectangle, lightLevel);
-                        
-                    }
+
+                            _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), tempWorldArray[x,y].sourceRectangle, lightLevel);                    }
                 }
             }
 
@@ -344,25 +349,45 @@ namespace PixelMidpointDisplacement
                 debugInfo += " | " + worldContext.worldArray[mouseXGridSpace, mouseYGridSpace];
                 debugInfo += " | " + worldContext.lightArray[mouseXGridSpace, mouseYGridSpace];
                 debugInfo += " | " + worldContext.surfaceBlocks.Contains((mouseXGridSpace, mouseYGridSpace));
+                debugInfo += " | Exposed: " + worldContext.exposedBlocks.ContainsKey((mouseXGridSpace, mouseYGridSpace));
+                debugInfo += " | Count: " + exposedBlockCount;
 
                 _spriteBatch.DrawString(ariel, debugInfo, new Vector2(_graphics.GraphicsDevice.Viewport.Width / 2, 20), Color.BlueViolet);
+                Rectangle rect = new Rectangle(0, 0, 10, 10);
                 
             }
 
             if (chatCountdown > 0 && chat != "") {
                 _spriteBatch.DrawString(ariel, chat, new Vector2(1000, 10), Color.BlueViolet);
             }
-                
-                _spriteBatch.Draw(playerSprite, new Rectangle((int)player.x + worldContext.screenSpaceOffset.x, (int)player.y + worldContext.screenSpaceOffset.y,  (int)(player.width * worldContext.pixelsPerBlock), (int)(player.height * worldContext.pixelsPerBlock)), Color.White);
+
+            //_spriteBatch.Draw(redTexture, new Rectangle((int)(player.x) + worldContext.screenSpaceOffset.x, (int)(player.y) + worldContext.screenSpaceOffset.y, (int)(player.collider.Width), (int)(player.collider.Height)), Color.White);
+            _spriteBatch.Draw(player.spriteAnimator.spriteSheet, new Rectangle((int)(player.x - player.spriteAnimator.sourceOffset.X) + worldContext.screenSpaceOffset.x, (int)(player.y - player.spriteAnimator.sourceOffset.Y) + worldContext.screenSpaceOffset.y, (int)(player.drawWidth * worldContext.pixelsPerBlock), (int)(player.drawHeight * worldContext.pixelsPerBlock)), player.spriteAnimator.sourceRect, Color.White, 0f, Vector2.Zero, player.playerEffect, 0f);
 
             for (int i = 0; i < animationController.animators.Count; i++)
             {
                 Animator a = animationController.animators[i];
                 Item owner = a.owner;
 
-                System.Diagnostics.Debug.WriteLine(owner.owner == player);
+                int rotationXOffset = 0;
+                int rotationYOffset = 0;
+                int positionXOffset = 0;
+                if (owner.owner.playerDirection < 0)
+                {
+                    //If the item is facing towards the negative x, account for flipping the image
+                    rotationXOffset = owner.owner.playerDirection * owner.sourceRectangle.Width;
+                    positionXOffset = (int)(owner.owner.width * worldContext.pixelsPerBlock); //Might need to modify the collider to account for this change...
+                    
+                }
+                if (owner.verticalDirection < 0)
+                {
+                    //If the item is facing towards negative y, account for flipping the image
+                    rotationYOffset = owner.verticalDirection * owner.sourceRectangle.Height;
+                }
+                Vector2 origin = new Vector2(owner.owner.playerDirection * owner.origin.X - rotationXOffset, owner.verticalDirection * owner.origin.Y - rotationYOffset);
 
-                _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)((player.x + worldContext.screenSpaceOffset.x) + a.currentPosition.xPos), (int)((player.y + worldContext.screenSpaceOffset.y) + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White,  owner.owner.playerDirection * (float)(a.currentPosition.rotation), new Vector2(owner.origin.X * owner.owner.playerDirection, owner.origin.Y), owner.spriteEffect | owner.owner.playerEffect, 0f);
+                _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)(owner.owner.x + worldContext.screenSpaceOffset.x + a.currentPosition.xPos + positionXOffset), (int)(owner.owner.y + worldContext.screenSpaceOffset.y + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White, (float)(owner.owner.playerDirection * (a.currentPosition.rotation)), origin, owner.spriteEffect | owner.owner.playerEffect, 0f);
+               // _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)((player.x + worldContext.screenSpaceOffset.x) + a.currentPosition.xPos), (int)((player.y + worldContext.screenSpaceOffset.y) + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White,  owner.owner.playerDirection * (float)(a.currentPosition.rotation), origin, owner.spriteEffect | owner.owner.playerEffect, 0f);
             }
 
             //drawCollisionBox();
@@ -392,10 +417,11 @@ namespace PixelMidpointDisplacement
                     {
                         _spriteBatch.Draw(collisionSprite, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, p, p), Color.White);
                     }
-                    _spriteBatch.Draw(playerSprite, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, p, 2), Color.White);
-                    _spriteBatch.Draw(playerSprite, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, 2, p), Color.White);
-                    _spriteBatch.Draw(playerSprite, new Rectangle(x * p + worldContext.screenSpaceOffset.x, (y + 1) * p + worldContext.screenSpaceOffset.y, p, 2), Color.White);
-                    _spriteBatch.Draw(playerSprite, new Rectangle((x + 1) * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, 2, p), Color.White);
+                    _spriteBatch.Draw(redTexture, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, p, 2), Color.White);
+                    _spriteBatch.Draw(redTexture, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, 2, p), Color.White);
+                    _spriteBatch.Draw(redTexture, new Rectangle(x * p + worldContext.screenSpaceOffset.x, (y + 1) * p + worldContext.screenSpaceOffset.y, p, 2), Color.White);
+                    _spriteBatch.Draw(redTexture, new Rectangle((x + 1) * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, 2, p), Color.White);
+                    
                 }
             }
         }
@@ -407,6 +433,7 @@ namespace PixelMidpointDisplacement
         int[,] worldArray;
         int[] surfaceHeight;
         List<(int x, int y)> surfaceBlocks = new List<(int x, int y)>(); //This list contains all the blocks facing the surface, not only the ones that are highest. Eg. cliff faces
+        
 
         double[,] perlinNoiseArray;
         BlockGenerationVariables[,] brownianMotionArray;
@@ -440,7 +467,7 @@ namespace PixelMidpointDisplacement
         //Weight of the absolute y value
         //Weight of the relative y value
         List<BlockThresholdValues> blockThresholdVariables = new List<BlockThresholdValues>(){
-            new BlockThresholdValues(0.9, 0, 0.005, 0.9, 0.48, 0, 1),
+            new BlockThresholdValues(blockThreshold : 0.9, maximumY : 0, decreasePerY : 0.005, maximumThreshold : 0.9, minimumThreshold : 0.48, absoluteYHeightWeight : 0, relativeYHeightWeight : 1),
             new BlockThresholdValues(0.9, 130, 0.005, 0.9, 0.48, 0.3, 1),
 
             new BlockThresholdValues(0.9, 150, 0.01, 0.9, 0.48, 1, 0),
@@ -456,7 +483,7 @@ namespace PixelMidpointDisplacement
 
         //SeededBrownianMotion Variables:
         BlockGenerationVariables[] ores = new BlockGenerationVariables[]{
-            new BlockGenerationVariables(1, new Block(2), 8, 360), //Dirt
+            new BlockGenerationVariables(seedDensity : 1, block : new Block(ID : 2), maxSingleSpread : 8, oreVeinSpread : 360), //Dirt
             new BlockGenerationVariables(0.1, new Block(1), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
             new BlockGenerationVariables(0.3, new Block(1), 6, 24)
             };
@@ -583,7 +610,6 @@ namespace PixelMidpointDisplacement
         private void calculateSurfaceBlocks() {
             for (int x = 0; x < surfaceHeight.Length; x++)
             {
-                
                     surfaceBlocks.Add((x, surfaceHeight[x]));
                     
                     int y = surfaceHeight[x] + 1;
@@ -719,6 +745,7 @@ namespace PixelMidpointDisplacement
                             {
                                 surfaceHeight[x] = y;
                             }
+
                         }
                     }
                     else
@@ -1103,12 +1130,17 @@ namespace PixelMidpointDisplacement
 
         public List<(int x, int y)> surfaceBlocks { get; set; }
 
+        public Dictionary<(int x, int y), Block> exposedBlocks = new Dictionary<(int x, int y), Block>();//This list contains all the blocks that are exposed to air, and hence would cast shadows.
+
         public int[,] lightArray { get; set; }
         public int pixelsPerBlock { get; set; } = 4; //Overwritten by the settings file
 
-        int pixelsPerBlockAfterGeneration;
+        public int pixelsPerBlockAfterGeneration;
 
-        Block[] blockIds = new Block[4];
+
+        Dictionary<blockIDs, int> intFromBlockID = Enum.GetValues(typeof(blockIDs)).Cast<blockIDs>().ToDictionary(e => e, e => (int)e);
+        Dictionary<int, blockIDs> blockIDFromInt = Enum.GetValues(typeof(blockIDs)).Cast<blockIDs>().ToDictionary(e => (int)e, e => e);
+        Dictionary<blockIDs, Block> blockFromID = new Dictionary<blockIDs, Block>();
 
         public (int x, int y) screenSpaceOffset { get; set; }
 
@@ -1124,11 +1156,8 @@ namespace PixelMidpointDisplacement
             this.engineController = engineController;
             this.animationController = animationController;
 
-
             runtimePath = AppDomain.CurrentDomain.BaseDirectory;
             
-
-
             //Load settings from file
             loadSettings();
         }
@@ -1172,35 +1201,47 @@ namespace PixelMidpointDisplacement
             for (int x = 0; x < worldArray.GetLength(0); x++) {
                 for (int y = 0; y < worldArray.GetLength(1); y++)
                 {
-                    generateInstanceFromID(intWorldArray, intWorldArray[x,y], x,  y);
+                    generateInstanceFromID(intWorldArray, blockIDFromInt[intWorldArray[x,y]], x,  y);
+                    addBlockToDictionaryIfExposedToAir(intWorldArray, x, y);
                 }
             }
 
+            System.Diagnostics.Debug.WriteLine(exposedBlocks.Count);
             updatePixelsPerBlock(pixelsPerBlockAfterGeneration);
 
         }
 
-        public void generateInstanceFromID(int[,] intArray, int ID, int x, int y) {
-            if (ID == 0 || ID == 1 || ID == 2)
+        public void generateInstanceFromID(int[,] intArray, blockIDs ID, int x, int y) {
+            if (ID == blockIDs.air || ID == blockIDs.stone || ID == blockIDs.dirt)
             {
-                worldArray[x, y] = new Block(blockIds[ID]);
+                worldArray[x, y] = new Block(blockFromID[ID]);
             }
-            else if (ID == 3) {
-                worldArray[x, y] = new GrassBlock(blockIds[ID]);
+            else if (ID == blockIDs.grass) {
+                worldArray[x, y] = new GrassBlock(blockFromID[ID]);
             }
 
             worldArray[x, y].setupInitialData(intArray, (x, y));
         }
 
+        public void addBlockToDictionaryIfExposedToAir(int[,] idArray, int x, int y) {
+            if (x > 0 && y > 0 && x < worldArray.GetLength(0) - 1 && y < worldArray.GetLength(1) - 1)
+            {
+               
+                if ((idArray[x - 1, y] == (int)blockIDs.air || idArray[x + 1, y] == (int)blockIDs.air || idArray[x, y - 1] == (int)blockIDs.air || idArray[x, y + 1] == (int)blockIDs.air) && idArray[x,y] != (int)blockIDs.air) //Then it is exposed to air
+                {
+                   exposedBlocks.Add((x, y), worldArray[x,y]);
+                }
+            }
+        }
         public void generateIDsFromTextureList(Rectangle[] textureSourceList) {
-            blockIds[0] = new Block(textureSourceList[0], 0); //Air block
-            blockIds[1] = new Block(textureSourceList[1], 1); //Stone block
-            blockIds[2] = new Block(textureSourceList[2], 2); //Dirt block
-            blockIds[3] = new GrassBlock(textureSourceList[3], 3);//Grass block
+            blockFromID.Add(blockIDs.air, new Block(textureSourceList[intFromBlockID[blockIDs.air]], intFromBlockID[blockIDs.air])); //Air block
+            blockFromID.Add(blockIDs.stone, new Block(textureSourceList[intFromBlockID[blockIDs.stone]], intFromBlockID[blockIDs.stone]));
+            blockFromID.Add(blockIDs.dirt, new Block(textureSourceList[intFromBlockID[blockIDs.dirt]], intFromBlockID[blockIDs.dirt]));
+            blockFromID.Add(blockIDs.grass, new GrassBlock(textureSourceList[intFromBlockID[blockIDs.grass]], intFromBlockID[blockIDs.grass]));
         }
 
-        public Block getBlockFromID(int ID) {
-            return blockIds[ID];
+        public Block getBlockFromID(blockIDs ID) {
+            return blockFromID[ID];
         }
 
         public void updatePixelsPerBlock(int newPixelsPerBlock) {
@@ -1213,7 +1254,7 @@ namespace PixelMidpointDisplacement
         public bool deleteBlock(int x, int y) {
             if (worldArray[x, y].ID != 0)
             {
-                worldArray[x, y] = new Block(blockIds[0]);
+                worldArray[x, y] = new Block(blockFromID[blockIDs.air]);
 
                 return true;
             }
@@ -1221,9 +1262,9 @@ namespace PixelMidpointDisplacement
             return false;
         }
         public bool addBlock(int x, int y, int ID) {
-            if (worldArray[x, y].ID == 0)
+            if (worldArray[x, y].ID == intFromBlockID[blockIDs.air])
             {
-                worldArray[x, y] = new Block(blockIds[ID]);
+                worldArray[x, y] = new Block(blockFromID[blockIDFromInt[ID]]);
                 return true;
             }
 
@@ -1599,6 +1640,8 @@ namespace PixelMidpointDisplacement
 
         public Rectangle collider { get; set; }
 
+        public double drawWidth { get; set; }
+        public double drawHeight { get; set; }
         public double width { get; set; }
         public double height { get; set; }
 
@@ -1662,6 +1705,9 @@ namespace PixelMidpointDisplacement
 
         Item mainHand;
 
+        Texture2D spriteSheet;
+        public SpriteAnimator spriteAnimator;
+
         public SpriteEffects playerEffect;
 
 
@@ -1669,11 +1715,30 @@ namespace PixelMidpointDisplacement
         {
             loadSettings();
 
+            //need to dissociate the collider width and the draw width. 
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
+
+            drawWidth = 1.5f;
+            drawHeight = 3;
 
             mainHand = new BlockItem(1, worldContext.animationController, this);
 
             lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
+
+
+            spriteAnimator = new SpriteAnimator(animationController : worldContext.animationController, constantOffset : new Vector2(12f, 8f), frameOffset : new Vector2(32, 65), sourceDimensions : new Vector2((float)32, (float)64), animationlessSourceRect : new Rectangle(160, 0, (int)32, (int)64), owner : this);
+           
+            
+            spriteAnimator.animationDictionary = new Dictionary<string, (int frameCount, int yOffset)> {
+                
+                { "walk", (6, 0) }
+            
+            };
+        }
+
+        public void setSpriteTexture(Texture2D spriteSheet) {
+            this.spriteSheet = spriteSheet;
+            spriteAnimator.spriteSheet = spriteSheet;
         }
 
         private void loadSettings() {
@@ -1705,6 +1770,10 @@ namespace PixelMidpointDisplacement
             {
 
                 accelerationX += horizontalAcceleration;
+                if (!spriteAnimator.isAnimationActive)
+                {
+                    spriteAnimator.startAnimation(0.5, "walk");
+                }
                 playerDirection = 1;
                 playerEffect = SpriteEffects.None;
                 
@@ -1712,10 +1781,17 @@ namespace PixelMidpointDisplacement
             if (Keyboard.GetState().IsKeyDown(Keys.A))
             {
                 accelerationX -= horizontalAcceleration;
+                if (!spriteAnimator.isAnimationActive) {
+                    spriteAnimator.startAnimation(0.5, "walk");
+                }
                 playerDirection = -1;
                 playerEffect = SpriteEffects.FlipHorizontally;
             }
-            if (Keyboard.GetState().IsKeyDown(Keys.W))
+            if (!Keyboard.GetState().IsKeyDown(Keys.A) && !Keyboard.GetState().IsKeyDown(Keys.D))
+            {
+                spriteAnimator.isAnimationActive = false; //If the player isn't walking, stop the animation
+            }
+            if (Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space))
             {
                 if (isOnGround)
                 {
@@ -1768,24 +1844,25 @@ namespace PixelMidpointDisplacement
 
     public class Item
     {
-        public Rectangle sourceRectangle;
-        public int spriteSheetID;
+        public Rectangle sourceRectangle { get; set; }
+        public int spriteSheetID { get; set; }
 
         
-        public (int width, int height) drawDimensions;
-        public Animator itemAnimator;
-        public AnimationController animationController;
-        public Vector2 origin;
-        public double constantRotationOffset;
+        public (int width, int height) drawDimensions { get; set; }
+        public Animator itemAnimator { get; set; }
+        public AnimationController animationController { get; set; }
+        public Vector2 origin { get; set; }
+        public int verticalDirection { get; set; }
+        public double constantRotationOffset { get; set; }
 
         public SpriteEffects spriteEffect;
 
-        public int colliderWidth;
-        public int colliderHeight;
+        public int colliderWidth { get; set; }
+        public int colliderHeight { get; set; }
 
-        public Vector2 offsetFromEntity;
+        public Vector2 offsetFromEntity { get; set; }
 
-        public Player owner;
+        public Player owner { get; set; }
 
         public Item(Player owner) {
             this.owner = owner;
@@ -1806,17 +1883,11 @@ namespace PixelMidpointDisplacement
 
         public Vector2[] rotatedPoints { get; set; }
 
+        public Vector2[] originalPoints { get; set; }
+
         public Vector2 rotationOrigin { get; set; }
 
-        public int colliderWidth { get; set; }
-
-        public int colliderHeight { get; set; }
-
         public (double x, double y) location { get; set; }
-
-        new public Player owner { get; set; }
-
-        public Animator itemAnimator { get; set; }
 
         public bool isActive { get; set; }
 
@@ -1843,6 +1914,7 @@ namespace PixelMidpointDisplacement
 
 
             rotatedPoints = new Vector2[4];
+            originalPoints = new Vector2[4];
 
 
             colliderWidth = 4;
@@ -1859,12 +1931,13 @@ namespace PixelMidpointDisplacement
                 if (!swungDownwardsLastIteration)
                 {
                     spriteEffect = SpriteEffects.None;
+                    verticalDirection = 1;
                     origin = new Vector2(-2f, 18f);
                     location = (owner.x - origin.X, owner.y - origin.Y);
                     constantRotationOffset = -Math.PI / 4;
 
                     float initialRotation = (float)0;
-                    itemAnimator = new Animator(animationController, this, 2, (0, 0, initialRotation), (0, 0, 0), constantRotationOffset, offsetFromEntity);
+                    itemAnimator = new Animator(animationController, this, 0.2, (0, 0, initialRotation), (0, 0, 2 * Math.PI/3), constantRotationOffset, offsetFromEntity);
                     swungDownwardsLastIteration = true;
 
                     initialiseColliderVectors(1, initialRotation);
@@ -1875,7 +1948,8 @@ namespace PixelMidpointDisplacement
                 {
 
                     spriteEffect = SpriteEffects.FlipVertically;
-                    origin = new Vector2(-2f, -2f);
+                    
+                    verticalDirection = -1;
                     location = (owner.x - origin.X, owner.y - origin.Y);
                     constantRotationOffset = Math.PI / 4;
 
@@ -1897,17 +1971,22 @@ namespace PixelMidpointDisplacement
 
         private void initialiseColliderVectors(int multiplier, float initialRotation)
         {
-            rotatedPoints[0] = new Vector2(-colliderWidth, -colliderHeight) - rotationOrigin; //The rotation origin doesn't adjust with the origin that is used for drawing. This is because the drawing system and the collision system operate under different grid spacesgit
-            rotatedPoints[1] = new Vector2(0, -colliderHeight) - rotationOrigin;
-            rotatedPoints[2] = new Vector2(-colliderWidth, 0) - rotationOrigin;
-            rotatedPoints[3] = new Vector2(0, 0) - rotationOrigin;
+            originalPoints[0] = new Vector2(-colliderWidth, -colliderHeight) - rotationOrigin; //The rotation origin doesn't adjust with the origin that is used for drawing. This is because the drawing system and the collision system operate under different grid spacesgit
+            originalPoints[1] = new Vector2(0, -colliderHeight) - rotationOrigin;
+            originalPoints[2] = new Vector2(-colliderWidth, 0) - rotationOrigin;
+            originalPoints[3] = new Vector2(0, 0) - rotationOrigin;
+
+            originalPoints[0] *= multiplier;
+            originalPoints[1] *= multiplier;
+            originalPoints[2] *= multiplier;
+            originalPoints[3] *= multiplier;
 
 
-
-            rotatedPoints[0] *= multiplier;
-            rotatedPoints[1] *= multiplier;
-            rotatedPoints[2] *= multiplier;
-            rotatedPoints[3] *= multiplier;
+            //Initialise the rotated points a
+            rotatedPoints[0] = new Vector2(originalPoints[0].X, originalPoints[0].Y);
+            rotatedPoints[1] = new Vector2(originalPoints[1].X, originalPoints[1].Y);
+            rotatedPoints[2] = new Vector2(originalPoints[2].X, originalPoints[2].Y);
+            rotatedPoints[3] = new Vector2(originalPoints[3].X, originalPoints[3].Y);
 
             ((INonAxisAlignedActiveCollider)this).calculateRotation(initialRotation);
         }
@@ -1925,11 +2004,12 @@ namespace PixelMidpointDisplacement
         public BlockItem(int BlockID, AnimationController animationController, Player owner) : base(owner) {
             blockID = BlockID;
             this.animationController = animationController;
-            System.Diagnostics.Debug.WriteLine(owner + " is the given owner");
+            
             this.owner = owner;
-            System.Diagnostics.Debug.WriteLine(this.owner + " is the idea of the owner");
+            
 
             spriteSheetID = 2;
+            verticalDirection = 1;
 
             sourceRectangle = new Rectangle(0, 0, 8, 8);
 
@@ -2056,21 +2136,31 @@ namespace PixelMidpointDisplacement
     public class AnimationController
     {
         public List<Animator> animators;
+        public List<SpriteAnimator> spriteAnimators;
 
         public AnimationController()
         {
             animators = new List<Animator>();
+            spriteAnimators = new List<SpriteAnimator>();
         }
 
         public void addAnimator(Animator animator)
         {
             animators.Add(animator);
-
         }
         public void removeAnimator(Animator animator)
         {
             animators.Remove(animator);
         }
+
+        public void addSpriteAnimator(SpriteAnimator animator) {
+            spriteAnimators.Add(animator);
+        }
+        public void removeSpriteAnimator(SpriteAnimator animator)
+        {
+            spriteAnimators.Remove(animator);
+        }
+
 
         public void tickAnimation(double elapsedTime)
         {
@@ -2078,20 +2168,93 @@ namespace PixelMidpointDisplacement
             {
                 animators[i].tick(elapsedTime);
             }
+            for (int i = 0; i < spriteAnimators.Count; i++) {
+                spriteAnimators[i].tickAnimation(elapsedTime);
+            }
         }
+        
     }
 
+    public class SpriteAnimator {
+        public Texture2D spriteSheet; //The sprite sheet to take pictures from
+        public Vector2 sourceOffset; //The initial offset to shift over all the draws
+        double maxDuration; //The entire duration of the animation
+        double duration; //The current duration
+        Vector2 frameOffset; //The offset each frame. The y value will be the offset for different animations (from the yOffset from the dictionary)
+        Vector2 sourceDimensions; //The dimensions of the source
+        int frame;
+        public Rectangle sourceRect; //The rectangle to draw from as the source rect. This takes the sourceDimensions, and the frameOffset * frame to get the location to draw from.
+        public Dictionary<String, (int frameCount, int yOffset)> animationDictionary; //The string indicates the animation, and the int value indicates the y offset (an index value) to get to said animation
+        int currentAnimationFrameCount;
+        int currentAnimationYOffset;
+        double currentDurationPerFrame;
+
+        Rectangle animationlessSourceRectangle; //The source rectangle when no animation is being played.
+        public bool isAnimationActive;
+
+        public AnimationController animationController;
+        public Player owner; //Substitute with something else later on.
+
+        public SpriteAnimator(AnimationController animationController, Vector2 constantOffset, Vector2 frameOffset, Vector2 sourceDimensions, Rectangle animationlessSourceRect, Player owner) {
+            this.owner = owner;
+            this.animationController = animationController;
+            this.sourceOffset = constantOffset;
+            this.frameOffset = frameOffset;
+            System.Diagnostics.Debug.WriteLine(sourceDimensions);
+            this.sourceDimensions = sourceDimensions;
+            animationlessSourceRectangle = animationlessSourceRect;
+            sourceRect = animationlessSourceRectangle;
+        }
+
+        public void startAnimation(double duration, string animation) {
+            isAnimationActive = true;
+            currentAnimationFrameCount = animationDictionary[animation].frameCount;
+            currentAnimationYOffset = animationDictionary[animation].yOffset;
+            currentDurationPerFrame = maxDuration / currentAnimationFrameCount;
+            this.maxDuration = duration;
+            this.duration = 0;
+            frame = 0;
+            animationController.addSpriteAnimator(this);
+        }
+
+        public void tickAnimation(double elapsedTime) {
+            duration += elapsedTime;
+            if (duration >= maxDuration || !isAnimationActive) {
+                isAnimationActive = false;
+                currentAnimationFrameCount = 0;
+                currentAnimationYOffset = 0;
+                currentDurationPerFrame = 0;
+                frame = 0;
+                sourceRect = animationlessSourceRectangle;
+                animationController.removeSpriteAnimator(this);
+                
+                return;
+            }
+
+            frame = (int)Math.Floor(duration / currentDurationPerFrame);
+            //System.Diagnostics.Debug.WriteLine(frame);
+            sourceRect = new Rectangle((int)(frame * frameOffset.X), (int)(currentAnimationYOffset * frameOffset.Y),(int)sourceDimensions.X, (int)sourceDimensions.Y);
+            //System.Diagnostics.Debug.WriteLine(sourceRect);
+        }
+
+
+
+        
+
+    }
 
     public class Block
     {
         public Rectangle sourceRectangle;
         public int emmissiveStrength;
         public int ID;
+     
 
         public Block(Rectangle textureSourceRectangle, int ID)
         {
             this.sourceRectangle = textureSourceRectangle;
             this.ID = ID;
+           
         }
         public Block(Rectangle textureSourceRectangle, int emmissiveStrength, int ID)
         {
@@ -2217,6 +2380,8 @@ namespace PixelMidpointDisplacement
 
         public Vector2[] rotatedPoints { get; set; }
 
+        public Vector2[] originalPoints { get; set; }
+
         public Vector2 rotationOrigin { get; set; }
 
         public int colliderWidth { get; set; }
@@ -2232,12 +2397,10 @@ namespace PixelMidpointDisplacement
 
         public void calculateCollision(IPassiveCollider externalCollider)
         {
-
             if (isActive)
             {
                 nonAxisAlignedCollisionDetection(externalCollider);
             }
-
         }
 
         public void nonAxisAlignedCollisionDetection(IPassiveCollider externalCollider)
@@ -2253,7 +2416,7 @@ namespace PixelMidpointDisplacement
             Vector2 seperatingAxis = calculateSeperationAxis(externalColliderInLocalSpace);
             //From the seperating axis, project the collider's shadow onto that axis, then see if there's a gap between the closest points... How shall I do that. Based on the axis, I can tell 
             //The center of the weapon is at 0,0 so that's to note. The seperating axis indicates what corner of the local and external colliders to use. I can take the weapons rectangle, then use a matrix transformation to rotate them, then find the point that has the greatest value along the seperating axis, which is also what it would be like projected, so i can ignore having to do vector dot products and merely take the appropriate component out of the transformed vectors.
-            calculateRotation((float)itemAnimator.currentChange.rotation);
+            calculateRotation((float)itemAnimator.currentPosition.rotation);
 
             //Multiply the vectors by the seperating axis to get the proj onto that axis, I can then take the largest (or most negative) one and use that for the shadow. But how do I determine if the two shadows are overlapping? I can get the shadow length,
             //I can calculate the distance (based on the externalColliderInLocalSpace) it's shadow is literally just half the dimension in whatever axis, and the distance is the position of the collider in local space.
@@ -2361,10 +2524,11 @@ namespace PixelMidpointDisplacement
 
         public void calculateRotation(float rotation)
         {
-            rotatedPoints[0] = Vector2.RotateAround(rotatedPoints[0], new Vector2(0, 0), rotation);
-            rotatedPoints[1] = Vector2.RotateAround(rotatedPoints[1], new Vector2(0, 0), rotation);
-            rotatedPoints[2] = Vector2.RotateAround(rotatedPoints[2], new Vector2(0, 0), rotation);
-            rotatedPoints[3] = Vector2.RotateAround(rotatedPoints[3], new Vector2(0, 0), rotation);
+            rotation *= owner.playerDirection;
+            rotatedPoints[0] = Vector2.RotateAround(originalPoints[0], new Vector2(0, 0), rotation);
+            rotatedPoints[1] = Vector2.RotateAround(originalPoints[1], new Vector2(0, 0), rotation);
+            rotatedPoints[2] = Vector2.RotateAround(originalPoints[2], new Vector2(0, 0), rotation);
+            rotatedPoints[3] = Vector2.RotateAround(originalPoints[3], new Vector2(0, 0), rotation);
         }
 
 
@@ -2377,6 +2541,15 @@ namespace PixelMidpointDisplacement
         //External colliders are colliders that don't compute their own collisions, they only react to collisions. Lets say that monsters have IExternalColliders, when the player collides with the monster, the collision function is run, but the monster doesn't also compute if it collided.
         //I think this will just make it a bit easier to seperate player based colliders from entity colliders. Weapons, including arrows, will have actual colliders that compute collisions with external colliders. This way weapons can 
     }
+
+    public enum blockIDs {
+        //Written in order of their integer IDs
+        air,
+        stone,
+        dirt,
+        grass
+    }
+    
     public class BlockGenerationVariables
     {
         public double seedDensity;
@@ -2448,7 +2621,6 @@ namespace PixelMidpointDisplacement
         }
 
     }
-
     public class BlockThresholdValues {
         //Higher means more solid
         public double blockThreshold;
@@ -2627,7 +2799,6 @@ namespace PixelMidpointDisplacement
         }
 
     }
-
     public class SeededBrownianMotion
     {
         public BlockGenerationVariables[,] seededBrownianMotion(BlockGenerationVariables[,] worldArray, BlockGenerationVariables[] ores)
