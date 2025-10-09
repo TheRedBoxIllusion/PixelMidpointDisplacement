@@ -20,3 +20,33 @@
 /processorParam:TextureFormat=Compressed
 /build:ariel.spritefont
 
+#begin CombineLightAndColor.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:CombineLightAndColor.fx
+
+#begin CombineMasks.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:CombineMasks.fx
+
+#begin LightCalculator.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:LightCalculator.fx
+
+#begin MaskLight.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:MaskLight.fx
+
+#begin Rotation.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Rotation.fx
+
