@@ -10,6 +10,8 @@ using System.Numerics;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using Vector2 = Microsoft.Xna.Framework.Vector2;
+using Vector3 = Microsoft.Xna.Framework.Vector3;
+using Vector4 = Microsoft.Xna.Framework.Vector4;
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -351,8 +353,18 @@ namespace PixelMidpointDisplacement
                 debugInfo += " | " + worldContext.surfaceBlocks.Contains((mouseXGridSpace, mouseYGridSpace));
                 debugInfo += " | Exposed: " + worldContext.exposedBlocks.ContainsKey((mouseXGridSpace, mouseYGridSpace));
                 debugInfo += " | Count: " + exposedBlockCount;
+                debugInfo += "\n";
+                if (worldContext.worldArray[mouseXGridSpace, mouseYGridSpace].faceVertices != null)
+                {
+                    foreach (Vector2 v in worldContext.worldArray[mouseXGridSpace, mouseYGridSpace].faceVertices)
+                    {
+                        debugInfo += v;
+                    }
+                    debugInfo += "\n";
+                    debugInfo += worldContext.worldArray[mouseXGridSpace, mouseYGridSpace].faceDirection;
+                }
 
-                _spriteBatch.DrawString(ariel, debugInfo, new Vector2(_graphics.GraphicsDevice.Viewport.Width / 2, 20), Color.BlueViolet);
+                _spriteBatch.DrawString(ariel, debugInfo, new Vector2(_graphics.GraphicsDevice.Viewport.Width / 3, 20), Color.BlueViolet);
                 Rectangle rect = new Rectangle(0, 0, 10, 10);
                 
             }
@@ -1203,10 +1215,11 @@ namespace PixelMidpointDisplacement
                 {
                     generateInstanceFromID(intWorldArray, blockIDFromInt[intWorldArray[x,y]], x,  y);
                     addBlockToDictionaryIfExposedToAir(intWorldArray, x, y);
+                    
                 }
             }
 
-            System.Diagnostics.Debug.WriteLine(exposedBlocks.Count);
+            
             updatePixelsPerBlock(pixelsPerBlockAfterGeneration);
 
         }
@@ -1230,6 +1243,7 @@ namespace PixelMidpointDisplacement
                 if ((idArray[x - 1, y] == (int)blockIDs.air || idArray[x + 1, y] == (int)blockIDs.air || idArray[x, y - 1] == (int)blockIDs.air || idArray[x, y + 1] == (int)blockIDs.air) && idArray[x,y] != (int)blockIDs.air) //Then it is exposed to air
                 {
                    exposedBlocks.Add((x, y), worldArray[x,y]);
+                   worldArray[x, y].setupFaceVertices(new Vector4(Convert.ToInt32((idArray[x, y-1] == (int)blockIDs.air)), Convert.ToInt32(idArray[x + 1, y] == (int)blockIDs.air), Convert.ToInt32(idArray[x,y + 1] == (int)blockIDs.air), Convert.ToInt32(idArray[x-1,y] == (int)blockIDs.air)));
                 }
             }
         }
@@ -1249,12 +1263,14 @@ namespace PixelMidpointDisplacement
             foreach (PhysicsObject obj in physicsObjects) {
                 obj.recalculateCollider();
             }
+
         }
         
         public bool deleteBlock(int x, int y) {
             if (worldArray[x, y].ID != 0)
             {
                 worldArray[x, y] = new Block(blockFromID[blockIDs.air]);
+                worldArray[x, y].setLocation((x, y));
 
                 return true;
             }
@@ -1265,6 +1281,7 @@ namespace PixelMidpointDisplacement
             if (worldArray[x, y].ID == intFromBlockID[blockIDs.air])
             {
                 worldArray[x, y] = new Block(blockFromID[blockIDFromInt[ID]]);
+                worldArray[x, y].setLocation((x, y));
                 return true;
             }
 
@@ -1809,7 +1826,7 @@ namespace PixelMidpointDisplacement
             //Item Swapping
             if (Keyboard.GetState().IsKeyDown(Keys.D1))
             {
-                System.Diagnostics.Debug.WriteLine(this);
+                
                 mainHand = new Weapon(worldContext.animationController, this);
                 worldContext.engineController.collisionController.addActiveCollider((IActiveCollider)mainHand);
             }
@@ -2200,7 +2217,7 @@ namespace PixelMidpointDisplacement
             this.animationController = animationController;
             this.sourceOffset = constantOffset;
             this.frameOffset = frameOffset;
-            System.Diagnostics.Debug.WriteLine(sourceDimensions);
+            
             this.sourceDimensions = sourceDimensions;
             animationlessSourceRectangle = animationlessSourceRect;
             sourceRect = animationlessSourceRectangle;
@@ -2232,9 +2249,9 @@ namespace PixelMidpointDisplacement
             }
 
             frame = (int)Math.Floor(duration / currentDurationPerFrame);
-            //System.Diagnostics.Debug.WriteLine(frame);
+            
             sourceRect = new Rectangle((int)(frame * frameOffset.X), (int)(currentAnimationYOffset * frameOffset.Y),(int)sourceDimensions.X, (int)sourceDimensions.Y);
-            //System.Diagnostics.Debug.WriteLine(sourceRect);
+            
         }
 
 
@@ -2248,13 +2265,16 @@ namespace PixelMidpointDisplacement
         public Rectangle sourceRectangle;
         public int emmissiveStrength;
         public int ID;
-     
+        public List<Vector2> faceVertices;
+        public (int x, int y) location;
+        public (int width, int height) dimensions = (1, 1); //Default to 1 by 1 blocks
+        public Vector4 faceDirection;
+        
 
         public Block(Rectangle textureSourceRectangle, int ID)
         {
             this.sourceRectangle = textureSourceRectangle;
             this.ID = ID;
-           
         }
         public Block(Rectangle textureSourceRectangle, int emmissiveStrength, int ID)
         {
@@ -2264,7 +2284,6 @@ namespace PixelMidpointDisplacement
         }
         public Block(int ID) {
             this.ID = ID;
-            
         }
         
         public Block(Block b)
@@ -2272,9 +2291,63 @@ namespace PixelMidpointDisplacement
             sourceRectangle = b.sourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
+            dimensions = b.dimensions;
+            location = b.location;
         }
 
-        public virtual void setupInitialData(int[,] worldArray, (int x, int y) blockLocation) { }
+        public void setLocation((int x, int y) location) {
+            System.Diagnostics.Debug.WriteLine(location);
+            this.location = location;
+        }
+
+        public virtual void setupInitialData(int[,] worldArray, (int x, int y) blockLocation) {
+            location = blockLocation;
+        }
+
+        public virtual void setupFaceVertices(Vector4 exposedFacesClockwise) {
+            this.faceDirection = exposedFacesClockwise;
+            //2 Vector2s are needed to allow for all 4 directions to be accounted for. However, this isn't the cleanest code and should be later improved
+            faceVertices = new List<Vector2>();
+            if(exposedFacesClockwise.X == 1)
+            {
+                faceVertices.Add(new Vector2(location.x, location.y));
+                faceVertices.Add(new Vector2(location.x + dimensions.width, location.y));
+            }
+            if (exposedFacesClockwise.Y == 1) 
+            {
+                //Check if the vertex already exists from the previous if statement
+                if (!faceVertices.Contains(new Vector2(location.x + dimensions.width, location.y)))
+                {
+
+                    faceVertices.Add(new Vector2(location.x + dimensions.width, location.y));
+                }
+                else {
+                    System.Diagnostics.Debug.WriteLine("Found an example that did contain said vector");
+                }
+                
+
+                    faceVertices.Add(new Vector2(location.x + dimensions.width, location.y + dimensions.height));
+            }
+            if(exposedFacesClockwise.Z == 1)
+            {
+                if (!faceVertices.Contains(new Vector2(location.x + dimensions.width, location.y + dimensions.height)))
+                {
+                    faceVertices.Add(new Vector2(location.x + dimensions.width, location.y + dimensions.height));
+                }
+
+                faceVertices.Add(new Vector2(location.x, location.y + dimensions.height));
+            }
+            if (exposedFacesClockwise.W == 1)
+            {
+                if (!faceVertices.Contains(new Vector2(location.x, location.y + dimensions.height)))
+                {
+                    //System.Diagnostics.Debug.WriteLine("Decidedly: AHHHH " + location.x + ", " + location.y + dimensions.height);
+                    faceVertices.Add(new Vector2(location.x, location.y + dimensions.height));
+                }
+               
+                    faceVertices.Add(new Vector2(location.x, location.y));
+            }
+        }
     }
 
     public class GrassBlock : Block {
@@ -2350,7 +2423,10 @@ namespace PixelMidpointDisplacement
             }
             
             sourceRectangle = new Rectangle(sourceRectangle.X + xOffset * 32, sourceRectangle.Y, 32, 32);
+
+            base.setupInitialData(worldArray, blockLocation);
         }
+        
     }
 
 
