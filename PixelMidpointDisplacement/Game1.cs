@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.ComponentModel.Design;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -17,23 +18,10 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * Things to do:
- * 
- * Completely modularise the different segments                                     - In Progress
- * - Physics engine
- * - Different noise algorithms
- * 
- * Lighting engine                                                                  - Needs to be started
- * -Emissive blocks and the light levels array
- * - Implement a global surface illumination by using a 'background' array
- *   that defines where the surface 'air' blocks are. Then using a vector for direction, calculate
- *   the light ray cast below the surface by the sunlight
- *   -> can be done two ways. A vector calculated from the top of the world. This would provide shadows from mountain tops
- *      if there's the appropriate direction. This wouldn't work too well with things like floating islands that would cast massive shadows
- *      So perhaps contemplate some hygens principle into the equation I guess after a certain distance
- * 
- * Optimise the drawing system                                                      - Completed
- * -Only draw blocks that are present on the screen
- *      - Determined by the screen offset (or the player position), the pixelsPerBlock and the window size
+    Rewrite the draw system to be as follows:
+        - Draw each block to a "chunk" -a 32 x worldDepth sprite. then draw the chunks that would be rednered to the screen
+        - Use the "sourceRect" to draw the segments of the chunk that would be on screen
+        - When destroying a block or adding it, just spriteBatch.Draw to that chunk and either clear the space that the block would be, or draw the sprite to that spot in the chunk
  */
 
 /*
@@ -58,6 +46,7 @@ namespace PixelMidpointDisplacement
         RenderTarget2D workingShadowMap;
         RenderTarget2D finalShadowMap;
         RenderTarget2D lightMap;
+        RenderTarget2D maskedLightmap;
 
         RenderTarget2D world;
 
@@ -75,12 +64,16 @@ namespace PixelMidpointDisplacement
 
         List<Texture2D> spriteSheetList = new List<Texture2D>();
 
+        Texture2D[] chunkArray;
 
         Effect calculateLight;
         Effect calculateShadow;
         Effect combineLightAndShadow;
         Effect combineLightAndColor;
         Effect combineShadows;
+
+        bool useShaders = false;
+        double toggleCooldown = 0;
 
 
         EngineController engineController;
@@ -158,10 +151,21 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(weaponSpriteSheet);
             spriteSheetList.Add(blockItemSpriteSheet);
 
+            
+
             worldContext.generateIDsFromTextureList(new Rectangle[]{new Rectangle(0, 0, 0, 0), new Rectangle(0, 0, 32, 32), new Rectangle(0, 32, 32, 32), new Rectangle(0, 64, 32, 32)});
 
+            (int width, int height) worldDimensions = (400, 800);
+            int blocksPerChunk = 32;
 
-            worldContext.generateWorld((400, 800));
+            //Try to find a way to make them recalculate depending on the pixelsPerBlock so that it's not so strictly defined
+            chunkArray = new Texture2D[(int)Math.Ceiling(worldDimensions.width/(double)blocksPerChunk)];
+            for (int i = 0; i < chunkArray.Length; i++) {
+                chunkArray[i] = new Texture2D(GraphicsDevice, blocksPerChunk * worldContext.pixelsPerBlockAfterGeneration, worldDimensions.height * worldContext.pixelsPerBlockAfterGeneration);
+            }
+
+
+            worldContext.generateWorld(worldDimensions);
 
 
             player.setSpriteTexture(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png"));
@@ -176,6 +180,7 @@ namespace PixelMidpointDisplacement
             workingShadowMap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
             finalShadowMap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
             lightMap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
+            maskedLightmap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
             world = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
             
             calculateLight = Content.Load<Effect>("LightCalculator");
@@ -250,6 +255,13 @@ namespace PixelMidpointDisplacement
             }
             timeSinceRepeatedLetter -= gameTime.ElapsedGameTime.TotalSeconds;
 
+            if (Keyboard.GetState().IsKeyDown(Keys.P) && toggleCooldown <= 0) {
+                useShaders = !useShaders;
+                toggleCooldown = 0.2;
+            }
+            if (toggleCooldown > 0) {
+                toggleCooldown -= gameTime.ElapsedGameTime.TotalSeconds;
+            }
 
 
 
@@ -341,10 +353,10 @@ namespace PixelMidpointDisplacement
             GraphicsDevice.SetRenderTarget(spriteRendering);
             _spriteBatch.Begin(SpriteSortMode.Deferred, null, SamplerState.PointClamp, null, null, null, null);
             int exposedBlockCount = 0;
-            
+
             //Draw the screen based on the visible blocks
             //The range: screenOffset - screenOffset + screenDimension
-            for (int x = ((int)-worldContext.screenSpaceOffset.x ) / worldContext.pixelsPerBlock - 1; x < ((int)-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / worldContext.pixelsPerBlock + 1; x++)
+            for (int x = ((int)-worldContext.screenSpaceOffset.x) / worldContext.pixelsPerBlock - 1; x < ((int)-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / worldContext.pixelsPerBlock + 1; x++)
             {
                 for (int y = ((int)-worldContext.screenSpaceOffset.y) / worldContext.pixelsPerBlock - 1; y < ((int)-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight) / worldContext.pixelsPerBlock + 1; y++)
                 {
@@ -354,17 +366,18 @@ namespace PixelMidpointDisplacement
                         if (lightValue > 255) {
                             lightValue = 255;
                         }
-                            Color lightLevel = new Color(lightValue, lightValue, lightValue);
+                        Color lightLevel = Color.White;
+                        if (!useShaders) {lightLevel =  new Color(lightValue, lightValue, lightValue); }
                         if (worldContext.exposedBlocks.ContainsKey((x, y)) && Mouse.GetState().MiddleButton == ButtonState.Pressed) {
-                            
+
                             exposedBlockCount += 1;
                         }
 
-                            _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), tempWorldArray[x,y].sourceRectangle, lightLevel);                    }
+                        _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), tempWorldArray[x, y].sourceRectangle, lightLevel); }
                 }
             }
 
-            _spriteBatch.DrawString(ariel, (int)player.x/worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10, 10), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, (int)player.x / worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10, 10), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
 
@@ -396,7 +409,7 @@ namespace PixelMidpointDisplacement
 
                 _spriteBatch.DrawString(ariel, debugInfo, new Vector2(_graphics.GraphicsDevice.Viewport.Width / 3, 20), Color.BlueViolet);
                 Rectangle rect = new Rectangle(0, 0, 10, 10);
-                
+
             }
 
             if (chatCountdown > 0 && chat != "") {
@@ -419,7 +432,6 @@ namespace PixelMidpointDisplacement
                     //If the item is facing towards the negative x, account for flipping the image
                     rotationXOffset = owner.owner.playerDirection * owner.sourceRectangle.Width;
                     positionXOffset = (int)(owner.owner.width * worldContext.pixelsPerBlock); //Might need to modify the collider to account for this change...
-                    
                 }
                 if (owner.verticalDirection < 0)
                 {
@@ -429,7 +441,7 @@ namespace PixelMidpointDisplacement
                 Vector2 origin = new Vector2(owner.owner.playerDirection * owner.origin.X - rotationXOffset, owner.verticalDirection * owner.origin.Y - rotationYOffset);
 
                 _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)(owner.owner.x + worldContext.screenSpaceOffset.x + a.currentPosition.xPos + positionXOffset), (int)(owner.owner.y + worldContext.screenSpaceOffset.y + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White, (float)(owner.owner.playerDirection * (a.currentPosition.rotation)), origin, owner.spriteEffect | owner.owner.playerEffect, 0f);
-               // _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)((player.x + worldContext.screenSpaceOffset.x) + a.currentPosition.xPos), (int)((player.y + worldContext.screenSpaceOffset.y) + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White,  owner.owner.playerDirection * (float)(a.currentPosition.rotation), origin, owner.spriteEffect | owner.owner.playerEffect, 0f);
+                // _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)((player.x + worldContext.screenSpaceOffset.x) + a.currentPosition.xPos), (int)((player.y + worldContext.screenSpaceOffset.y) + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White,  owner.owner.playerDirection * (float)(a.currentPosition.rotation), origin, owner.spriteEffect | owner.owner.playerEffect, 0f);
             }
 
             //drawCollisionBox();
@@ -437,33 +449,42 @@ namespace PixelMidpointDisplacement
             _spriteBatch.End();
 
             //Draw light
-            Vector2 lightPosition = new Vector2((float)Mouse.GetState().X/(float)_graphics.PreferredBackBufferWidth, (float)Mouse.GetState().Y/(float)_graphics.PreferredBackBufferHeight);
-            calculateLight.Parameters["lightIntensity"].SetValue(90f);
-            calculateLight.Parameters["lightColor"].SetValue(new Vector3(1f, 1f, 1f));
-            calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
-            calculateLight.Parameters["lightPosition"].SetValue(lightPosition);
-            System.Diagnostics.Debug.WriteLine((float)Mouse.GetState().X/(float)_graphics.PreferredBackBufferWidth);
-            GraphicsDevice.SetRenderTarget(lightMap);
-            _spriteBatch.Begin(effect : calculateLight);
-            _spriteBatch.Draw(lightMap, lightMap.Bounds, Color.White);
-            _spriteBatch.End();
+            if (useShaders)
+            {
+                Vector2 lightPosition = new Vector2((float)Mouse.GetState().X / (float)_graphics.PreferredBackBufferWidth, (float)Mouse.GetState().Y / (float)_graphics.PreferredBackBufferHeight);
+                calculateLight.Parameters["lightIntensity"].SetValue(90f);
+                calculateLight.Parameters["lightColor"].SetValue(new Vector3(1f, 1f, 1f));
+                calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
+                calculateLight.Parameters["lightPosition"].SetValue(lightPosition);
 
-            /*
-            calculateShadowMap(lightPosition);
+            
+                GraphicsDevice.SetRenderTarget(lightMap);
+                _spriteBatch.Begin(effect: calculateLight);
+                _spriteBatch.Draw(lightMap, lightMap.Bounds, Color.White);
+                _spriteBatch.End();
 
-            GraphicsDevice.SetRenderTarget(lightMap);
-            _spriteBatch.Begin(effect: combineLightAndShadow);
-            combineLightAndShadow.Parameters["Mask"].SetValue(finalShadowMap);
-            _spriteBatch.Draw(lightMap, Vector2.Zero, Color.White);
-            _spriteBatch.End();
-            */
-            combineLightAndColor.Parameters["Lightmap"].SetValue(lightMap);
-            GraphicsDevice.SetRenderTarget(world);
-            _spriteBatch.Begin(effect : combineLightAndColor);
-            _spriteBatch.Draw(spriteRendering, Vector2.Zero, Color.White);
-            _spriteBatch.End();
+                calculateShadowMap(lightPosition);
 
-            GraphicsDevice.SetRenderTarget(null);
+                GraphicsDevice.SetRenderTarget(maskedLightmap);
+                _spriteBatch.Begin(effect: combineLightAndShadow);
+                combineLightAndShadow.Parameters["Mask"].SetValue(finalShadowMap);
+                _spriteBatch.Draw(lightMap, Vector2.Zero, Color.White);
+                _spriteBatch.End();
+
+                combineLightAndColor.Parameters["Lightmap"].SetValue(maskedLightmap);
+                GraphicsDevice.SetRenderTarget(world);
+                _spriteBatch.Begin(effect: combineLightAndColor);
+                _spriteBatch.Draw(spriteRendering, Vector2.Zero, Color.White);
+                _spriteBatch.End();
+            }
+            else {
+                GraphicsDevice.SetRenderTarget(world);
+                _spriteBatch.Begin();
+                _spriteBatch.Draw(spriteRendering, Vector2.Zero, Color.White);
+                _spriteBatch.End();
+            }
+
+                GraphicsDevice.SetRenderTarget(null);
             _spriteBatch.Begin();
             _spriteBatch.Draw(world, Vector2.Zero, Color.White);
             _spriteBatch.End();
@@ -480,32 +501,51 @@ namespace PixelMidpointDisplacement
             GraphicsDevice.SetRenderTarget(workingShadowMap);
             GraphicsDevice.Clear(Color.Black);
 
+            int numberOfVertices = 0;
+            
             calculateShadow.Parameters["lightPosition"].SetValue(lightPosition);
-            for (int x = 0; x < worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth; x++)
+
+            for (int x = (int)(-worldContext.screenSpaceOffset.x/worldContext.pixelsPerBlock) - 1; x < ((-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / worldContext.pixelsPerBlock) + 1; x++)
             {
-                for (int y = 0; y < worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight; y++)
+                
+                for (int y = (-worldContext.screenSpaceOffset.y/worldContext.pixelsPerBlock) - 1; y < ((-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight)/worldContext.pixelsPerBlock)+1; y++)
                 {
+                    
                     if (worldContext.exposedBlocks.ContainsKey((x, y)))
                     {
+                        
                         for (int i = 0; i < worldContext.worldArray[x, y].faceVertices.Count - 1; i++)
                         {
+
                             Vector2[] vertexArray = worldContext.worldArray[x, y].faceVertices.ToArray();
+
+                            
                             if (vertexArray[i].X != vertexArray[i + 1].X && vertexArray[i].Y != vertexArray[i + 1].Y)
                             {
+                                
                                 continue;
+                            }
+                            
+
+                            for (int g = 0; g < vertexArray.Length; g++)
+                            {
+                                vertexArray[g] *= worldContext.pixelsPerBlock;
+                                vertexArray[g] = new Vector2((vertexArray[g].X + worldContext.screenSpaceOffset.x), (vertexArray[g].Y + worldContext.screenSpaceOffset.y));
                             }
 
                             Color[] vertex1Color = new Color[1] { Color.Black };
                             Color[] vertex2Color = new Color[1] { Color.Black };
 
-                            if (vertexArray[i].X >= 0 && vertexArray[i].X <= finalShadowMap.Width && vertexArray[i].Y >= 0 && vertexArray[i].Y <= finalShadowMap.Height)
+                            
+                            if (vertexArray[i].X >= 0 && vertexArray[i].X < finalShadowMap.Width && vertexArray[i].Y >= 0 && vertexArray[i].Y < finalShadowMap.Height)
                             {
-                                finalShadowMap.GetData<Color>(0, new Rectangle((int)vertexArray[i].X, (int)vertexArray[i].Y, 1, 1), vertex1Color, 0, 1);
+                                finalShadowMap.GetData<Color>(0, new Rectangle((int)vertexArray[i].X, (int)vertexArray[i].Y, 1, 1), vertex1Color, 0, 1); //Rect must be inside the texture
                             }
                             if (vertexArray[i + 1].X >= 0 && vertexArray[i + 1].X <= finalShadowMap.Width && vertexArray[i + 1].Y >= 0 && vertexArray[i + 1].Y <= finalShadowMap.Height)
                             {
                                 finalShadowMap.GetData<Color>(0, new Rectangle((int)vertexArray[i + 1].X, (int)vertexArray[i + 1].Y, 1, 1), vertex2Color, 0, 1);
                             }
+                            
 
 
                             if (vertex1Color[0] != Color.Black && vertex2Color[0] != Color.Black)
@@ -513,7 +553,8 @@ namespace PixelMidpointDisplacement
                                 //The face is already in a shadow, so skip calculating the shadow for it
                                 continue;
                             }
-
+                            
+                            numberOfVertices += 1;
                             //Determine what axis the plane is facing
                             Vector2 faceDirection = new Vector2();
                             if (vertexArray[i].X - vertexArray[i + 1].X == 0)
@@ -536,7 +577,7 @@ namespace PixelMidpointDisplacement
 
                             Vector2 vertex1 = vertexArray[firstVertex] / new Vector2(_graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
                             Vector2 vertex2 = vertexArray[secondVertex] / new Vector2(_graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight); ;
-
+                            
 
                             //Calculate variables for the shader
                             float gradient1 = (lightPosition.Y - vertex1.Y) / (lightPosition.X - vertex1.X);
@@ -549,6 +590,7 @@ namespace PixelMidpointDisplacement
 
                             //Set variables in the shader
                             //rotator.Parameters["faceDirection"].SetValue(faceDirection);
+                            
                             calculateShadow.Parameters["vertex1"].SetValue(vertex1);
                             calculateShadow.Parameters["vertex2"].SetValue(vertex2);
                             calculateShadow.Parameters["gradient1"].SetValue(gradient1);
@@ -562,7 +604,7 @@ namespace PixelMidpointDisplacement
                             GraphicsDevice.SetRenderTarget(shadowMap);
                             GraphicsDevice.Clear(Color.Black);
                             _spriteBatch.Begin(samplerState: SamplerState.PointClamp, effect: calculateShadow);
-                            _spriteBatch.Draw(shadowMap, shadowMap.Bounds, Color.White);
+                            _spriteBatch.Draw(redTexture, shadowMap.Bounds, Color.White);
                             _spriteBatch.End();
 
                             //Draw the current shadow and the cummulative shadow map together
@@ -583,6 +625,7 @@ namespace PixelMidpointDisplacement
                     }
                 }
             }
+            //System.Diagnostics.Debug.WriteLine(numberOfVertices);
         }
             
    
