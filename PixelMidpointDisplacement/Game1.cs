@@ -22,6 +22,10 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
         - Draw each block to a "chunk" -a 32 x worldDepth sprite. then draw the chunks that would be rednered to the screen
         - Use the "sourceRect" to draw the segments of the chunk that would be on screen
         - When destroying a block or adding it, just spriteBatch.Draw to that chunk and either clear the space that the block would be, or draw the sprite to that spot in the chunk
+
+    Speed up the shader:
+        - Draw the light and shadow in 1/4 resolution and upscale. Reduces the number of pixels significantly.
+        -> Might rewrite it to not have to calculate the shadows for every pixel, only at the faces and adjust how light is calculated. Use a raycasting to check if a 'face' blocks the light
  */
 
 /*
@@ -39,6 +43,7 @@ namespace PixelMidpointDisplacement
     {
         private GraphicsDeviceManager _graphics;
         private SpriteBatch _spriteBatch;
+        BasicEffect basicEffect;
 
         WorldContext worldContext;
         RenderTarget2D spriteRendering;
@@ -50,6 +55,11 @@ namespace PixelMidpointDisplacement
 
         RenderTarget2D world;
 
+        float shadowValue = 0.2f;
+
+        Matrix worldMatrix, viewMatrix, projectionMatrix;
+
+        VertexPositionColor[] triangleVertices = new VertexPositionColor[5];
 
         //Texture2D playerSprite;
         Texture2D collisionSprite;
@@ -64,7 +74,9 @@ namespace PixelMidpointDisplacement
 
         List<Texture2D> spriteSheetList = new List<Texture2D>();
 
-        Texture2D[] chunkArray;
+        RenderTarget2D[,] chunkArray;
+
+        RenderTarget2D chunkTest;
 
         Effect calculateLight;
         Effect calculateShadow;
@@ -72,8 +84,16 @@ namespace PixelMidpointDisplacement
         Effect combineLightAndColor;
         Effect combineShadows;
 
+        List<(int x, int y)> currentlyRenderedExposedBlocks = new List<(int x, int y)>();
+
+        short[] ind = { 0, 3, 2, 0, 1, 2 };
+
+        double shaderPrecision = 0.75;
+
         bool useShaders = false;
         double toggleCooldown = 0;
+
+        int exposedBlockCount;
 
 
         EngineController engineController;
@@ -81,6 +101,7 @@ namespace PixelMidpointDisplacement
         AnimationController animationController;
 
         SpriteFont ariel;
+        
 
         //++++++++++++++++++
 
@@ -102,6 +123,14 @@ namespace PixelMidpointDisplacement
         int frameCount = 0;
 
         string playerAcceleration;
+
+        bool hasCalculatedFirstChunks = false;
+        int blocksPerChunk = 32;
+
+        int chunkXMin;
+        int chunkYMin;
+        int chunkXMax;
+        int chunkYMax;
 
         public Game1()
         {
@@ -132,12 +161,22 @@ namespace PixelMidpointDisplacement
             _graphics.PreferredBackBufferWidth = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width;
             _graphics.ApplyChanges();
 
+            worldMatrix = Matrix.Identity;
+            viewMatrix = Matrix.CreateLookAt(new Vector3(0, 0, 1), Vector3.Zero, Vector3.Up);
+
+            projectionMatrix = Matrix.CreateOrthographicOffCenter(0, 1, 1, 0, 0, 1);
+
             base.Initialize();
         }
 
         protected override void LoadContent()
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
+            basicEffect = new BasicEffect(_graphics.GraphicsDevice);
+
+            basicEffect.World = worldMatrix;
+            basicEffect.View = viewMatrix;
+            basicEffect.Projection = projectionMatrix;
 
             ariel = Content.Load<SpriteFont>("ariel");
             blockSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockSpriteSheet.png");
@@ -151,22 +190,23 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(weaponSpriteSheet);
             spriteSheetList.Add(blockItemSpriteSheet);
 
-            
+            triangleVertices[0].Color = new Color(shadowValue, shadowValue, shadowValue);
+            triangleVertices[1].Color = new Color(shadowValue, shadowValue, shadowValue);
+            triangleVertices[2].Color = new Color(shadowValue, shadowValue, shadowValue);
+            triangleVertices[3].Color = new Color(shadowValue, shadowValue, shadowValue);
+            triangleVertices[4].Color = new Color(shadowValue, shadowValue, shadowValue);
+
+            basicEffect.TextureEnabled = false;
+            basicEffect.VertexColorEnabled = true;
 
             worldContext.generateIDsFromTextureList(new Rectangle[]{new Rectangle(0, 0, 0, 0), new Rectangle(0, 0, 32, 32), new Rectangle(0, 32, 32, 32), new Rectangle(0, 64, 32, 32)});
 
             (int width, int height) worldDimensions = (400, 800);
-            int blocksPerChunk = 32;
-
-            //Try to find a way to make them recalculate depending on the pixelsPerBlock so that it's not so strictly defined
-            chunkArray = new Texture2D[(int)Math.Ceiling(worldDimensions.width/(double)blocksPerChunk)];
-            for (int i = 0; i < chunkArray.Length; i++) {
-                chunkArray[i] = new Texture2D(GraphicsDevice, blocksPerChunk * worldContext.pixelsPerBlockAfterGeneration, worldDimensions.height * worldContext.pixelsPerBlockAfterGeneration);
-            }
-
+            chunkArray = new RenderTarget2D[(int)Math.Ceiling(worldDimensions.width/(double)blocksPerChunk),(int)Math.Ceiling(worldDimensions.height/(double)blocksPerChunk)];
 
             worldContext.generateWorld(worldDimensions);
-
+            updatePixelsPerBlock();
+            
 
             player.setSpriteTexture(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png"));
             collisionSprite = new Texture2D(_graphics.GraphicsDevice, 1, 1);
@@ -176,13 +216,15 @@ namespace PixelMidpointDisplacement
 
 
             spriteRendering = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
-            shadowMap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
-            workingShadowMap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
-            finalShadowMap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
-            lightMap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
-            maskedLightmap = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
             world = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
-            
+
+            shadowMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
+            workingShadowMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
+            finalShadowMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
+            lightMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
+            maskedLightmap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
+
+
             calculateLight = Content.Load<Effect>("LightCalculator");
             calculateShadow = Content.Load<Effect>("Rotation");
             combineShadows = Content.Load<Effect>("CombineMasks");
@@ -191,12 +233,34 @@ namespace PixelMidpointDisplacement
 
         }
 
+        public void updatePixelsPerBlock()
+        {
+            for (int x = 0; x < chunkArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < chunkArray.GetLength(1); y++)
+                {
+                    chunkArray[x, y] = new RenderTarget2D(GraphicsDevice, blocksPerChunk * worldContext.pixelsPerBlock, blocksPerChunk * worldContext.pixelsPerBlock);
+                }
+            }
+            
+        }
+
         protected override void Update(GameTime gameTime)
         {
             
             if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
+            updateChatSystem(gameTime);
+            updatePhysicsObjects(gameTime);
+            calculateScreenspaceOffset();
+            updateDigSystem();
+            tickAnimations(gameTime);
+
+            base.Update(gameTime);
+        }
+
+        public void updateChatSystem(GameTime gameTime) {
             if (Keyboard.GetState().IsKeyDown(Keys.Enter) && chatCountdown < 2.7)
             {
                 if (writeToChat)
@@ -218,7 +282,7 @@ namespace PixelMidpointDisplacement
                 if (Keyboard.GetState().GetPressedKeys().Length != 0)
                 {
                     Keys k = Keyboard.GetState().GetPressedKeys()[0];
-                    
+
                     if (!(k.ToString().Equals("Enter")))
                     {
                         chatCountdown = 3;
@@ -232,7 +296,7 @@ namespace PixelMidpointDisplacement
                             previousAddedCharacters = k.ToString();
                             chat += stringToAdd;
 
-                            if (chat.Length >= 75 && chat.Length%75 == 0) { chat = chat.Insert(chat.LastIndexOf(' ') + 1, "\n");}
+                            if (chat.Length >= 75 && chat.Length % 75 == 0) { chat = chat.Insert(chat.LastIndexOf(' ') + 1, "\n"); }
 
                             if (previousAddedCharacters.Equals(k.ToString()))
                             {
@@ -244,7 +308,7 @@ namespace PixelMidpointDisplacement
                             }
                         }
                     }
-                    
+
                 }
             }
             chatCountdown -= gameTime.ElapsedGameTime.TotalSeconds;
@@ -255,46 +319,50 @@ namespace PixelMidpointDisplacement
             }
             timeSinceRepeatedLetter -= gameTime.ElapsedGameTime.TotalSeconds;
 
-            if (Keyboard.GetState().IsKeyDown(Keys.P) && toggleCooldown <= 0) {
+            if (Keyboard.GetState().IsKeyDown(Keys.P) && toggleCooldown <= 0)
+            {
                 useShaders = !useShaders;
                 toggleCooldown = 0.2;
             }
-            if (toggleCooldown > 0) {
+            if (toggleCooldown > 0)
+            {
                 toggleCooldown -= gameTime.ElapsedGameTime.TotalSeconds;
             }
-
-
-
-
+        }
+        public void updatePhysicsObjects(GameTime gameTime) {
             for (int i = 0; i < worldContext.physicsObjects.Count; i++)
-                {
-                    //General Physics simulations
-                    //Order: Acceleration, velocity then location
-                    worldContext.physicsObjects[i].isOnGround = false;
+            {
+                //General Physics simulations
+                //Order: Acceleration, velocity then location
+                worldContext.physicsObjects[i].isOnGround = false;
 
-                    engineController.physicsEngine.addGravity(worldContext.physicsObjects[i]);
-                    engineController.physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                engineController.physicsEngine.addGravity(worldContext.physicsObjects[i]);
+                engineController.physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
-                    engineController.physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
-                    engineController.physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
-                    engineController.physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                engineController.physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
+                engineController.physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                engineController.physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
-                    //Reset acceleration to be calculated next frame
-                    playerAcceleration = worldContext.physicsObjects[i].accelerationX + ", " + worldContext.physicsObjects[i].accelerationY;
-
-
-                    worldContext.physicsObjects[i].accelerationX = 0;
-                    worldContext.physicsObjects[i].accelerationY = 0;
-                }
+                //Reset acceleration to be calculated next frame
+                playerAcceleration = worldContext.physicsObjects[i].accelerationX + ", " + worldContext.physicsObjects[i].accelerationY;
 
 
+                worldContext.physicsObjects[i].accelerationX = 0;
+                worldContext.physicsObjects[i].accelerationY = 0;
+            }
+
+        }
+        public void calculateScreenspaceOffset() {
             worldContext.screenSpaceOffset = (-(int)player.x + _graphics.GraphicsDevice.Viewport.Width / 2 - (int)(player.width * worldContext.pixelsPerBlock),
-                                              -(int)player.y + _graphics.GraphicsDevice.Viewport.Height / 2 - (int)(player.height * worldContext.pixelsPerBlock));
+                                                  -(int)player.y + _graphics.GraphicsDevice.Viewport.Height / 2 - (int)(player.height * worldContext.pixelsPerBlock));
 
-            if (worldContext.screenSpaceOffset.x > -(int)(player.width * worldContext.pixelsPerBlock) - 5) {
+            if (worldContext.screenSpaceOffset.x > -(int)(player.width * worldContext.pixelsPerBlock) - 5)
+            {
                 worldContext.screenSpaceOffset = (-(int)(player.width * worldContext.pixelsPerBlock) - 5, worldContext.screenSpaceOffset.y);
-            } else if (worldContext.screenSpaceOffset.x < (-(int)worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Width - (int)(player.width * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock/2){
-                worldContext.screenSpaceOffset = ((-(int)worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Width - (int)(player.width * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock/2, worldContext.screenSpaceOffset.y);
+            }
+            else if (worldContext.screenSpaceOffset.x < (-(int)worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Width - (int)(player.width * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock / 2)
+            {
+                worldContext.screenSpaceOffset = ((-(int)worldContext.worldArray.GetLength(0) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Width - (int)(player.width * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock / 2, worldContext.screenSpaceOffset.y);
             }
 
             if (worldContext.screenSpaceOffset.y > -(int)(player.height * worldContext.pixelsPerBlock) - 5)
@@ -305,9 +373,9 @@ namespace PixelMidpointDisplacement
             {
                 worldContext.screenSpaceOffset = (worldContext.screenSpaceOffset.x, (-(int)worldContext.worldArray.GetLength(1) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Height - (int)(player.height * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock / 2);
             }
-            
+        }
 
-            //Digging system
+        public void updateDigSystem() {
             if (Mouse.GetState().ScrollWheelValue / 120 != digSize - 1)
             {
                 digSize = Mouse.GetState().ScrollWheelValue / 120 + 1;
@@ -327,7 +395,8 @@ namespace PixelMidpointDisplacement
                 int mouseYGridSpace = (int)Math.Floor(mouseYPixelSpace / worldContext.pixelsPerBlock);
 
                 //Delete Block at that location
-                for (int x = 0; x < digSize; x++) {
+                for (int x = 0; x < digSize; x++)
+                {
                     for (int y = 0; y < digSize; y++)
                     {
                         int usedX = x - (int)Math.Floor(digSize / 2.0);
@@ -341,47 +410,248 @@ namespace PixelMidpointDisplacement
 
             }
 
-            animationController.tickAnimation(gameTime.ElapsedGameTime.TotalSeconds);
-
-            base.Update(gameTime);
         }
-
+        public void tickAnimations(GameTime gameTime) {
+            animationController.tickAnimation(gameTime.ElapsedGameTime.TotalSeconds);
+        }
         protected override void Draw(GameTime gameTime)
         {
-            GraphicsDevice.Clear(Color.CornflowerBlue);
-            Block[,] tempWorldArray = worldContext.worldArray;
-            GraphicsDevice.SetRenderTarget(spriteRendering);
-            _spriteBatch.Begin(SpriteSortMode.Deferred, null, SamplerState.PointClamp, null, null, null, null);
-            int exposedBlockCount = 0;
+            if (!hasCalculatedFirstChunks) {
+                
+                drawInitialChunks();
+                hasCalculatedFirstChunks = true;
+            }
+            /*
+            //Update chunks
+            int firstX = (int)Math.Floor(-worldContext.screenSpaceOffset.x / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
+            int firstY = (int)Math.Floor(-worldContext.screenSpaceOffset.y / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
 
-            //Draw the screen based on the visible blocks
-            //The range: screenOffset - screenOffset + screenDimension
+            int lastX = (int)Math.Ceiling((-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
+            int lastY = (int)Math.Ceiling((-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight) / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
+            //Something is wrong here that I need to fix. Going upwards crashes the game, and it doesn't render the chunks properly
+
+            //It's assuming that when the top moves into a new chunk, then so does the bottom. It needs to consider both seperately and only account for its side (min/max)
+            System.Diagnostics.Debug.WriteLine(firstX + ", " + firstY);
+            System.Diagnostics.Debug.WriteLine(lastX + ", " + lastY);
+            if (firstX > chunkXMin)
+            {
+                //The screen moved right, so clear the blocks at the current chunkXMin
+
+                for (int y = chunkYMin; y <= chunkYMax; y++)
+                {
+                    chunkArray[chunkXMin, y] = null;
+                }
+                chunkXMin = firstX;
+
+            }
+            if (firstY > chunkYMin)
+            {
+                //The screen moved down, so clear the blocks at the current chunkYMin, and draw ones at lastY
+                for (int x = chunkXMin; x <= chunkXMax; x++)
+                {
+                    chunkArray[x, chunkYMin] = null;
+                }
+                
+                chunkYMin = firstY;
+                
+            }
+            if (firstX < chunkXMin)
+            {
+                //The screen moved left, so clear the blocks at the current chunkXMax, and draw ones at firstX
+                //Clear chunks
+                
+                //Draw the new chunks
+                for (int y = firstY; y <= lastY; y++)
+                {
+                    drawChunk(firstX, y);
+                }
+                chunkXMin = firstX;
+                
+            }
+            if (firstY < chunkYMin)
+            {
+                //The screen moved up, so clear the blocks at the current chunkYMax, and draw ones at lastY
+
+                for (int x = firstX; x <= lastX; x++)
+                {
+                    drawChunk(x, firstY);
+                }
+                chunkYMin = firstY;
+            }
+
+            if (lastX > chunkXMax)
+            {
+                //The screen moved right, so clear the blocks at the current chunkXMin
+
+                for (int y = firstY; y <= lastY; y++)
+                {
+                    drawChunk(lastX, y);
+                }
+                chunkXMax = lastX;
+
+            }
+            if (lastY > chunkYMax)
+            {
+                //The screen moved down, so clear the blocks at the current chunkYMin, and draw ones at lastY
+                for (int x = firstX; x <= lastX; x++)
+                {
+                    drawChunk(x, lastY);
+                }
+
+                chunkYMax = lastY;
+
+            }
+            if (lastX < chunkXMax)
+            {
+                //The screen moved left, so clear the blocks at the current chunkXMax, and draw ones at firstX
+                //Clear chunks
+
+                //Draw the new chunks
+                for (int y = chunkYMin; y <= chunkYMax; y++)
+                {
+                    chunkArray[chunkXMax, y] = null;
+                }
+                chunkXMax = lastX;
+
+            }
+            if (lastY < chunkYMax)
+            {
+                //The screen moved up, so clear the blocks at the current chunkYMax, and draw ones at lastY
+
+                for (int x = chunkXMin; x <= chunkXMax; x++)
+                {
+                    chunkArray[x, chunkYMax] = null;
+                }
+                chunkYMax = lastY;
+            }*/
+
+            
+            GraphicsDevice.Clear(Color.CornflowerBlue);
+            
+            GraphicsDevice.SetRenderTarget(spriteRendering);
+            _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+
+            /*
+             for (int x = firstX; x <= lastX; x++)
+             {
+                 for (int y = firstY; y <= lastY; y++)
+                 {
+                     _spriteBatch.Draw(chunkArray[x, y], new Vector2(x * blocksPerChunk * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, (y * blocksPerChunk * worldContext.pixelsPerBlock) + worldContext.screenSpaceOffset.y), Color.White);
+                 }
+             }
+            */
+
+            drawBlocks();
+            drawCoords(gameTime);
+            drawDebugInfo();
+            drawChat();
+            drawPlayer();
+            drawAnimatorObjects();
+            _spriteBatch.End();
+
+            
+            drawLight();
+
+
+            GraphicsDevice.SetRenderTarget(null);
+            _spriteBatch.Begin();
+            _spriteBatch.Draw(world, world.Bounds, Color.White);      
+            _spriteBatch.End();
+
+            base.Draw(gameTime);
+        }
+
+        public void drawInitialChunks() {
+            //Draw the first chunks that are on screen. When the chunk number changes, use drawChunk to draw the new ones to a render target and clear the old value to free up space?
+            chunkXMin = (int)Math.Floor(-worldContext.screenSpaceOffset.x / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
+            chunkXMax = (int)Math.Ceiling((-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
+
+            chunkYMin = (int)Math.Floor(-worldContext.screenSpaceOffset.y / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
+            chunkYMax = (int)Math.Ceiling((-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight) / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
+            for (int x = chunkXMin; x <= chunkXMax; x++) {
+                for (int y = chunkYMin; y <= chunkYMax; y++)
+                {
+                    chunkArray[x, y] = new RenderTarget2D(GraphicsDevice, blocksPerChunk * worldContext.pixelsPerBlock, blocksPerChunk * worldContext.pixelsPerBlock);
+                    GraphicsDevice.SetRenderTarget(chunkArray[x,y]);
+                    _spriteBatch.Begin();
+                    
+                    
+                    for (int xB = x * blocksPerChunk; xB < (x + 1) * blocksPerChunk; xB++) {
+                        for (int yB = y * blocksPerChunk; yB < (y + 1) * blocksPerChunk; yB++) {
+                            if (xB >= 0 && yB >= 0 && xB < worldContext.worldArray.GetLength(0) && yB < worldContext.worldArray.GetLength(1))
+                            {
+                                int lightValue = worldContext.lightArray[xB, yB];
+                                if (lightValue > 255)
+                                {
+                                    lightValue = 255;
+                                }
+                                Color lightLevel = Color.White;
+                                if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
+                                _spriteBatch.Draw(blockSpriteSheet, new Rectangle((xB - (x * blocksPerChunk)) * worldContext.pixelsPerBlock, (yB - (y * blocksPerChunk)) * worldContext.pixelsPerBlock, worldContext.pixelsPerBlock, worldContext.pixelsPerBlock), worldContext.worldArray[xB,yB].sourceRectangle, Color.White);
+                                
+                            }
+                        }
+                    }
+                    _spriteBatch.End();
+
+                }
+            }
+        }
+        public void updateChunks() {
+            
+        }
+        public void drawChunk(int x, int y) {
+            chunkArray[x, y] = new RenderTarget2D(GraphicsDevice, blocksPerChunk * worldContext.pixelsPerBlock, blocksPerChunk * worldContext.pixelsPerBlock);
+            GraphicsDevice.SetRenderTarget(chunkArray[x, y]);
+            _spriteBatch.Begin();
+
+            for (int xB = x * blocksPerChunk; xB < (x + 1) * blocksPerChunk; xB++)
+            {
+                for (int yB = y * blocksPerChunk; yB < (y + 1) * blocksPerChunk; yB++)
+                {
+                    if (xB >= 0 && yB >= 0 && xB < worldContext.worldArray.GetLength(0) && yB < worldContext.worldArray.GetLength(1))
+                    {
+                        int lightValue = worldContext.lightArray[xB, yB];
+                        if (lightValue > 255)
+                        {
+                            lightValue = 255;
+                        }
+                        Color lightLevel = Color.White;
+                        if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
+                        _spriteBatch.Draw(blockSpriteSheet, new Rectangle((xB - (x * blocksPerChunk)) * worldContext.pixelsPerBlock, (yB - (y * blocksPerChunk)) * worldContext.pixelsPerBlock, worldContext.pixelsPerBlock, worldContext.pixelsPerBlock), worldContext.worldArray[xB, yB].sourceRectangle, Color.White);
+
+                    }
+                }
+            }
+            _spriteBatch.End();
+        }
+
+        public void drawBlocks() {
+            exposedBlockCount = 0;
+            currentlyRenderedExposedBlocks.Clear();
             for (int x = ((int)-worldContext.screenSpaceOffset.x) / worldContext.pixelsPerBlock - 1; x < ((int)-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / worldContext.pixelsPerBlock + 1; x++)
             {
                 for (int y = ((int)-worldContext.screenSpaceOffset.y) / worldContext.pixelsPerBlock - 1; y < ((int)-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight) / worldContext.pixelsPerBlock + 1; y++)
                 {
-                    if (x > 0 && y > 0 && x < tempWorldArray.GetLength(0) && y < tempWorldArray.GetLength(1))
+                    if (x > 0 && y > 0 && x < worldContext.worldArray.GetLength(0) && y < worldContext.worldArray.GetLength(1))
                     {
                         int lightValue = worldContext.lightArray[x, y];
-                        if (lightValue > 255) {
+                        if (lightValue > 255)
+                        {
                             lightValue = 255;
                         }
                         Color lightLevel = Color.White;
-                        if (!useShaders) {lightLevel =  new Color(lightValue, lightValue, lightValue); }
-                        if (worldContext.exposedBlocks.ContainsKey((x, y)) && Mouse.GetState().MiddleButton == ButtonState.Pressed) {
-
-                            exposedBlockCount += 1;
-                        }
-
-                        _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), tempWorldArray[x, y].sourceRectangle, lightLevel); }
+                        if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
+                        if (worldContext.exposedBlocks.ContainsKey((x, y))) { currentlyRenderedExposedBlocks.Add((x,y)); }
+                        _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), worldContext.worldArray[x, y].sourceRectangle, lightLevel);
+                    }
                 }
             }
+        }
 
-            _spriteBatch.DrawString(ariel, (int)player.x / worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10, 10), Color.BlueViolet);
-            _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
-            _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
-
-            if (Mouse.GetState().MiddleButton == ButtonState.Pressed) {
+        public void drawDebugInfo() {
+            if (Mouse.GetState().MiddleButton == ButtonState.Pressed)
+            {
                 double mouseXPixelSpace = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
                 double mouseYPixelSpace = Mouse.GetState().Y - worldContext.screenSpaceOffset.y;
 
@@ -412,13 +682,27 @@ namespace PixelMidpointDisplacement
 
             }
 
-            if (chatCountdown > 0 && chat != "") {
+        }
+
+        public void drawCoords(GameTime gameTime) {
+            _spriteBatch.DrawString(ariel, (int)player.x / worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10, 10), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, (int)(1 / gameTime.ElapsedGameTime.TotalSeconds) + " fps", new Vector2(200, 10), Color.BlueViolet);
+        }
+
+        public void drawChat() {
+            if (chatCountdown > 0 && chat != "")
+            {
                 _spriteBatch.DrawString(ariel, chat, new Vector2(1000, 10), Color.BlueViolet);
             }
+        }
 
-            //_spriteBatch.Draw(redTexture, new Rectangle((int)(player.x) + worldContext.screenSpaceOffset.x, (int)(player.y) + worldContext.screenSpaceOffset.y, (int)(player.collider.Width), (int)(player.collider.Height)), Color.White);
+        public void drawPlayer() {
             _spriteBatch.Draw(player.spriteAnimator.spriteSheet, new Rectangle((int)(player.x - player.spriteAnimator.sourceOffset.X) + worldContext.screenSpaceOffset.x, (int)(player.y - player.spriteAnimator.sourceOffset.Y) + worldContext.screenSpaceOffset.y, (int)(player.drawWidth * worldContext.pixelsPerBlock), (int)(player.drawHeight * worldContext.pixelsPerBlock)), player.spriteAnimator.sourceRect, Color.White, 0f, Vector2.Zero, player.playerEffect, 0f);
+        }
 
+        public void drawAnimatorObjects() {
             for (int i = 0; i < animationController.animators.Count; i++)
             {
                 Animator a = animationController.animators[i];
@@ -441,195 +725,148 @@ namespace PixelMidpointDisplacement
                 Vector2 origin = new Vector2(owner.owner.playerDirection * owner.origin.X - rotationXOffset, owner.verticalDirection * owner.origin.Y - rotationYOffset);
 
                 _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)(owner.owner.x + worldContext.screenSpaceOffset.x + a.currentPosition.xPos + positionXOffset), (int)(owner.owner.y + worldContext.screenSpaceOffset.y + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White, (float)(owner.owner.playerDirection * (a.currentPosition.rotation)), origin, owner.spriteEffect | owner.owner.playerEffect, 0f);
-                // _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)((player.x + worldContext.screenSpaceOffset.x) + a.currentPosition.xPos), (int)((player.y + worldContext.screenSpaceOffset.y) + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White,  owner.owner.playerDirection * (float)(a.currentPosition.rotation), origin, owner.spriteEffect | owner.owner.playerEffect, 0f);
+
             }
 
-            //drawCollisionBox();
+        }
 
-            _spriteBatch.End();
-
-            //Draw light
+        public void drawLight() {
             if (useShaders)
             {
                 Vector2 lightPosition = new Vector2((float)Mouse.GetState().X / (float)_graphics.PreferredBackBufferWidth, (float)Mouse.GetState().Y / (float)_graphics.PreferredBackBufferHeight);
-                calculateLight.Parameters["lightIntensity"].SetValue(90f);
-                calculateLight.Parameters["lightColor"].SetValue(new Vector3(1f, 1f, 1f));
-                calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
-                calculateLight.Parameters["lightPosition"].SetValue(lightPosition);
-
-            
-                GraphicsDevice.SetRenderTarget(lightMap);
-                _spriteBatch.Begin(effect: calculateLight);
-                _spriteBatch.Draw(lightMap, lightMap.Bounds, Color.White);
-                _spriteBatch.End();
-
-                calculateShadowMap(lightPosition);
-
-                GraphicsDevice.SetRenderTarget(maskedLightmap);
-                _spriteBatch.Begin(effect: combineLightAndShadow);
-                combineLightAndShadow.Parameters["Mask"].SetValue(finalShadowMap);
-                _spriteBatch.Draw(lightMap, Vector2.Zero, Color.White);
-                _spriteBatch.End();
-
-                combineLightAndColor.Parameters["Lightmap"].SetValue(maskedLightmap);
-                GraphicsDevice.SetRenderTarget(world);
-                _spriteBatch.Begin(effect: combineLightAndColor);
-                _spriteBatch.Draw(spriteRendering, Vector2.Zero, Color.White);
-                _spriteBatch.End();
+                //Find why the shadows disappear when the render targets are not the same dimensions as the world...
+                for (int i = 0; i < 2; i++)
+                {
+                    calculateLightmap(lightPosition);
+                    calculateShadowMap(lightPosition);
+                    calculateOccludedLightmap();
+                    calculateLightedWorld();
+                }
             }
-            else {
+            else
+            {
                 GraphicsDevice.SetRenderTarget(world);
                 _spriteBatch.Begin();
                 _spriteBatch.Draw(spriteRendering, Vector2.Zero, Color.White);
                 _spriteBatch.End();
             }
-
-                GraphicsDevice.SetRenderTarget(null);
-            _spriteBatch.Begin();
-            _spriteBatch.Draw(world, Vector2.Zero, Color.White);
-            _spriteBatch.End();
-            base.Draw(gameTime);
         }
+        public void calculateLightmap(Vector2 lightPosition) {
+            calculateLight.Parameters["lightIntensity"].SetValue(90f);
+            calculateLight.Parameters["lightColor"].SetValue(new Vector3(1f, 1f, 1f));
+            calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
+            calculateLight.Parameters["lightPosition"].SetValue(lightPosition);
 
 
+            GraphicsDevice.SetRenderTarget(lightMap);
+            _spriteBatch.Begin(effect: calculateLight);
+            _spriteBatch.Draw(lightMap, lightMap.Bounds, Color.White);
+            _spriteBatch.End();
+
+        }
         public void calculateShadowMap(Vector2 lightPosition)
         {
-            GraphicsDevice.SetRenderTarget(shadowMap);
-            GraphicsDevice.Clear(Color.Black);
             GraphicsDevice.SetRenderTarget(finalShadowMap);
             GraphicsDevice.Clear(Color.Black);
-            GraphicsDevice.SetRenderTarget(workingShadowMap);
-            GraphicsDevice.Clear(Color.Black);
-
-            int numberOfVertices = 0;
-            
-            calculateShadow.Parameters["lightPosition"].SetValue(lightPosition);
-
-            for (int x = (int)(-worldContext.screenSpaceOffset.x/worldContext.pixelsPerBlock) - 1; x < ((-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / worldContext.pixelsPerBlock) + 1; x++)
-            {
-                
-                for (int y = (-worldContext.screenSpaceOffset.y/worldContext.pixelsPerBlock) - 1; y < ((-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight)/worldContext.pixelsPerBlock)+1; y++)
-                {
-                    
-                    if (worldContext.exposedBlocks.ContainsKey((x, y)))
-                    {
+            foreach((int, int) coord in currentlyRenderedExposedBlocks) {
+                int x = coord.Item1;
+                int y = coord.Item2;
                         
-                        for (int i = 0; i < worldContext.worldArray[x, y].faceVertices.Count - 1; i++)
-                        {
-
-                            Vector2[] vertexArray = worldContext.worldArray[x, y].faceVertices.ToArray();
-
+                Vector3[] vertexArray = new Vector3[worldContext.worldArray[x, y].faceVertices.Count];
+                for (int g = 0; g < vertexArray.Length; g++)
+                {
+                vertexArray[g] = new Vector3((worldContext.worldArray[x, y].faceVertices[g].X * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x) / _graphics.PreferredBackBufferWidth, (worldContext.worldArray[x, y].faceVertices[g].Y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight, 0);
+                }
+                for (int i = 0; i < vertexArray.Length - 1; i++)
+                {
+                           
+                    if (vertexArray[i].X != vertexArray[i + 1].X && vertexArray[i].Y != vertexArray[i + 1].Y) { continue; }
                             
-                            if (vertexArray[i].X != vertexArray[i + 1].X && vertexArray[i].Y != vertexArray[i + 1].Y)
-                            {
-                                
-                                continue;
-                            }
-                            
+                    float xDif1 = (vertexArray[i].X - lightPosition.X);
+                    float xDif2 = (vertexArray[i + 1].X - lightPosition.X);
+                    float yDif1 = (vertexArray[i].Y - lightPosition.Y);
+                    float yDif2 = (vertexArray[i + 1].Y - lightPosition.Y);
 
-                            for (int g = 0; g < vertexArray.Length; g++)
-                            {
-                                vertexArray[g] *= worldContext.pixelsPerBlock;
-                                vertexArray[g] = new Vector2((vertexArray[g].X + worldContext.screenSpaceOffset.x), (vertexArray[g].Y + worldContext.screenSpaceOffset.y));
-                            }
-
-                            Color[] vertex1Color = new Color[1] { Color.Black };
-                            Color[] vertex2Color = new Color[1] { Color.Black };
-
-                            
-                            if (vertexArray[i].X >= 0 && vertexArray[i].X < finalShadowMap.Width && vertexArray[i].Y >= 0 && vertexArray[i].Y < finalShadowMap.Height)
-                            {
-                                finalShadowMap.GetData<Color>(0, new Rectangle((int)vertexArray[i].X, (int)vertexArray[i].Y, 1, 1), vertex1Color, 0, 1); //Rect must be inside the texture
-                            }
-                            if (vertexArray[i + 1].X >= 0 && vertexArray[i + 1].X <= finalShadowMap.Width && vertexArray[i + 1].Y >= 0 && vertexArray[i + 1].Y <= finalShadowMap.Height)
-                            {
-                                finalShadowMap.GetData<Color>(0, new Rectangle((int)vertexArray[i + 1].X, (int)vertexArray[i + 1].Y, 1, 1), vertex2Color, 0, 1);
-                            }
-                            
-
-
-                            if (vertex1Color[0] != Color.Black && vertex2Color[0] != Color.Black)
-                            {
-                                //The face is already in a shadow, so skip calculating the shadow for it
-                                continue;
-                            }
-                            
-                            numberOfVertices += 1;
-                            //Determine what axis the plane is facing
-                            Vector2 faceDirection = new Vector2();
-                            if (vertexArray[i].X - vertexArray[i + 1].X == 0)
-                            {
-
-                                faceDirection = new Vector2(1, 0);
-                            }
-                            else
-                            {
-                                faceDirection = new Vector2(0, 1);
-                            }
-                            int firstVertex = i;
-                            int secondVertex = i + 1;
-
-                            if (vertexArray[i].X - vertexArray[i + 1].X > 0 || vertexArray[i].Y - vertexArray[i + 1].Y > 0)
-                            {
-                                firstVertex = i + 1;
-                                secondVertex = i;
-                            }
-
-                            Vector2 vertex1 = vertexArray[firstVertex] / new Vector2(_graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
-                            Vector2 vertex2 = vertexArray[secondVertex] / new Vector2(_graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight); ;
-                            
-
-                            //Calculate variables for the shader
-                            float gradient1 = (lightPosition.Y - vertex1.Y) / (lightPosition.X - vertex1.X);
-
-                            float gradient2 = (lightPosition.Y - vertex2.Y) / (lightPosition.X - vertex2.X);
-                            float gradientBetweenVertexes = (vertex2.Y - vertex1.Y) / (vertex2.X - vertex1.X);
-
-                            bool flipVertex1 = faceDirection.X > 0 ? (lightPosition.X - vertex1.X) >= 0 : (lightPosition.Y - vertex1.Y) <= 0;
-                            bool flipVertex2 = faceDirection.X > 0 ? (lightPosition.X - vertex2.X) >= 0 : (lightPosition.Y - vertex2.Y) <= 0;
-
-                            //Set variables in the shader
-                            //rotator.Parameters["faceDirection"].SetValue(faceDirection);
-                            
-                            calculateShadow.Parameters["vertex1"].SetValue(vertex1);
-                            calculateShadow.Parameters["vertex2"].SetValue(vertex2);
-                            calculateShadow.Parameters["gradient1"].SetValue(gradient1);
-                            calculateShadow.Parameters["gradient2"].SetValue(gradient2);
-                            calculateShadow.Parameters["gradientBetweenVertexes"].SetValue(gradientBetweenVertexes);
-                            calculateShadow.Parameters["flipVertex1"].SetValue(flipVertex1);
-                            calculateShadow.Parameters["flipVertex2"].SetValue(flipVertex2);
-                            calculateShadow.Parameters["falloff"].SetValue(0.1f);
-
-                            //Draw the shadow cast by the current face
-                            GraphicsDevice.SetRenderTarget(shadowMap);
-                            GraphicsDevice.Clear(Color.Black);
-                            _spriteBatch.Begin(samplerState: SamplerState.PointClamp, effect: calculateShadow);
-                            _spriteBatch.Draw(redTexture, shadowMap.Bounds, Color.White);
-                            _spriteBatch.End();
-
-                            //Draw the current shadow and the cummulative shadow map together
-                            combineShadows.Parameters["Lightmap"].SetValue(workingShadowMap);
-
-                            GraphicsDevice.SetRenderTarget(finalShadowMap);
-                            _spriteBatch.Begin(samplerState: SamplerState.PointClamp, effect: combineShadows);
-                            _spriteBatch.Draw(shadowMap, workingShadowMap.Bounds, Color.White);
-                            _spriteBatch.End();
-
-                            //Update the working shadow map to equal the combined shadow map
-                            GraphicsDevice.SetRenderTarget(workingShadowMap);
-                            GraphicsDevice.Clear(Color.Black);
-                            _spriteBatch.Begin();
-                            _spriteBatch.Draw(finalShadowMap, workingShadowMap.Bounds, Color.White);
-                            _spriteBatch.End();
-                        }
+                    float setX1 = 1;
+                    float setX2 = 1;
+                    if (xDif1 == 0)
+                    {
+                        setX1 = -1;
                     }
+                    if (xDif2 == 0)
+                    {
+                        setX2 = -1;
+                    }
+                    float gradient1 = yDif1 / xDif1;
+                    float gradient2 = yDif2 / xDif2;
+
+                    if (yDif2 > 0 && setX2 * gradient2 + vertexArray[i + 1].Y < 1)
+                    {
+                        setX2 = 1 / (gradient2);
+                    }
+                    else if (yDif2 < 0 && setX2 * gradient2 + vertexArray[i + 1].Y > 0)
+                    {
+                        setX2 = -1 / (gradient2);
+                    }
+                    if (yDif1 > 0 && setX1 * gradient1 + vertexArray[i].Y < 1)
+                    {
+                        setX1 = 1 / (gradient1);
+                    }
+                    else if (yDif1 < 0 && setX1 * gradient1 + vertexArray[i].Y > 0)
+                    {
+                        setX1 = -1 / (gradient1);
+                    }
+                    float setY1 = setX1 * gradient1;
+                    float setY2 = setX2 * gradient2;
+
+                    if (xDif1 == 0) { setX1 = 0; setY1 = Math.Sign(yDif1); }
+                    if (xDif2 == 0) { setX2 = 0; setY2 = Math.Sign(yDif2); }
+                    if (yDif1 == 0) { setX1 = Math.Sign(xDif1); setY1 = 0; }
+                    if (yDif2 == 0) { setX2 = Math.Sign(xDif2); setY2 = 0; }
+
+
+
+                    triangleVertices[0].Position = vertexArray[i];
+                    triangleVertices[1].Position = vertexArray[i + 1];
+                    triangleVertices[2].Position = new Vector3(setX2, setY2, 0) + vertexArray[i + 1];
+                    triangleVertices[3].Position = new Vector3(setX1, setY1, 0) + vertexArray[i];
+
+                    triangleVertices[4].Position = vertexArray[i];
+
+                    foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
+                    {
+                        pass.Apply();
+
+                        GraphicsDevice.DrawUserIndexedPrimitives(
+                            PrimitiveType.TriangleStrip,
+                            triangleVertices,
+                            0,
+                            triangleVertices.Length,
+                            ind,
+                            0,
+                            3
+                            );
+                    }
+
+                 
                 }
             }
-            //System.Diagnostics.Debug.WriteLine(numberOfVertices);
         }
-            
-   
 
+        public void calculateOccludedLightmap() {
+            GraphicsDevice.SetRenderTarget(maskedLightmap);
+            _spriteBatch.Begin(effect: combineLightAndShadow);
+            combineLightAndShadow.Parameters["Mask"].SetValue(finalShadowMap);
+            _spriteBatch.Draw(lightMap, Vector2.Zero, Color.White);
+            _spriteBatch.End();
+        }
+        public void calculateLightedWorld() {
+            combineLightAndColor.Parameters["Lightmap"].SetValue(spriteRendering);
+            GraphicsDevice.SetRenderTarget(world);
+            _spriteBatch.Begin(effect: combineLightAndColor, samplerState : SamplerState.PointClamp);
+            _spriteBatch.Draw(maskedLightmap, world.Bounds, Color.White);
+            _spriteBatch.End();
+        }
         public void drawCollisionBox()
         {
             //A version of the collision code. It runs the same basic collision detection system, 
@@ -1360,6 +1597,7 @@ namespace PixelMidpointDisplacement
          */
 
         public Block[,] worldArray { get; set; }
+        public int[,] intWorldArray { get; set; }
         public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
 
         public List<(int x, int y)> surfaceBlocks { get; set; }
@@ -1408,7 +1646,7 @@ namespace PixelMidpointDisplacement
             
             worldArray = new Block[worldDimensions.width, worldDimensions.height];
 
-            int[,] intWorldArray = new int[worldDimensions.width, worldDimensions.height];
+            intWorldArray = new int[worldDimensions.width, worldDimensions.height];
 
             lightArray = new int[worldDimensions.width, worldDimensions.height];
             
@@ -1458,16 +1696,39 @@ namespace PixelMidpointDisplacement
             worldArray[x, y].setupInitialData(intArray, (x, y));
         }
 
-        public void addBlockToDictionaryIfExposedToAir(int[,] idArray, int x, int y) {
+        public void addBlockToDictionaryIfExposedToAir(int[,] blockArray, int x, int y)
+        {
             if (x > 0 && y > 0 && x < worldArray.GetLength(0) - 1 && y < worldArray.GetLength(1) - 1)
             {
-               
-                if ((idArray[x - 1, y] == (int)blockIDs.air || idArray[x + 1, y] == (int)blockIDs.air || idArray[x, y - 1] == (int)blockIDs.air || idArray[x, y + 1] == (int)blockIDs.air) && idArray[x,y] != (int)blockIDs.air) //Then it is exposed to air
+
+                if ((blockArray[x - 1, y] == (int)blockIDs.air || blockArray[x + 1, y] == (int)blockIDs.air || blockArray[x, y - 1] == (int)blockIDs.air || blockArray[x, y + 1] == (int)blockIDs.air) && blockArray[x, y] != (int)blockIDs.air) //Then it is exposed to air
                 {
-                   exposedBlocks.Add((x, y), worldArray[x,y]);
-                   worldArray[x, y].setupFaceVertices(new Vector4(Convert.ToInt32((idArray[x, y-1] == (int)blockIDs.air)), Convert.ToInt32(idArray[x + 1, y] == (int)blockIDs.air), Convert.ToInt32(idArray[x,y + 1] == (int)blockIDs.air), Convert.ToInt32(idArray[x-1,y] == (int)blockIDs.air)));
+                    exposedBlocks.Add((x, y), worldArray[x, y]);
+                    worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
                 }
             }
+        }
+        public Vector4 calculateExposedFaces(int[,] blockArray, int x, int y)
+        {
+            return new Vector4(Convert.ToInt32((blockArray[x, y - 1] == (int)blockIDs.air)), Convert.ToInt32(blockArray[x + 1, y] == (int)blockIDs.air), Convert.ToInt32(blockArray[x, y + 1] == (int)blockIDs.air), Convert.ToInt32(blockArray[x - 1, y] == (int)blockIDs.air));
+        }
+
+        public void addBlockToDictionaryIfExposedToAir(Block[,] blockArray, int x, int y)
+        {
+            if (x > 0 && y > 0 && x < worldArray.GetLength(0) - 1 && y < worldArray.GetLength(1) - 1)
+            {
+
+                if ((blockArray[x - 1, y].ID == (int)blockIDs.air || blockArray[x + 1, y].ID == (int)blockIDs.air || blockArray[x, y - 1].ID == (int)blockIDs.air || blockArray[x, y + 1].ID == (int)blockIDs.air) && blockArray[x, y].ID != (int)blockIDs.air) //Then it is exposed to air
+                {
+                    exposedBlocks.Add((x, y), worldArray[x, y]);
+                    worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
+                }
+            }
+        }
+
+        public Vector4 calculateExposedFaces(Block[,] blockArray, int x, int y)
+        {
+            return new Vector4(Convert.ToInt32((blockArray[x, y - 1].ID == (int)blockIDs.air)), Convert.ToInt32(blockArray[x + 1, y].ID == (int)blockIDs.air), Convert.ToInt32(blockArray[x, y + 1].ID == (int)blockIDs.air), Convert.ToInt32(blockArray[x - 1, y].ID == (int)blockIDs.air));
         }
         public void generateIDsFromTextureList(Rectangle[] textureSourceList) {
             blockFromID.Add(blockIDs.air, new Block(textureSourceList[intFromBlockID[blockIDs.air]], intFromBlockID[blockIDs.air])); //Air block
@@ -1491,6 +1752,7 @@ namespace PixelMidpointDisplacement
         public bool deleteBlock(int x, int y) {
             if (worldArray[x, y].ID != 0)
             {
+                worldArray[x, y].blockDestroyed(exposedBlocks);
                 worldArray[x, y] = new Block(blockFromID[blockIDs.air]);
                 worldArray[x, y].setLocation((x, y));
 
@@ -1504,6 +1766,7 @@ namespace PixelMidpointDisplacement
             {
                 worldArray[x, y] = new Block(blockFromID[blockIDFromInt[ID]]);
                 worldArray[x, y].setLocation((x, y));
+                addBlockToDictionaryIfExposedToAir(worldArray, x, y);
                 return true;
             }
 
@@ -2520,6 +2783,12 @@ namespace PixelMidpointDisplacement
         public void setLocation((int x, int y) location) {
             
             this.location = location;
+        }
+        public void blockPlaced(Vector4 exposedFaces) {
+            setupFaceVertices(exposedFaces);
+        }
+        public void blockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks) {
+            if (exposedBlocks.ContainsKey(location)) { exposedBlocks.Remove(location); }
         }
 
         public virtual void setupInitialData(int[,] worldArray, (int x, int y) blockLocation) {

@@ -18,7 +18,10 @@ float gradient1;
 float gradient2;
 float gradientBetweenVertexes;
 bool flipVertex1;
+
 bool flipVertex2;
+
+bool flippedVertex;
 
 float falloff;
 
@@ -27,6 +30,11 @@ Texture2D SpriteTexture;
 sampler2D SpriteTextureSampler = sampler_state
 {
     Texture = <SpriteTexture>;
+};
+Texture2D ShadowTexture;
+sampler2D ShadowSampler = sampler_state
+{
+    Texture = <ShadowTexture>;
 };
 
 struct VertexShaderInput
@@ -56,35 +64,23 @@ VertexShaderOutput MainVS(VertexShaderInput input)
 
 float4 MainPS(VertexShaderOutput input) : SV_TARGET
 {
-    float4 color = float4(0, 0, 0, 1);
+    float4 color = float4(0, 0, 0, 1); //tex2D(SpriteTextureSampler, input.TextureCoordinates);
+    //color = tex2D(ShadowSampler, input.TextureCoordinates);
 
     bool confinedWithinVertex1 = false;
-    
-    if (lightPosition.x - vertex1.x < 0)
-    {
-        confinedWithinVertex1 = flipVertex1 ? (input.TextureCoordinates.y - vertex1.y) < gradient1 * (input.TextureCoordinates.x - vertex1.x) : (input.TextureCoordinates.y - vertex1.y) > gradient1 * (input.TextureCoordinates.x - vertex1.x);
-    }
-    else
-    {
-        confinedWithinVertex1 = flipVertex1 ? (input.TextureCoordinates.y - vertex1.y) > gradient1 * (input.TextureCoordinates.x - vertex1.x) : (input.TextureCoordinates.y - vertex1.y) < gradient1 * (input.TextureCoordinates.x - vertex1.x);
-    }
+
+    confinedWithinVertex1 = flipVertex1 ? (input.TextureCoordinates.y - vertex1.y) < gradient1 * (input.TextureCoordinates.x - vertex1.x) : (input.TextureCoordinates.y - vertex1.y) > gradient1 * (input.TextureCoordinates.x - vertex1.x);
+
     
     bool confinedWithinVertex2 = false;
-    
-    if (lightPosition.x - vertex2.x < 0)
-    {       
-        confinedWithinVertex2 = flipVertex1 ? (input.TextureCoordinates.y - vertex2.y) > gradient2 * (input.TextureCoordinates.x - vertex2.x) : (input.TextureCoordinates.y - vertex2.y) < gradient2 * (input.TextureCoordinates.x - vertex2.x);
-    }
-    else
-    {   
-        confinedWithinVertex2 = flipVertex1 ? (input.TextureCoordinates.y - vertex2.y) < gradient2 * (input.TextureCoordinates.x - vertex2.x) : (input.TextureCoordinates.y - vertex2.y) > gradient2 * (input.TextureCoordinates.x - vertex2.x);
-    }
+    confinedWithinVertex2 = flipVertex2 ? (input.TextureCoordinates.y - vertex2.y) > gradient2 * (input.TextureCoordinates.x - vertex2.x) : (input.TextureCoordinates.y - vertex2.y) < gradient2 * (input.TextureCoordinates.x - vertex2.x);
 
-    bool confinedPastFace = flipVertex1 || flipVertex2 ? input.TextureCoordinates.y - vertex1.y > gradientBetweenVertexes * (input.TextureCoordinates.x - vertex1.x) : input.TextureCoordinates.y - vertex1.y < gradientBetweenVertexes * (input.TextureCoordinates.x - vertex1.x);
+
+    bool confinedPastFace = flippedVertex ? input.TextureCoordinates.y - vertex1.y > gradientBetweenVertexes * (input.TextureCoordinates.x - vertex1.x) : input.TextureCoordinates.y - vertex1.y < gradientBetweenVertexes * (input.TextureCoordinates.x - vertex1.x);
     if (confinedWithinVertex1 && confinedWithinVertex2 && confinedPastFace)
-        {
+    {
             color = float4(falloff, falloff, falloff, 1);
-        }
+    }
     
 	return color;
 }
