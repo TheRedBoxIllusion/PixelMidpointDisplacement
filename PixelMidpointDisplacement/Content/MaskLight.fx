@@ -30,8 +30,7 @@ struct VertexShaderOutput
 
 float4 MainPS(VertexShaderOutput input) : COLOR
 {
-    float4 invertedMask = float4(1, 1, 1, 2) - tex2D(MaskSampler, input.TextureCoordinates); //Alpha set to two so that -1 will equal 1
-    return tex2D(SpriteTextureSampler, input.TextureCoordinates) * invertedMask;
+    return tex2D(SpriteTextureSampler, input.TextureCoordinates) * tex2D(MaskSampler, input.TextureCoordinates);
 }
 
 technique SpriteDrawing

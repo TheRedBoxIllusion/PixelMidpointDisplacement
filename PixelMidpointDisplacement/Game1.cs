@@ -55,11 +55,11 @@ namespace PixelMidpointDisplacement
 
         RenderTarget2D world;
 
-        float shadowValue = 0.2f;
+        float shadowValue = 0.5f;
 
         Matrix worldMatrix, viewMatrix, projectionMatrix;
 
-        VertexPositionColor[] triangleVertices = new VertexPositionColor[5];
+        VertexPositionColorTexture[] triangleVertices;
 
         //Texture2D playerSprite;
         Texture2D collisionSprite;
@@ -101,6 +101,8 @@ namespace PixelMidpointDisplacement
         AnimationController animationController;
 
         SpriteFont ariel;
+
+        BlendState maskBlendState;
         
 
         //++++++++++++++++++
@@ -171,12 +173,14 @@ namespace PixelMidpointDisplacement
 
         protected override void LoadContent()
         {
+
             _spriteBatch = new SpriteBatch(GraphicsDevice);
             basicEffect = new BasicEffect(_graphics.GraphicsDevice);
 
             basicEffect.World = worldMatrix;
             basicEffect.View = viewMatrix;
             basicEffect.Projection = projectionMatrix;
+            
 
             ariel = Content.Load<SpriteFont>("ariel");
             blockSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockSpriteSheet.png");
@@ -190,14 +194,22 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(weaponSpriteSheet);
             spriteSheetList.Add(blockItemSpriteSheet);
 
-            triangleVertices[0].Color = new Color(shadowValue, shadowValue, shadowValue);
-            triangleVertices[1].Color = new Color(shadowValue, shadowValue, shadowValue);
-            triangleVertices[2].Color = new Color(shadowValue, shadowValue, shadowValue);
-            triangleVertices[3].Color = new Color(shadowValue, shadowValue, shadowValue);
-            triangleVertices[4].Color = new Color(shadowValue, shadowValue, shadowValue);
+            triangleVertices = new VertexPositionColorTexture[5]; //Might not need the 5th item
+            triangleVertices[0].TextureCoordinate = new Vector2(0, 0);
+            triangleVertices[1].TextureCoordinate = new Vector2(1, 0);
+            triangleVertices[2].TextureCoordinate = new Vector2(1, 1);
+            triangleVertices[3].TextureCoordinate = new Vector2(0, 1);
+            triangleVertices[4].TextureCoordinate = new Vector2(0, 0);
+            Color shadowColor = new Color(shadowValue, shadowValue, shadowValue);
+            triangleVertices[0].Color = shadowColor;
+            triangleVertices[1].Color = shadowColor;
+            triangleVertices[2].Color = shadowColor;
+            triangleVertices[3].Color = shadowColor;
+            triangleVertices[4].Color = shadowColor;
 
-            basicEffect.TextureEnabled = false;
             basicEffect.VertexColorEnabled = true;
+            
+            basicEffect.LightingEnabled = false;
 
             worldContext.generateIDsFromTextureList(new Rectangle[]{new Rectangle(0, 0, 0, 0), new Rectangle(0, 0, 32, 32), new Rectangle(0, 32, 32, 32), new Rectangle(0, 64, 32, 32)});
 
@@ -230,6 +242,15 @@ namespace PixelMidpointDisplacement
             combineShadows = Content.Load<Effect>("CombineMasks");
             combineLightAndShadow = Content.Load<Effect>("MaskLight");
             combineLightAndColor = Content.Load<Effect>("CombineLightAndColor");
+
+            maskBlendState = new BlendState
+            {
+                ColorSourceBlend = Blend.DestinationColor,
+                ColorDestinationBlend = Blend.Zero
+            };
+
+
+            
 
         }
 
@@ -416,6 +437,9 @@ namespace PixelMidpointDisplacement
         }
         protected override void Draw(GameTime gameTime)
         {
+            
+
+            //System.Diagnostics.Debug.WriteLine((int)(1 / gameTime.ElapsedGameTime.TotalSeconds));
             if (!hasCalculatedFirstChunks) {
                 
                 drawInitialChunks();
@@ -734,14 +758,29 @@ namespace PixelMidpointDisplacement
             if (useShaders)
             {
                 Vector2 lightPosition = new Vector2((float)Mouse.GetState().X / (float)_graphics.PreferredBackBufferWidth, (float)Mouse.GetState().Y / (float)_graphics.PreferredBackBufferHeight);
+                
                 //Find why the shadows disappear when the render targets are not the same dimensions as the world...
-                for (int i = 0; i < 2; i++)
+                for (int i = 0; i < 1; i++)
                 {
-                    calculateLightmap(lightPosition);
-                    calculateShadowMap(lightPosition);
-                    calculateOccludedLightmap();
-                    calculateLightedWorld();
+
+                    //All running: Around 18-25fps
+                    //None running: 45-60
+
+                    
+                    
+                    //The shadowmap is not multiplieed to the lightmap: 22-30Fps
+                    //Is multiplied : 13-30 sorta
+
+                    //No shadows: 22fps??? Only:30-60
+                    calculateShadowMap(lightPosition); //A noticable performance drop at 10 dynamic lights. At 30 lights, it drops to 9-20fps
+                    calculateLightmap(lightPosition); //Minor impact on performance
+                    //calculateOccludedLightmap();
+
                 }
+                    //No world updates: 35-60fps
+                    calculateLightedWorld();
+                    
+                
             }
             else
             {
@@ -756,19 +795,28 @@ namespace PixelMidpointDisplacement
             calculateLight.Parameters["lightColor"].SetValue(new Vector3(1f, 1f, 1f));
             calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
             calculateLight.Parameters["lightPosition"].SetValue(lightPosition);
+            //calculateLight.Parameters["Mask"].SetValue(finalShadowMap);
 
 
             GraphicsDevice.SetRenderTarget(lightMap);
+
+            
             _spriteBatch.Begin(effect: calculateLight);
-            _spriteBatch.Draw(lightMap, lightMap.Bounds, Color.White);
+            _spriteBatch.Draw(finalShadowMap, Vector2.Zero, Color.White);
             _spriteBatch.End();
 
         }
         public void calculateShadowMap(Vector2 lightPosition)
         {
+            int faceCount = 0;
+            //A possible performance increase:
+            //Instead of drawing every single shadow. Compile a list of VertexPositionColorTextures of all the polygons and convert it to an array. Make an array of inds duplicated repeatedly and shifted by duplicateNumber * length, then render everything in one graphics call?
             GraphicsDevice.SetRenderTarget(finalShadowMap);
-            GraphicsDevice.Clear(Color.Black);
-            foreach((int, int) coord in currentlyRenderedExposedBlocks) {
+            GraphicsDevice.Clear(Color.White);
+            RasterizerState rasterizerState1 = new RasterizerState();
+            rasterizerState1.CullMode = CullMode.None;
+            GraphicsDevice.RasterizerState = rasterizerState1;
+            foreach ((int, int) coord in currentlyRenderedExposedBlocks) {
                 int x = coord.Item1;
                 int y = coord.Item2;
                         
@@ -781,7 +829,8 @@ namespace PixelMidpointDisplacement
                 {
                            
                     if (vertexArray[i].X != vertexArray[i + 1].X && vertexArray[i].Y != vertexArray[i + 1].Y) { continue; }
-                            
+
+                    faceCount += 1;
                     float xDif1 = (vertexArray[i].X - lightPosition.X);
                     float xDif2 = (vertexArray[i + 1].X - lightPosition.X);
                     float yDif1 = (vertexArray[i].Y - lightPosition.Y);
@@ -832,7 +881,7 @@ namespace PixelMidpointDisplacement
                     triangleVertices[3].Position = new Vector3(setX1, setY1, 0) + vertexArray[i];
 
                     triangleVertices[4].Position = vertexArray[i];
-
+                    
                     foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
                     {
                         pass.Apply();
@@ -847,24 +896,27 @@ namespace PixelMidpointDisplacement
                             3
                             );
                     }
-
-                 
                 }
             }
+            System.Diagnostics.Debug.WriteLine(faceCount);
         }
 
         public void calculateOccludedLightmap() {
-            GraphicsDevice.SetRenderTarget(maskedLightmap);
+            GraphicsDevice.SetRenderTarget(lightMap);
+            combineLightAndShadow.Parameters["Mask"].SetValue(lightMap);
+            
             _spriteBatch.Begin(effect: combineLightAndShadow);
-            combineLightAndShadow.Parameters["Mask"].SetValue(finalShadowMap);
-            _spriteBatch.Draw(lightMap, Vector2.Zero, Color.White);
+            //combineLightAndShadow.Parameters["Mask"].SetValue(finalShadowMap);
+            //_spriteBatch.Draw(lightMap, Vector2.Zero, Color.White);
+            _spriteBatch.Draw(finalShadowMap, Vector2.Zero, Color.White);
             _spriteBatch.End();
         }
         public void calculateLightedWorld() {
             combineLightAndColor.Parameters["Lightmap"].SetValue(spriteRendering);
             GraphicsDevice.SetRenderTarget(world);
+            GraphicsDevice.Clear(Color.White);
             _spriteBatch.Begin(effect: combineLightAndColor, samplerState : SamplerState.PointClamp);
-            _spriteBatch.Draw(maskedLightmap, world.Bounds, Color.White);
+            _spriteBatch.Draw(lightMap, world.Bounds, Color.White);
             _spriteBatch.End();
         }
         public void drawCollisionBox()
