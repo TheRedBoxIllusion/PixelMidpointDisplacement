@@ -423,7 +423,7 @@ namespace PixelMidpointDisplacement
         
         protected override void Draw(GameTime gameTime)
         {
-
+            System.Diagnostics.Debug.WriteLine((int)(1/gameTime.ElapsedGameTime.TotalSeconds));
             GraphicsDevice.Clear(Color.CornflowerBlue);
             
             GraphicsDevice.SetRenderTarget(spriteRendering);
@@ -2487,29 +2487,49 @@ namespace PixelMidpointDisplacement
         public float range { get; set; }
         public RenderTarget2D shadowMap { get; set; }
         public RenderTarget2D lightMap { get; set; }
-        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity) : base (wc)
+        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity) : base(wc)
         {
             spriteSheet = wc.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.arrow];
-            
-
-            spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, new Vector2(16,16), new Vector2(16,16), new Rectangle(0, 0, 16, 16), this);
+            spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, new Vector2(16, 16), new Vector2(16, 16), new Rectangle(0, 0, 16, 16), this);
+            spriteAnimator.sourceOffset = new Vector2(0f, 16f);
 
             rotationOrigin = Vector2.Zero;
             directionalEffect = SpriteEffects.None;
-            
-            x = arrowLocation.x;
-            y = arrowLocation.y;
+
             drawHeight = 1;
             drawWidth = 1;
+            width = 1;
+            height = 0.5;
+
+            x = arrowLocation.x;
+            y = arrowLocation.y;
             
+
             kX = 0.01;
             kY = 0.01;
 
             minVelocityX = 0.25;
             minVelocityY = 0;
 
-            lightColor = new Vector3(0.98f,0.44f,0.16f);
-            luminosity = 30f;
+            int lightType = new Random().Next(4);
+            if (lightType == 0)
+            {
+                lightColor = new Vector3(0.98f, 0.44f, 0.16f);
+            }
+            else if (lightType == 1)
+            {
+                lightColor = new Vector3(0.17f, 0.98f, 0.98f);
+            }
+            else if (lightType == 2)
+            {
+                lightColor = new Vector3(0.8f, 0.18f, 0.06f);
+            }
+            else if (lightType == 3) {
+                lightColor = new Vector3(0.8f, 0.06f, 0.7f);
+            }
+
+
+            luminosity = Mouse.GetState().ScrollWheelValue * 4;
             range = 10f;
 
             shadowMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
@@ -2547,7 +2567,14 @@ namespace PixelMidpointDisplacement
             if (velocityX != 0 && calculatePhysics)
             {
                 rotation = (float)Math.Atan(-velocityY/velocityX);
-            } 
+            }
+
+            if (Keyboard.GetState().IsKeyDown(Keys.LeftShift)) {
+                if(Mouse.GetState().ScrollWheelValue * 4 != luminosity)
+                {
+                    luminosity = Mouse.GetState().ScrollWheelValue * 4;
+                }
+            }
             
         }
 

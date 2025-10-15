@@ -31,9 +31,8 @@ struct VertexShaderOutput
 float4 MainPS(VertexShaderOutput input) : COLOR
 {
     float luminosity = lightIntensity / 
-	pow(((lightPosition.x - input.TextureCoordinates.x) * renderDimensions.x) * ((lightPosition.x - input.TextureCoordinates.x) * renderDimensions.x) + 
-	((lightPosition.y - input.TextureCoordinates.y) * renderDimensions.y) * ((lightPosition.y - input.TextureCoordinates.y) * renderDimensions.y),
-    0.5);
+	(((lightPosition.x - input.TextureCoordinates.x) * renderDimensions.x) * ((lightPosition.x - input.TextureCoordinates.x) * renderDimensions.x) +
+	((lightPosition.y - input.TextureCoordinates.y) * renderDimensions.y) * ((lightPosition.y - input.TextureCoordinates.y) * renderDimensions.y));
     float4 light = float4(lightColor.x * luminosity, lightColor.y * luminosity, lightColor.z * luminosity, 1);
     
     return light * tex2D(SpriteTextureSampler, input.TextureCoordinates);
