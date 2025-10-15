@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.Design;
@@ -47,36 +48,24 @@ namespace PixelMidpointDisplacement
 
         WorldContext worldContext;
         RenderTarget2D spriteRendering;
-        RenderTarget2D shadowMap;
-        RenderTarget2D workingShadowMap;
+
         RenderTarget2D finalShadowMap;
         RenderTarget2D lightMap;
-        RenderTarget2D maskedLightmap;
+
 
         RenderTarget2D world;
 
         float shadowValue = 0.5f;
+        int lightCount = 1;
 
         Matrix worldMatrix, viewMatrix, projectionMatrix;
 
         VertexPositionColorTexture[] triangleVertices;
 
-        //Texture2D playerSprite;
         Texture2D collisionSprite;
-
-        Texture2D blockSpriteSheet;
-
-        Texture2D weaponSpriteSheet;
-
         Texture2D redTexture;
 
-        Texture2D blockItemSpriteSheet;
 
-        List<Texture2D> spriteSheetList = new List<Texture2D>();
-
-        RenderTarget2D[,] chunkArray;
-
-        RenderTarget2D chunkTest;
 
         Effect calculateLight;
         Effect calculateShadow;
@@ -152,9 +141,7 @@ namespace PixelMidpointDisplacement
             
 
             player = new Player(worldContext);
-            worldContext.physicsObjects.Add(player);
-
-
+           
         }
 
         protected override void Initialize()
@@ -183,29 +170,34 @@ namespace PixelMidpointDisplacement
             
 
             ariel = Content.Load<SpriteFont>("ariel");
-            blockSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockSpriteSheet.png");
-            weaponSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\weaponSpriteSheet.png");
-            blockItemSpriteSheet = Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockItemSpriteSheet.png");
+           
 
             redTexture = new Texture2D(GraphicsDevice, 1, 1);
             redTexture.SetData<Color>(new Color[]{ Color.Red});
+            List<Texture2D> spriteSheetList = new List<Texture2D>();
+            //Need a better way to ensure that they are in the same order as the spriteSheetIDs enum
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockSpriteSheet.png")); //0
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\weaponSpriteSheet.png")); //1
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockItemSpriteSheet.png")); //2
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png")); //3
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ArrowSpriteSheet.png")); //4
 
-            spriteSheetList.Add(blockSpriteSheet);
-            spriteSheetList.Add(weaponSpriteSheet);
-            spriteSheetList.Add(blockItemSpriteSheet);
+            worldContext.engineController.spriteController.setSpriteSheetList(spriteSheetList);
 
-            triangleVertices = new VertexPositionColorTexture[5]; //Might not need the 5th item
+            player.setSpriteTexture(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.player]);
+
+            triangleVertices = new VertexPositionColorTexture[4]; //Might not need the 5th item
             triangleVertices[0].TextureCoordinate = new Vector2(0, 0);
             triangleVertices[1].TextureCoordinate = new Vector2(1, 0);
             triangleVertices[2].TextureCoordinate = new Vector2(1, 1);
             triangleVertices[3].TextureCoordinate = new Vector2(0, 1);
-            triangleVertices[4].TextureCoordinate = new Vector2(0, 0);
+            
             Color shadowColor = new Color(shadowValue, shadowValue, shadowValue);
             triangleVertices[0].Color = shadowColor;
             triangleVertices[1].Color = shadowColor;
             triangleVertices[2].Color = shadowColor;
             triangleVertices[3].Color = shadowColor;
-            triangleVertices[4].Color = shadowColor;
+            
 
             basicEffect.VertexColorEnabled = true;
             
@@ -214,10 +206,10 @@ namespace PixelMidpointDisplacement
             worldContext.generateIDsFromTextureList(new Rectangle[]{new Rectangle(0, 0, 0, 0), new Rectangle(0, 0, 32, 32), new Rectangle(0, 32, 32, 32), new Rectangle(0, 64, 32, 32)});
 
             (int width, int height) worldDimensions = (400, 800);
-            chunkArray = new RenderTarget2D[(int)Math.Ceiling(worldDimensions.width/(double)blocksPerChunk),(int)Math.Ceiling(worldDimensions.height/(double)blocksPerChunk)];
+
 
             worldContext.generateWorld(worldDimensions);
-            updatePixelsPerBlock();
+            
             
 
             player.setSpriteTexture(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png"));
@@ -230,17 +222,17 @@ namespace PixelMidpointDisplacement
             spriteRendering = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
             world = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
 
-            shadowMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
-            workingShadowMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
-            finalShadowMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
+            
+            finalShadowMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision), false, SurfaceFormat.Alpha8, DepthFormat.None);
             lightMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
-            maskedLightmap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
+            
 
+         
 
             calculateLight = Content.Load<Effect>("LightCalculator");
-            calculateShadow = Content.Load<Effect>("Rotation");
-            combineShadows = Content.Load<Effect>("CombineMasks");
-            combineLightAndShadow = Content.Load<Effect>("MaskLight");
+            //calculateShadow = Content.Load<Effect>("Rotation");
+            //combineShadows = Content.Load<Effect>("CombineMasks");
+            //combineLightAndShadow = Content.Load<Effect>("MaskLight");
             combineLightAndColor = Content.Load<Effect>("CombineLightAndColor");
 
             maskBlendState = new BlendState
@@ -254,17 +246,6 @@ namespace PixelMidpointDisplacement
 
         }
 
-        public void updatePixelsPerBlock()
-        {
-            for (int x = 0; x < chunkArray.GetLength(0); x++)
-            {
-                for (int y = 0; y < chunkArray.GetLength(1); y++)
-                {
-                    chunkArray[x, y] = new RenderTarget2D(GraphicsDevice, blocksPerChunk * worldContext.pixelsPerBlock, blocksPerChunk * worldContext.pixelsPerBlock);
-                }
-            }
-            
-        }
 
         protected override void Update(GameTime gameTime)
         {
@@ -277,6 +258,7 @@ namespace PixelMidpointDisplacement
             calculateScreenspaceOffset();
             updateDigSystem();
             tickAnimations(gameTime);
+            updateEntities(gameTime);
 
             base.Update(gameTime);
         }
@@ -334,12 +316,8 @@ namespace PixelMidpointDisplacement
             }
             chatCountdown -= gameTime.ElapsedGameTime.TotalSeconds;
 
-            if (!writeToChat)
-            {
-                player.inputUpdate(gameTime.ElapsedGameTime.TotalSeconds);
-            }
             timeSinceRepeatedLetter -= gameTime.ElapsedGameTime.TotalSeconds;
-
+            player.writeToChat = writeToChat;
             if (Keyboard.GetState().IsKeyDown(Keys.P) && toggleCooldown <= 0)
             {
                 useShaders = !useShaders;
@@ -355,21 +333,24 @@ namespace PixelMidpointDisplacement
             {
                 //General Physics simulations
                 //Order: Acceleration, velocity then location
-                worldContext.physicsObjects[i].isOnGround = false;
+                if (worldContext.physicsObjects[i].calculatePhysics)
+                {
+                    worldContext.physicsObjects[i].isOnGround = false;
 
-                engineController.physicsEngine.addGravity(worldContext.physicsObjects[i]);
-                engineController.physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                    engineController.physicsEngine.addGravity(worldContext.physicsObjects[i]);
+                    engineController.physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
-                engineController.physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
-                engineController.physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
-                engineController.physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                    engineController.physicsEngine.detectBlockCollisions(worldContext.physicsObjects[i]);
+                    engineController.physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+                    engineController.physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
-                //Reset acceleration to be calculated next frame
-                playerAcceleration = worldContext.physicsObjects[i].accelerationX + ", " + worldContext.physicsObjects[i].accelerationY;
+                    //Reset acceleration to be calculated next frame
+                    playerAcceleration = worldContext.physicsObjects[i].accelerationX + ", " + worldContext.physicsObjects[i].accelerationY;
 
 
-                worldContext.physicsObjects[i].accelerationX = 0;
-                worldContext.physicsObjects[i].accelerationY = 0;
+                    worldContext.physicsObjects[i].accelerationX = 0;
+                    worldContext.physicsObjects[i].accelerationY = 0;
+                }
             }
 
         }
@@ -395,9 +376,9 @@ namespace PixelMidpointDisplacement
                 worldContext.screenSpaceOffset = (worldContext.screenSpaceOffset.x, (-(int)worldContext.worldArray.GetLength(1) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Height - (int)(player.height * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock / 2);
             }
         }
-
         public void updateDigSystem() {
-            if (Mouse.GetState().ScrollWheelValue / 120 != digSize - 1)
+            if (Keyboard.GetState().IsKeyDown(Keys.LeftShift)) { if (Mouse.GetState().ScrollWheelValue / 120 != lightCount - 1 ) { lightCount = Mouse.GetState().ScrollWheelValue / 120 + 1; } }
+            else if (Mouse.GetState().ScrollWheelValue / 120 != digSize - 1)
             {
                 digSize = Mouse.GetState().ScrollWheelValue / 120 + 1;
 
@@ -435,140 +416,25 @@ namespace PixelMidpointDisplacement
         public void tickAnimations(GameTime gameTime) {
             animationController.tickAnimation(gameTime.ElapsedGameTime.TotalSeconds);
         }
+
+        public void updateEntities(GameTime gameTime) {
+            worldContext.engineController.entityController.entityInputUpdate(gameTime.ElapsedGameTime.TotalSeconds);
+        }
+        
         protected override void Draw(GameTime gameTime)
         {
-            
 
-            //System.Diagnostics.Debug.WriteLine((int)(1 / gameTime.ElapsedGameTime.TotalSeconds));
-            if (!hasCalculatedFirstChunks) {
-                
-                drawInitialChunks();
-                hasCalculatedFirstChunks = true;
-            }
-            /*
-            //Update chunks
-            int firstX = (int)Math.Floor(-worldContext.screenSpaceOffset.x / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
-            int firstY = (int)Math.Floor(-worldContext.screenSpaceOffset.y / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
-
-            int lastX = (int)Math.Ceiling((-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
-            int lastY = (int)Math.Ceiling((-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight) / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
-            //Something is wrong here that I need to fix. Going upwards crashes the game, and it doesn't render the chunks properly
-
-            //It's assuming that when the top moves into a new chunk, then so does the bottom. It needs to consider both seperately and only account for its side (min/max)
-            System.Diagnostics.Debug.WriteLine(firstX + ", " + firstY);
-            System.Diagnostics.Debug.WriteLine(lastX + ", " + lastY);
-            if (firstX > chunkXMin)
-            {
-                //The screen moved right, so clear the blocks at the current chunkXMin
-
-                for (int y = chunkYMin; y <= chunkYMax; y++)
-                {
-                    chunkArray[chunkXMin, y] = null;
-                }
-                chunkXMin = firstX;
-
-            }
-            if (firstY > chunkYMin)
-            {
-                //The screen moved down, so clear the blocks at the current chunkYMin, and draw ones at lastY
-                for (int x = chunkXMin; x <= chunkXMax; x++)
-                {
-                    chunkArray[x, chunkYMin] = null;
-                }
-                
-                chunkYMin = firstY;
-                
-            }
-            if (firstX < chunkXMin)
-            {
-                //The screen moved left, so clear the blocks at the current chunkXMax, and draw ones at firstX
-                //Clear chunks
-                
-                //Draw the new chunks
-                for (int y = firstY; y <= lastY; y++)
-                {
-                    drawChunk(firstX, y);
-                }
-                chunkXMin = firstX;
-                
-            }
-            if (firstY < chunkYMin)
-            {
-                //The screen moved up, so clear the blocks at the current chunkYMax, and draw ones at lastY
-
-                for (int x = firstX; x <= lastX; x++)
-                {
-                    drawChunk(x, firstY);
-                }
-                chunkYMin = firstY;
-            }
-
-            if (lastX > chunkXMax)
-            {
-                //The screen moved right, so clear the blocks at the current chunkXMin
-
-                for (int y = firstY; y <= lastY; y++)
-                {
-                    drawChunk(lastX, y);
-                }
-                chunkXMax = lastX;
-
-            }
-            if (lastY > chunkYMax)
-            {
-                //The screen moved down, so clear the blocks at the current chunkYMin, and draw ones at lastY
-                for (int x = firstX; x <= lastX; x++)
-                {
-                    drawChunk(x, lastY);
-                }
-
-                chunkYMax = lastY;
-
-            }
-            if (lastX < chunkXMax)
-            {
-                //The screen moved left, so clear the blocks at the current chunkXMax, and draw ones at firstX
-                //Clear chunks
-
-                //Draw the new chunks
-                for (int y = chunkYMin; y <= chunkYMax; y++)
-                {
-                    chunkArray[chunkXMax, y] = null;
-                }
-                chunkXMax = lastX;
-
-            }
-            if (lastY < chunkYMax)
-            {
-                //The screen moved up, so clear the blocks at the current chunkYMax, and draw ones at lastY
-
-                for (int x = chunkXMin; x <= chunkXMax; x++)
-                {
-                    chunkArray[x, chunkYMax] = null;
-                }
-                chunkYMax = lastY;
-            }*/
-
-            
             GraphicsDevice.Clear(Color.CornflowerBlue);
             
             GraphicsDevice.SetRenderTarget(spriteRendering);
             _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
 
-            /*
-             for (int x = firstX; x <= lastX; x++)
-             {
-                 for (int y = firstY; y <= lastY; y++)
-                 {
-                     _spriteBatch.Draw(chunkArray[x, y], new Vector2(x * blocksPerChunk * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, (y * blocksPerChunk * worldContext.pixelsPerBlock) + worldContext.screenSpaceOffset.y), Color.White);
-                 }
-             }
-            */
-
+           
             drawBlocks();
             drawCoords(gameTime);
             drawDebugInfo();
             drawChat();
+            drawEntities();
             drawPlayer();
             drawAnimatorObjects();
             _spriteBatch.End();
@@ -585,71 +451,7 @@ namespace PixelMidpointDisplacement
             base.Draw(gameTime);
         }
 
-        public void drawInitialChunks() {
-            //Draw the first chunks that are on screen. When the chunk number changes, use drawChunk to draw the new ones to a render target and clear the old value to free up space?
-            chunkXMin = (int)Math.Floor(-worldContext.screenSpaceOffset.x / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
-            chunkXMax = (int)Math.Ceiling((-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
-
-            chunkYMin = (int)Math.Floor(-worldContext.screenSpaceOffset.y / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
-            chunkYMax = (int)Math.Ceiling((-worldContext.screenSpaceOffset.y + _graphics.PreferredBackBufferHeight) / (double)(blocksPerChunk * worldContext.pixelsPerBlock));
-            for (int x = chunkXMin; x <= chunkXMax; x++) {
-                for (int y = chunkYMin; y <= chunkYMax; y++)
-                {
-                    chunkArray[x, y] = new RenderTarget2D(GraphicsDevice, blocksPerChunk * worldContext.pixelsPerBlock, blocksPerChunk * worldContext.pixelsPerBlock);
-                    GraphicsDevice.SetRenderTarget(chunkArray[x,y]);
-                    _spriteBatch.Begin();
-                    
-                    
-                    for (int xB = x * blocksPerChunk; xB < (x + 1) * blocksPerChunk; xB++) {
-                        for (int yB = y * blocksPerChunk; yB < (y + 1) * blocksPerChunk; yB++) {
-                            if (xB >= 0 && yB >= 0 && xB < worldContext.worldArray.GetLength(0) && yB < worldContext.worldArray.GetLength(1))
-                            {
-                                int lightValue = worldContext.lightArray[xB, yB];
-                                if (lightValue > 255)
-                                {
-                                    lightValue = 255;
-                                }
-                                Color lightLevel = Color.White;
-                                if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
-                                _spriteBatch.Draw(blockSpriteSheet, new Rectangle((xB - (x * blocksPerChunk)) * worldContext.pixelsPerBlock, (yB - (y * blocksPerChunk)) * worldContext.pixelsPerBlock, worldContext.pixelsPerBlock, worldContext.pixelsPerBlock), worldContext.worldArray[xB,yB].sourceRectangle, Color.White);
-                                
-                            }
-                        }
-                    }
-                    _spriteBatch.End();
-
-                }
-            }
-        }
-        public void updateChunks() {
-            
-        }
-        public void drawChunk(int x, int y) {
-            chunkArray[x, y] = new RenderTarget2D(GraphicsDevice, blocksPerChunk * worldContext.pixelsPerBlock, blocksPerChunk * worldContext.pixelsPerBlock);
-            GraphicsDevice.SetRenderTarget(chunkArray[x, y]);
-            _spriteBatch.Begin();
-
-            for (int xB = x * blocksPerChunk; xB < (x + 1) * blocksPerChunk; xB++)
-            {
-                for (int yB = y * blocksPerChunk; yB < (y + 1) * blocksPerChunk; yB++)
-                {
-                    if (xB >= 0 && yB >= 0 && xB < worldContext.worldArray.GetLength(0) && yB < worldContext.worldArray.GetLength(1))
-                    {
-                        int lightValue = worldContext.lightArray[xB, yB];
-                        if (lightValue > 255)
-                        {
-                            lightValue = 255;
-                        }
-                        Color lightLevel = Color.White;
-                        if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
-                        _spriteBatch.Draw(blockSpriteSheet, new Rectangle((xB - (x * blocksPerChunk)) * worldContext.pixelsPerBlock, (yB - (y * blocksPerChunk)) * worldContext.pixelsPerBlock, worldContext.pixelsPerBlock, worldContext.pixelsPerBlock), worldContext.worldArray[xB, yB].sourceRectangle, Color.White);
-
-                    }
-                }
-            }
-            _spriteBatch.End();
-        }
-
+        
         public void drawBlocks() {
             exposedBlockCount = 0;
             currentlyRenderedExposedBlocks.Clear();
@@ -667,7 +469,7 @@ namespace PixelMidpointDisplacement
                         Color lightLevel = Color.White;
                         if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
                         if (worldContext.exposedBlocks.ContainsKey((x, y))) { currentlyRenderedExposedBlocks.Add((x,y)); }
-                        _spriteBatch.Draw(blockSpriteSheet, new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), worldContext.worldArray[x, y].sourceRectangle, lightLevel);
+                        _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.blocks], new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), worldContext.worldArray[x, y].sourceRectangle, lightLevel);
                     }
                 }
             }
@@ -713,6 +515,7 @@ namespace PixelMidpointDisplacement
             _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, (int)(1 / gameTime.ElapsedGameTime.TotalSeconds) + " fps", new Vector2(200, 10), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, lightCount + " lights", new Vector2(450, 10), Color.BlueViolet);
         }
 
         public void drawChat() {
@@ -722,8 +525,19 @@ namespace PixelMidpointDisplacement
             }
         }
 
+        public void drawEntities() {
+            for(int i = 0; i < worldContext.engineController.entityController.entities.Count; i++) {
+                if (worldContext.engineController.entityController.entities[i] != null && worldContext.engineController.entityController.entities[i].spriteAnimator != null) {
+                    if (worldContext.engineController.entityController.entities[i] != player)
+                    {
+                        Entity entity = worldContext.engineController.entityController.entities[i];
+                        _spriteBatch.Draw(entity.spriteAnimator.spriteSheet, new Rectangle((int)(entity.x - entity.spriteAnimator.sourceOffset.X + worldContext.screenSpaceOffset.x), (int)(entity.y - entity.spriteAnimator.sourceOffset.Y + worldContext.screenSpaceOffset.y), (int)(entity.drawWidth * worldContext.pixelsPerBlock), (int)(entity.drawHeight * worldContext.pixelsPerBlock)), entity.spriteAnimator.sourceRect, Color.White, entity.rotation, entity.rotationOrigin, entity.directionalEffect, 0f);
+                    }
+                }
+            }
+        }
         public void drawPlayer() {
-            _spriteBatch.Draw(player.spriteAnimator.spriteSheet, new Rectangle((int)(player.x - player.spriteAnimator.sourceOffset.X) + worldContext.screenSpaceOffset.x, (int)(player.y - player.spriteAnimator.sourceOffset.Y) + worldContext.screenSpaceOffset.y, (int)(player.drawWidth * worldContext.pixelsPerBlock), (int)(player.drawHeight * worldContext.pixelsPerBlock)), player.spriteAnimator.sourceRect, Color.White, 0f, Vector2.Zero, player.playerEffect, 0f);
+            _spriteBatch.Draw(player.spriteAnimator.spriteSheet, new Rectangle((int)(player.x - player.spriteAnimator.sourceOffset.X) + worldContext.screenSpaceOffset.x, (int)(player.y - player.spriteAnimator.sourceOffset.Y) + worldContext.screenSpaceOffset.y, (int)(player.drawWidth * worldContext.pixelsPerBlock), (int)(player.drawHeight * worldContext.pixelsPerBlock)), player.spriteAnimator.sourceRect, Color.White, 0f, Vector2.Zero, player.directionalEffect, 0f);
         }
 
         public void drawAnimatorObjects() {
@@ -748,7 +562,7 @@ namespace PixelMidpointDisplacement
                 }
                 Vector2 origin = new Vector2(owner.owner.playerDirection * owner.origin.X - rotationXOffset, owner.verticalDirection * owner.origin.Y - rotationYOffset);
 
-                _spriteBatch.Draw(spriteSheetList[owner.spriteSheetID], new Rectangle((int)(owner.owner.x + worldContext.screenSpaceOffset.x + a.currentPosition.xPos + positionXOffset), (int)(owner.owner.y + worldContext.screenSpaceOffset.y + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White, (float)(owner.owner.playerDirection * (a.currentPosition.rotation)), origin, owner.spriteEffect | owner.owner.playerEffect, 0f);
+                _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[owner.spriteSheetID], new Rectangle((int)(owner.owner.x + worldContext.screenSpaceOffset.x + a.currentPosition.xPos + positionXOffset), (int)(owner.owner.y + worldContext.screenSpaceOffset.y + a.currentPosition.yPos), (int)(owner.drawDimensions.width), (int)(owner.drawDimensions.height)), owner.sourceRectangle, Color.White, (float)(owner.owner.playerDirection * (a.currentPosition.rotation)), origin, owner.spriteEffect | owner.owner.directionalEffect, 0f);
 
             }
 
@@ -759,17 +573,8 @@ namespace PixelMidpointDisplacement
             {
                 Vector2 lightPosition = new Vector2((float)Mouse.GetState().X / (float)_graphics.PreferredBackBufferWidth, (float)Mouse.GetState().Y / (float)_graphics.PreferredBackBufferHeight);
                 
-                //Find why the shadows disappear when the render targets are not the same dimensions as the world...
-                for (int i = 0; i < 1; i++)
+                for (int i = 0; i < lightCount; i++)
                 {
-
-                    //All running: Around 18-25fps
-                    //None running: 45-60
-
-                    
-                    
-                    //The shadowmap is not multiplieed to the lightmap: 22-30Fps
-                    //Is multiplied : 13-30 sorta
 
                     //No shadows: 22fps??? Only:30-60
                     calculateShadowMap(lightPosition); //A noticable performance drop at 10 dynamic lights. At 30 lights, it drops to 9-20fps
@@ -816,6 +621,9 @@ namespace PixelMidpointDisplacement
             RasterizerState rasterizerState1 = new RasterizerState();
             rasterizerState1.CullMode = CullMode.None;
             GraphicsDevice.RasterizerState = rasterizerState1;
+            //List<VertexPositionColorTexture> vertexList = new List<VertexPositionColorTexture>();
+            //List<short> indList = new List<short>();
+            
             foreach ((int, int) coord in currentlyRenderedExposedBlocks) {
                 int x = coord.Item1;
                 int y = coord.Item2;
@@ -873,32 +681,31 @@ namespace PixelMidpointDisplacement
                     if (yDif1 == 0) { setX1 = Math.Sign(xDif1); setY1 = 0; }
                     if (yDif2 == 0) { setX2 = Math.Sign(xDif2); setY2 = 0; }
 
-
-
                     triangleVertices[0].Position = vertexArray[i];
                     triangleVertices[1].Position = vertexArray[i + 1];
                     triangleVertices[2].Position = new Vector3(setX2, setY2, 0) + vertexArray[i + 1];
                     triangleVertices[3].Position = new Vector3(setX1, setY1, 0) + vertexArray[i];
 
-                    triangleVertices[4].Position = vertexArray[i];
-                    
-                    foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
-                    {
-                        pass.Apply();
 
-                        GraphicsDevice.DrawUserIndexedPrimitives(
-                            PrimitiveType.TriangleStrip,
-                            triangleVertices,
-                            0,
-                            triangleVertices.Length,
-                            ind,
-                            0,
-                            3
-                            );
+                    if (faceCount > 0)
+                    {
+                        foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
+                        {
+                            pass.Apply();
+
+                            GraphicsDevice.DrawUserIndexedPrimitives(
+                                PrimitiveType.TriangleStrip,
+                                triangleVertices,
+                                0,
+                                triangleVertices.Length,
+                                ind,
+                                0,
+                                (ind.Length / 3) + 1
+                                );
+                        }
                     }
                 }
             }
-            System.Diagnostics.Debug.WriteLine(faceCount);
         }
 
         public void calculateOccludedLightmap() {
@@ -906,8 +713,6 @@ namespace PixelMidpointDisplacement
             combineLightAndShadow.Parameters["Mask"].SetValue(lightMap);
             
             _spriteBatch.Begin(effect: combineLightAndShadow);
-            //combineLightAndShadow.Parameters["Mask"].SetValue(finalShadowMap);
-            //_spriteBatch.Draw(lightMap, Vector2.Zero, Color.White);
             _spriteBatch.Draw(finalShadowMap, Vector2.Zero, Color.White);
             _spriteBatch.End();
         }
@@ -976,7 +781,8 @@ namespace PixelMidpointDisplacement
         0.02,
         0.015,
         0.0075,
-        0.00325};
+        0.00325
+        };
 
         //Smaller means the blocks are also smaller...
         double frequency = 0.025;
@@ -1320,6 +1126,8 @@ namespace PixelMidpointDisplacement
 
         bool accummulateLight = true;
 
+        List<IEmissive> lights = new List<IEmissive>();
+
         public LightingSystem(WorldContext worldContext)
         {
             wc = worldContext;
@@ -1587,6 +1395,9 @@ namespace PixelMidpointDisplacement
         public LightingSystem lightingSystem;
         public PhysicsEngine physicsEngine;
         public CollisionController collisionController;
+        public EntityController entityController;
+        public SpriteController spriteController;
+
         public WorldContext worldContext;
         
 
@@ -1595,6 +1406,8 @@ namespace PixelMidpointDisplacement
             lightingSystem = new LightingSystem(wc);
             physicsEngine = new PhysicsEngine(wc);
             collisionController = new CollisionController();
+            entityController = new EntityController();
+            spriteController = new SpriteController();
         }
 
       
@@ -1629,6 +1442,31 @@ namespace PixelMidpointDisplacement
                 activeColliders.Add(collider);
             }
         }
+    }
+
+    public class SpriteController {
+        public Texture2D blockSpriteSheet;
+        public Texture2D weaponSpriteSheet;
+        public Texture2D blockItemSpriteSheet;
+        public Texture2D playerSpriteSheet;
+        public Texture2D arrowSpriteSheet;
+
+        public List<Texture2D> spriteSheetList = new List<Texture2D>();
+        //public List<Texture2D> entitySpriteSheetList = new List<Texture2D>();
+
+        public void setSpriteSheetList(List<Texture2D> spriteSheets) {
+            spriteSheetList = spriteSheets;
+            for(int i = 0; i < spriteSheetList.Count; i++) {
+                System.Diagnostics.Debug.WriteLine(spriteSheetList[i]);    
+            }
+        }
+    }
+    public enum spriteSheetIDs {
+        blocks,
+        weapons,
+        blockItems,
+        player,
+        arrow
     }
 
     public class WorldContext {
@@ -1798,7 +1636,6 @@ namespace PixelMidpointDisplacement
             foreach (PhysicsObject obj in physicsObjects) {
                 obj.recalculateCollider();
             }
-
         }
         
         public bool deleteBlock(int x, int y) {
@@ -2008,7 +1845,7 @@ namespace PixelMidpointDisplacement
                             if (blockRect.Intersects(entityCollider))
                             {
                                 (double x, double y) collisionNormal = computeCollisionNormal(entityCollider, blockRect);
-
+                                entity.hasCollided();
 
                                 //If the signs are unequal on either the velocity or the acceleration then the forces should cancel as the resulting motion would be counteracted by the block
                                 if (((Math.Sign(collisionNormal.y) != Math.Sign(entity.velocityY) && entity.velocityY != 0) || (Math.Sign(collisionNormal.y) != Math.Sign(entity.accelerationY) && entity.accelerationY != 0)) && collisionNormal.y != 0)
@@ -2178,6 +2015,8 @@ namespace PixelMidpointDisplacement
         public double accelerationX { get; set; }
         public double accelerationY { get; set; }
 
+        public bool calculatePhysics = true;
+
         public double velocityX { get; set; }
         public double velocityY { get; set; }
 
@@ -2240,13 +2079,55 @@ namespace PixelMidpointDisplacement
         public void recalculateCollider() {
             collider = new Rectangle(0, 0, (int)(width * worldContext.pixelsPerBlock), (int)(height * worldContext.pixelsPerBlock));
         }
+
+        public virtual void hasCollided() { }
     }
 
-    public class Player : PhysicsObject
+    public class Entity : PhysicsObject {
+        
+        public Texture2D spriteSheet;
+        public SpriteAnimator spriteAnimator;
+        public float rotation;
+        public Vector2 rotationOrigin;
+        public SpriteEffects directionalEffect;
+
+        public Entity(WorldContext wc) : base(wc) {
+            worldContext = wc;
+            worldContext.physicsObjects.Add(this);
+        }
+        public void setSpriteTexture(Texture2D spriteSheet)
+        {
+            this.spriteSheet = spriteSheet;
+            spriteAnimator.spriteSheet = spriteSheet;
+        }
+        public virtual void inputUpdate(double elapsedTime)
+        { }
+
+    }
+    public class EntityController {
+        public List<Entity> entities = new List<Entity>();
+
+        public void entityInputUpdate(double elapsedTime) {
+            for (int i = 0; i < entities.Count; i++)
+            {
+                entities[i].inputUpdate(elapsedTime);
+            }
+        }
+
+        public void addEntity(Entity entity) {
+            if (!entities.Contains(entity)) { entities.Add(entity); }
+        }
+        public void removeEntity(Entity entity) {
+            if (entities.Contains(entity)) { entities.Remove(entity); }
+        }
+    }
+    public class Player : Entity
     {
         int emmissiveStrength = 500;
         int emmissiveMax = 125;
         int[,] lightMap;
+
+        public bool writeToChat;
 
         public int playerDirection { get; set; }
 
@@ -2259,21 +2140,23 @@ namespace PixelMidpointDisplacement
 
         Item mainHand;
 
-        Texture2D spriteSheet;
-        public SpriteAnimator spriteAnimator;
 
-        public SpriteEffects playerEffect;
+    
 
 
         public Player(WorldContext wc) : base(wc)
         {
             loadSettings();
 
+            
             //need to dissociate the collider width and the draw width. 
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
 
             drawWidth = 1.5f;
             drawHeight = 3;
+
+            rotation = 0;
+            rotationOrigin = Vector2.Zero;
 
             mainHand = new BlockItem(1, worldContext.animationController, this);
 
@@ -2288,11 +2171,9 @@ namespace PixelMidpointDisplacement
                 { "walk", (6, 0) }
             
             };
-        }
 
-        public void setSpriteTexture(Texture2D spriteSheet) {
-            this.spriteSheet = spriteSheet;
-            spriteAnimator.spriteSheet = spriteSheet;
+            wc.engineController.entityController.addEntity(this);
+            
         }
 
         private void loadSettings() {
@@ -2318,67 +2199,76 @@ namespace PixelMidpointDisplacement
             jumpAcceleration = Convert.ToDouble(sr.ReadLine());
         }
 
-        public void inputUpdate(double elapsedTime) {
+        public override void inputUpdate(double elapsedTime) {
             //Movement
-            if (Keyboard.GetState().IsKeyDown(Keys.D))
+            if (!writeToChat)
             {
-
-                accelerationX += horizontalAcceleration;
-                if (!spriteAnimator.isAnimationActive)
+                if (Keyboard.GetState().IsKeyDown(Keys.D))
                 {
-                    spriteAnimator.startAnimation(0.5, "walk");
-                }
-                playerDirection = 1;
-                playerEffect = SpriteEffects.None;
-                
-            }
-            if (Keyboard.GetState().IsKeyDown(Keys.A))
-            {
-                accelerationX -= horizontalAcceleration;
-                if (!spriteAnimator.isAnimationActive) {
-                    spriteAnimator.startAnimation(0.5, "walk");
-                }
-                playerDirection = -1;
-                playerEffect = SpriteEffects.FlipHorizontally;
-            }
-            if (!Keyboard.GetState().IsKeyDown(Keys.A) && !Keyboard.GetState().IsKeyDown(Keys.D))
-            {
-                spriteAnimator.isAnimationActive = false; //If the player isn't walking, stop the animation
-            }
-            if (Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space))
-            {
-                if (isOnGround)
-                {
-                    accelerationY += jumpAcceleration / elapsedTime;
-                }
-            }
-            if (Keyboard.GetState().IsKeyDown(Keys.R))
-            {
-                x = initialX;
-                y = initialY;
-                velocityX = 0;
-                velocityY = 0;
-            }
 
-            //Item Swapping
-            if (Keyboard.GetState().IsKeyDown(Keys.D1))
-            {
-                
-                mainHand = new Weapon(worldContext.animationController, this);
-                worldContext.engineController.collisionController.addActiveCollider((IActiveCollider)mainHand);
-            }
-            else if (Keyboard.GetState().IsKeyDown(Keys.D2)) {
-                mainHand = new BlockItem(1, worldContext.animationController, this);
-            }
+                    accelerationX += horizontalAcceleration;
+                    if (!spriteAnimator.isAnimationActive)
+                    {
+                        spriteAnimator.startAnimation(0.5, "walk");
+                    }
+                    playerDirection = 1;
+                    directionalEffect = SpriteEffects.None;
 
-            ///Item Action
-            if (Mouse.GetState().LeftButton == ButtonState.Pressed)
-            {
-                if (mainHand != null)
+                }
+                if (Keyboard.GetState().IsKeyDown(Keys.A))
                 {
-                    mainHand.onLeftClick();
+                    accelerationX -= horizontalAcceleration;
+                    if (!spriteAnimator.isAnimationActive)
+                    {
+                        spriteAnimator.startAnimation(0.5, "walk");
+                    }
+                    playerDirection = -1;
+                    directionalEffect = SpriteEffects.FlipHorizontally;
+                }
+                if (!Keyboard.GetState().IsKeyDown(Keys.A) && !Keyboard.GetState().IsKeyDown(Keys.D))
+                {
+                    spriteAnimator.isAnimationActive = false; //If the player isn't walking, stop the animation
+                }
+                if (Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space))
+                {
+                    if (isOnGround)
+                    {
+                        accelerationY += jumpAcceleration / elapsedTime;
+                    }
+                }
+                if (Keyboard.GetState().IsKeyDown(Keys.R))
+                {
+                    x = initialX;
+                    y = initialY;
+                    velocityX = 0;
+                    velocityY = 0;
+                }
+
+                //Item Swapping
+                if (Keyboard.GetState().IsKeyDown(Keys.D1))
+                {
+
+                    mainHand = new Weapon(worldContext.animationController, this);
+                    worldContext.engineController.collisionController.addActiveCollider((IActiveCollider)mainHand);
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.D2))
+                {
+                    mainHand = new Bow(worldContext.animationController, this);
+                } else if (Keyboard.GetState().IsKeyDown(Keys.D3))
+                {
+                    mainHand = new BlockItem(1, worldContext.animationController, this);
                 }
             }
+                ///Item Action
+                if (Mouse.GetState().LeftButton == ButtonState.Pressed)
+                {
+                    if (mainHand != null)
+                    {
+                        mainHand.onLeftClick();
+                    }
+                }
+            
+            
         }
         public override void updateLocation(double xChange, double yChange) {
             int xBlockChange = (int)(Math.Floor((x + xChange) / worldContext.pixelsPerBlock) - Math.Floor(x / worldContext.pixelsPerBlock));
@@ -2546,7 +2436,106 @@ namespace PixelMidpointDisplacement
         }
 
     }
-    
+    public class Bow : Item {
+        public Bow(AnimationController ac, Player owner) : base(owner) {
+            spriteSheetID = (int)spriteSheetIDs.weapons;
+            animationController = ac;
+            origin = new Vector2(-6f,-6f);
+            constantRotationOffset = 0;
+            spriteEffect =  SpriteEffects.None;
+
+            verticalDirection = 1;
+
+
+            sourceRectangle = new Rectangle(16, 0, 16, 16);
+            drawDimensions = (48, 48);
+        }
+
+        public override void onLeftClick()
+        {
+            if (itemAnimator == null)
+            {
+                itemAnimator = new Animator(animationController, this, 0.3, (0, 0, 0), (0, 0, 0), 0, new Vector2(0,0));
+                if (Mouse.GetState().X < owner.x + owner.worldContext.screenSpaceOffset.x) { owner.playerDirection = -1; owner.directionalEffect = SpriteEffects.FlipHorizontally; } 
+                else if 
+                    (Mouse.GetState().X > owner.x + owner.worldContext.screenSpaceOffset.x) { owner.playerDirection = 1; owner.directionalEffect = SpriteEffects.None; }
+                    animationController.addAnimator(itemAnimator);
+                //Generate an arrow entity
+                Arrow firedArrow = new Arrow(owner.worldContext, (owner.x, owner.y), 30);
+                
+            }
+        }
+
+    }
+
+    public class Arrow : Entity, IEmissive{
+        public Color lightColor { get; set; }
+        public float luminosity { get; set; }
+        public float range { get; set; }
+        public RenderTarget2D shadowMap { get; set; }
+        public RenderTarget2D lightMap { get; set; }
+        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity) : base (wc)
+        {
+            spriteSheet = wc.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.arrow];
+            System.Diagnostics.Debug.WriteLine(spriteSheet + " Ahh");
+
+            spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, new Vector2(16,16), new Vector2(16,16), new Rectangle(0, 0, 16, 16), this);
+
+            rotationOrigin = Vector2.Zero;
+            directionalEffect = SpriteEffects.None;
+            
+            x = arrowLocation.x;
+            y = arrowLocation.y;
+            drawHeight = 1;
+            drawWidth = 1;
+            
+            kX = 0.01;
+            kY = 0.01;
+
+            minVelocityX = 0.25;
+            minVelocityY = 0;
+            
+            calculateInitialVelocity(initialVelocity);
+            spriteAnimator.animationDictionary = new Dictionary<string, (int frameCount, int yOffset)> {
+                { "fly", (1, 0) }
+            };
+
+            worldContext.engineController.entityController.addEntity(this);
+            //spriteAnimator.startAnimation(1, "fly");
+            
+        }
+        private void calculateInitialVelocity(double initialVelocity) {
+            //Compute angle
+            double yDif = -(Mouse.GetState().Y - (y + worldContext.screenSpaceOffset.y));
+            double xDif = ((Mouse.GetState().X - (x + worldContext.screenSpaceOffset.x)));
+            if (xDif < 0)
+            {
+                yDif *= -1;
+            }
+            
+                double theta = Math.Atan(-(Mouse.GetState().Y - (y + worldContext.screenSpaceOffset.y)) / ((Mouse.GetState().X - (x + worldContext.screenSpaceOffset.x))));
+            velocityX = initialVelocity * Math.Cos(theta);
+            
+            velocityY = initialVelocity * Math.Sin(theta);
+            if (xDif < 0) { velocityX *= -1; velocityY *= -1; directionalEffect = SpriteEffects.FlipHorizontally; }
+            System.Diagnostics.Debug.WriteLine("Arrow velocity was calculated at "  + velocityX + ", " + velocityY);
+        }
+
+        public override void inputUpdate(double elapsedTime)
+        {
+            if (velocityX != 0 && calculatePhysics)
+            {
+                rotation = (float)Math.Atan(-velocityY/velocityX);
+            } 
+            
+        }
+
+        public override void hasCollided()
+        {
+            calculatePhysics = false;
+           
+        }
+    }
     public class BlockItem : Item {
         public int blockID;
 
@@ -2747,10 +2736,11 @@ namespace PixelMidpointDisplacement
         public bool isAnimationActive;
 
         public AnimationController animationController;
-        public Player owner; //Substitute with something else later on.
+        public Entity owner; //Substitute with something else later on.
 
-        public SpriteAnimator(AnimationController animationController, Vector2 constantOffset, Vector2 frameOffset, Vector2 sourceDimensions, Rectangle animationlessSourceRect, Player owner) {
+        public SpriteAnimator(AnimationController animationController, Vector2 constantOffset, Vector2 frameOffset, Vector2 sourceDimensions, Rectangle animationlessSourceRect, Entity owner) {
             this.owner = owner;
+            this.spriteSheet = owner.spriteSheet;
             this.animationController = animationController;
             this.sourceOffset = constantOffset;
             this.frameOffset = frameOffset;
@@ -2833,7 +2823,6 @@ namespace PixelMidpointDisplacement
         }
 
         public void setLocation((int x, int y) location) {
-            
             this.location = location;
         }
         public void blockPlaced(Vector4 exposedFaces) {
@@ -3156,6 +3145,18 @@ namespace PixelMidpointDisplacement
         Rectangle collider { get; set; }
         //External colliders are colliders that don't compute their own collisions, they only react to collisions. Lets say that monsters have IExternalColliders, when the player collides with the monster, the collision function is run, but the monster doesn't also compute if it collided.
         //I think this will just make it a bit easier to seperate player based colliders from entity colliders. Weapons, including arrows, will have actual colliders that compute collisions with external colliders. This way weapons can 
+    }
+
+    public interface IEmissive {
+        public double x { get; set; }
+        public double y { get; set; }
+        public Color lightColor { get; set; }
+        public float luminosity { get; set; }
+
+        public float range { get; set; }
+
+        public RenderTarget2D shadowMap { get; set; }
+        public RenderTarget2D lightMap { get; set; }
     }
 
     public enum blockIDs {

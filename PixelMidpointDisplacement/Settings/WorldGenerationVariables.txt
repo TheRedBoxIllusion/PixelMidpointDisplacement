@@ -10,7 +10,7 @@ Octave weights: The weights of each octave when combining them all together. In 
 0.0075
 0.00325
 Frequency: The initial scale of the noise. A smaller frequency produces a finer detailed noise map. This is very impactful when combined with the initial pixels per block of the world context							(double)
-0.0025
+0.025
 Vector count: The number of possible vectors for the perlin noise. The vectors are then calculated by dividing a sphere into this number of segments. This impacts the angles of the caves. 							(int)
 6
 Angle Offset: The angle that all the vectors are offset. To see a good demonstration of what the angle does, set the vector count to 2 and then screw with the angle													(double)

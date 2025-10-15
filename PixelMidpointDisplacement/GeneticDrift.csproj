@@ -11,6 +11,7 @@
     <ApplicationIcon>Icon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <None Remove="Content\ArrowSpriteSheet.png" />
     <None Remove="Content\blockItemSpriteSheet.png" />
     <None Remove="Content\blockSpriteSheet.png" />
     <None Remove="Content\Player.png" />
@@ -24,6 +25,9 @@
     <None Remove="Settings\WorldContextSettings.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Content\ArrowSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Content\blockItemSpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
