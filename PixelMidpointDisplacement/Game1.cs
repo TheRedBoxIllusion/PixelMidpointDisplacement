@@ -49,13 +49,14 @@ namespace PixelMidpointDisplacement
         WorldContext worldContext;
         RenderTarget2D spriteRendering;
 
-        RenderTarget2D finalShadowMap;
+        RenderTarget2D workingLightMap;
         RenderTarget2D lightMap;
+        
 
 
         RenderTarget2D world;
 
-        float shadowValue = 0.5f;
+        float shadowValue = 0.4f;
         int lightCount = 1;
 
         Matrix worldMatrix, viewMatrix, projectionMatrix;
@@ -65,19 +66,18 @@ namespace PixelMidpointDisplacement
         Texture2D collisionSprite;
         Texture2D redTexture;
 
-
-
         Effect calculateLight;
         Effect calculateShadow;
         Effect combineLightAndShadow;
         Effect combineLightAndColor;
         Effect combineShadows;
+        Effect addLightmaps;
 
         List<(int x, int y)> currentlyRenderedExposedBlocks = new List<(int x, int y)>();
 
         short[] ind = { 0, 3, 2, 0, 1, 2 };
 
-        double shaderPrecision = 0.75;
+        
 
         bool useShaders = false;
         double toggleCooldown = 0;
@@ -164,6 +164,8 @@ namespace PixelMidpointDisplacement
             _spriteBatch = new SpriteBatch(GraphicsDevice);
             basicEffect = new BasicEffect(_graphics.GraphicsDevice);
 
+            worldContext.engineController.lightingSystem.graphics = _graphics;
+
             basicEffect.World = worldMatrix;
             basicEffect.View = viewMatrix;
             basicEffect.Projection = projectionMatrix;
@@ -223,16 +225,14 @@ namespace PixelMidpointDisplacement
             world = new RenderTarget2D(GraphicsDevice, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight);
 
             
-            finalShadowMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision), false, SurfaceFormat.Alpha8, DepthFormat.None);
-            lightMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * shaderPrecision));
+            workingLightMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision), false, SurfaceFormat.Alpha8, DepthFormat.None);
+            lightMap = new RenderTarget2D(GraphicsDevice, (int)(_graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(_graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
             
 
          
 
             calculateLight = Content.Load<Effect>("LightCalculator");
-            //calculateShadow = Content.Load<Effect>("Rotation");
-            //combineShadows = Content.Load<Effect>("CombineMasks");
-            //combineLightAndShadow = Content.Load<Effect>("MaskLight");
+            addLightmaps = Content.Load<Effect>("CombineMasks");
             combineLightAndColor = Content.Load<Effect>("CombineLightAndColor");
 
             maskBlendState = new BlendState
@@ -445,7 +445,9 @@ namespace PixelMidpointDisplacement
 
             GraphicsDevice.SetRenderTarget(null);
             _spriteBatch.Begin();
-            _spriteBatch.Draw(world, world.Bounds, Color.White);      
+            
+             _spriteBatch.Draw(world, world.Bounds, Color.White);
+            
             _spriteBatch.End();
 
             base.Draw(gameTime);
@@ -571,16 +573,18 @@ namespace PixelMidpointDisplacement
         public void drawLight() {
             if (useShaders)
             {
-                Vector2 lightPosition = new Vector2((float)Mouse.GetState().X / (float)_graphics.PreferredBackBufferWidth, (float)Mouse.GetState().Y / (float)_graphics.PreferredBackBufferHeight);
+                //Vector2 lightPosition = new Vector2((float)Mouse.GetState().X / (float)_graphics.PreferredBackBufferWidth, (float)Mouse.GetState().Y / (float)_graphics.PreferredBackBufferHeight);
+                GraphicsDevice.SetRenderTarget(lightMap);
+                GraphicsDevice.Clear(new Color(0.1f, 0.1f, 0.1f));
                 
-                for (int i = 0; i < lightCount; i++)
+                for (int i = 0; i < worldContext.engineController.lightingSystem.lights.Count; i++)
                 {
-
                     //No shadows: 22fps??? Only:30-60
-                    calculateShadowMap(lightPosition); //A noticable performance drop at 10 dynamic lights. At 30 lights, it drops to 9-20fps
-                    calculateLightmap(lightPosition); //Minor impact on performance
+                    Vector2 lightPosition = new Vector2((float)((worldContext.engineController.lightingSystem.lights[i].x + worldContext.screenSpaceOffset.x)) / _graphics.PreferredBackBufferWidth, (float)((worldContext.engineController.lightingSystem.lights[i].y + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight));
+                    calculateShadowMap(worldContext.engineController.lightingSystem.lights[i], lightPosition); //A noticable performance drop at 10 dynamic lights. At 30 lights, it drops to 9-20fps
+                    calculateLightmap(worldContext.engineController.lightingSystem.lights[i], lightPosition); //Minor impact on performance
                     //calculateOccludedLightmap();
-
+                    addLightmapToGlobalLights(worldContext.engineController.lightingSystem.lights[i]);
                 }
                     //No world updates: 35-60fps
                     calculateLightedWorld();
@@ -595,28 +599,28 @@ namespace PixelMidpointDisplacement
                 _spriteBatch.End();
             }
         }
-        public void calculateLightmap(Vector2 lightPosition) {
-            calculateLight.Parameters["lightIntensity"].SetValue(90f);
-            calculateLight.Parameters["lightColor"].SetValue(new Vector3(1f, 1f, 1f));
+        public void calculateLightmap(IEmissive lightObject, Vector2 lightPosition) {
+            calculateLight.Parameters["lightIntensity"].SetValue(lightObject.luminosity);
+            calculateLight.Parameters["lightColor"].SetValue(lightObject.lightColor);
             calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
             calculateLight.Parameters["lightPosition"].SetValue(lightPosition);
             //calculateLight.Parameters["Mask"].SetValue(finalShadowMap);
 
 
-            GraphicsDevice.SetRenderTarget(lightMap);
+            GraphicsDevice.SetRenderTarget(lightObject.lightMap);
 
             
             _spriteBatch.Begin(effect: calculateLight);
-            _spriteBatch.Draw(finalShadowMap, Vector2.Zero, Color.White);
+            _spriteBatch.Draw(lightObject.shadowMap, Vector2.Zero, Color.White);
             _spriteBatch.End();
 
         }
-        public void calculateShadowMap(Vector2 lightPosition)
+        public void calculateShadowMap(IEmissive lightObject, Vector2 lightPosition)
         {
             int faceCount = 0;
             //A possible performance increase:
             //Instead of drawing every single shadow. Compile a list of VertexPositionColorTextures of all the polygons and convert it to an array. Make an array of inds duplicated repeatedly and shifted by duplicateNumber * length, then render everything in one graphics call?
-            GraphicsDevice.SetRenderTarget(finalShadowMap);
+            GraphicsDevice.SetRenderTarget(lightObject.shadowMap);
             GraphicsDevice.Clear(Color.White);
             RasterizerState rasterizerState1 = new RasterizerState();
             rasterizerState1.CullMode = CullMode.None;
@@ -708,12 +712,18 @@ namespace PixelMidpointDisplacement
             }
         }
 
-        public void calculateOccludedLightmap() {
-            GraphicsDevice.SetRenderTarget(lightMap);
-            combineLightAndShadow.Parameters["Mask"].SetValue(lightMap);
+        public void addLightmapToGlobalLights(IEmissive lightObject) {
+            addLightmaps.Parameters["Lightmap"].SetValue(lightMap);
+
+            GraphicsDevice.SetRenderTarget(workingLightMap);
             
-            _spriteBatch.Begin(effect: combineLightAndShadow);
-            _spriteBatch.Draw(finalShadowMap, Vector2.Zero, Color.White);
+            _spriteBatch.Begin(effect:addLightmaps);
+            _spriteBatch.Draw(lightObject.lightMap, Vector2.Zero, Color.White);
+            _spriteBatch.End();
+
+            GraphicsDevice.SetRenderTarget(lightMap);
+            _spriteBatch.Begin();
+            _spriteBatch.Draw(workingLightMap, Vector2.Zero, Color.White);
             _spriteBatch.End();
         }
         public void calculateLightedWorld() {
@@ -1121,12 +1131,15 @@ namespace PixelMidpointDisplacement
         int shadowBrightness = 200;
         int darkestLight = 0;
 
+        public double shaderPrecision = 0.75;
+        public GraphicsDeviceManager graphics;
+
         double scalar = 0.8;
         double emmissiveScalar = 0.5;
 
         bool accummulateLight = true;
 
-        List<IEmissive> lights = new List<IEmissive>();
+        public List<IEmissive> lights = new List<IEmissive>();
 
         public LightingSystem(WorldContext worldContext)
         {
@@ -2469,7 +2482,7 @@ namespace PixelMidpointDisplacement
     }
 
     public class Arrow : Entity, IEmissive{
-        public Color lightColor { get; set; }
+        public Vector3 lightColor { get; set; }
         public float luminosity { get; set; }
         public float range { get; set; }
         public RenderTarget2D shadowMap { get; set; }
@@ -2477,7 +2490,7 @@ namespace PixelMidpointDisplacement
         public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity) : base (wc)
         {
             spriteSheet = wc.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.arrow];
-            System.Diagnostics.Debug.WriteLine(spriteSheet + " Ahh");
+            
 
             spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, new Vector2(16,16), new Vector2(16,16), new Rectangle(0, 0, 16, 16), this);
 
@@ -2494,7 +2507,15 @@ namespace PixelMidpointDisplacement
 
             minVelocityX = 0.25;
             minVelocityY = 0;
-            
+
+            lightColor = new Vector3(0.98f,0.44f,0.16f);
+            luminosity = 30f;
+            range = 10f;
+
+            shadowMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
+            lightMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
+            worldContext.engineController.lightingSystem.lights.Add(this);
+
             calculateInitialVelocity(initialVelocity);
             spriteAnimator.animationDictionary = new Dictionary<string, (int frameCount, int yOffset)> {
                 { "fly", (1, 0) }
@@ -2518,7 +2539,7 @@ namespace PixelMidpointDisplacement
             
             velocityY = initialVelocity * Math.Sin(theta);
             if (xDif < 0) { velocityX *= -1; velocityY *= -1; directionalEffect = SpriteEffects.FlipHorizontally; }
-            System.Diagnostics.Debug.WriteLine("Arrow velocity was calculated at "  + velocityX + ", " + velocityY);
+            
         }
 
         public override void inputUpdate(double elapsedTime)
@@ -2533,7 +2554,7 @@ namespace PixelMidpointDisplacement
         public override void hasCollided()
         {
             calculatePhysics = false;
-           
+            worldContext.engineController.lightingSystem.lights.Remove(this);
         }
     }
     public class BlockItem : Item {
@@ -3150,10 +3171,11 @@ namespace PixelMidpointDisplacement
     public interface IEmissive {
         public double x { get; set; }
         public double y { get; set; }
-        public Color lightColor { get; set; }
+        public Vector3 lightColor { get; set; }
         public float luminosity { get; set; }
 
         public float range { get; set; }
+
 
         public RenderTarget2D shadowMap { get; set; }
         public RenderTarget2D lightMap { get; set; }

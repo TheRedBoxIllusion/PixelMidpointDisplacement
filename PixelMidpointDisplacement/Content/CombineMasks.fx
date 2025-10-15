@@ -27,17 +27,8 @@ struct VertexShaderOutput
 
 float4 MainPS(VertexShaderOutput input) : COLOR
 {
-    float4 pixelColor = tex2D(SpriteTextureSampler, input.TextureCoordinates) * input.Color;
-    float4 light = tex2D(LightmapSampler, input.TextureCoordinates);
-    if (all(pixelColor == float4(0, 0, 0, 1)) && all(light != float4(0, 0, 0, 0)))
-    {
-        return light;
-    }
-    else
-    {
-        return pixelColor;
-    }
-    
+    return tex2D(SpriteTextureSampler, input.TextureCoordinates) + tex2D(LightmapSampler, input.TextureCoordinates);
+
 }
 
 technique SpriteDrawing
