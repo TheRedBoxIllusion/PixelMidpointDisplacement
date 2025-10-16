@@ -24,9 +24,26 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
         - Use the "sourceRect" to draw the segments of the chunk that would be on screen
         - When destroying a block or adding it, just spriteBatch.Draw to that chunk and either clear the space that the block would be, or draw the sprite to that spot in the chunk
 
-    Speed up the shader:
-        - Draw the light and shadow in 1/4 resolution and upscale. Reduces the number of pixels significantly.
-        -> Might rewrite it to not have to calculate the shadows for every pixel, only at the faces and adjust how light is calculated. Use a raycasting to check if a 'face' blocks the light
+        = This ended up being slower than rendering each block individually. Also used up more GPU because it had to store so many render targets
+
+    Biomes:     *High Priority
+        - Rewrite the world generation system to generate from "biomes" -a class that defines world generation variables and includes lists of entities, structures and stuff like trees that can spawn in that biome
+        - Figure out how to seamlessly join between different biomes both on the surface (should be easy, just share a common vertex for the midpoint displacement algorithm) 
+            and caves (No clue!!) other than perhaps keeping one perlin noise generation and only modifying the block Threshold values?
+
+        -Process:
+            -> Progress from left to right generating a list of biomes.
+                    - Each biome generates a random width 
+            -> Pass into a biome an initial point for the MPD algorithm that comes from the biome to the previous biome
+            -> One perlin noise map, just each biome defines its own threshold weights
+            -> Ore generation is per biome
+            -> Later on: Underground biomes? I think that would be a different system and moreso just a seperate pass after the initial surface biomes
+
+        
+    Structure Editor:      *Next in list for world Gen
+        - Make a program that allows you to place blocks within a sandbox style world and then save it as a .txt file to pass into world gen
+            - Saves the block IDs that you place and is an array of the specified dimensions. Somehow this gets read to a structure array file?
+    
  */
 
 /*
@@ -423,7 +440,7 @@ namespace PixelMidpointDisplacement
         
         protected override void Draw(GameTime gameTime)
         {
-            System.Diagnostics.Debug.WriteLine((int)(1/gameTime.ElapsedGameTime.TotalSeconds));
+            
             GraphicsDevice.Clear(Color.CornflowerBlue);
             
             GraphicsDevice.SetRenderTarget(spriteRendering);
@@ -778,7 +795,9 @@ namespace PixelMidpointDisplacement
 
 
         Block[,] oreArray;
-        
+
+        List<(double, double)> initialPoints;
+
 
         //Perlin Noise Variables:
         int noiseIterations = 8;
@@ -869,8 +888,8 @@ namespace PixelMidpointDisplacement
                 surfaceHeight[x] = worldDimensions.height;
             }
 
-
-            List<(double, double)> initialPoints = new List<(double, double)>() { (0, 900), (worldContext.pixelsPerBlock * 0.25 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * 0.5 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock *  0.75 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
+            //Both of these will be done in the individual biomes class
+            initialPoints = new List<(double, double)>() { (0, 900), (worldContext.pixelsPerBlock * 0.25 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * 0.5 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock *  0.75 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
 
             MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 50, 1.2, 12, 30);
 
@@ -1122,6 +1141,18 @@ namespace PixelMidpointDisplacement
 
     }
 
+    public class Biome {
+        int biomeWidth;
+
+        List<BlockThresholdValues> blockThresholdVariables;
+        BlockGenerationVariables[] ores;
+
+        List<Entity> spawnableEntities;
+        List<Structure> spawnableStructures;
+        List<(double, double)> initialPoints;
+    }
+
+    public class Structure { }
     public class LightingSystem
     {
         public int[,] lightArray { get; set; }
@@ -1469,9 +1500,7 @@ namespace PixelMidpointDisplacement
 
         public void setSpriteSheetList(List<Texture2D> spriteSheets) {
             spriteSheetList = spriteSheets;
-            for(int i = 0; i < spriteSheetList.Count; i++) {
-                System.Diagnostics.Debug.WriteLine(spriteSheetList[i]);    
-            }
+            
         }
     }
     public enum spriteSheetIDs {
