@@ -1299,10 +1299,10 @@ namespace PixelMidpointDisplacement
         public MountainBiome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) : base(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions)
         {
             //Generate the randomised variables
-            iterations = 15;
+            iterations = 10;
             decayPower = 0.9;
             positiveWeight = 80;
-            initialIterationOffset = 500;
+            initialIterationOffset = 100;
 
             ores = new BlockGenerationVariables[] {
                 new BlockGenerationVariables(1, new Block((int)blockIDs.stone), 8, 80),
@@ -1318,7 +1318,7 @@ namespace PixelMidpointDisplacement
             this.biomeDimensions.width = new Random().Next(200, 400);
 
 
-            initialPoints.Add(((rightMostTerrainPoint.x + this.biomeDimensions.width * wg.worldContext.pixelsPerBlock)/2, rightMostTerrainPoint.y - 500));
+            initialPoints.Add((rightMostTerrainPoint.x + (this.biomeDimensions.width * wg.worldContext.pixelsPerBlock)/2, rightMostTerrainPoint.y - 500)); //A central peak
             initialPoints.Add((rightMostTerrainPoint.x + this.biomeDimensions.width * wg.worldContext.pixelsPerBlock, rightMostTerrainPoint.y));
         }
 
