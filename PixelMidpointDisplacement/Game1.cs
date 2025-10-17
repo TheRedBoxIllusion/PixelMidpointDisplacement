@@ -224,9 +224,7 @@ namespace PixelMidpointDisplacement
 
             worldContext.generateIDsFromTextureList(new Rectangle[]{new Rectangle(0, 0, 0, 0), new Rectangle(0, 0, 32, 32), new Rectangle(0, 32, 32, 32), new Rectangle(0, 64, 32, 32)});
 
-            (int width, int height) worldDimensions = (400, 800);
-
-
+            (int width, int height) worldDimensions = (800, 800);
             worldContext.generateWorld(worldDimensions);
             
             
@@ -783,21 +781,25 @@ namespace PixelMidpointDisplacement
     }
 
     public class WorldGenerator {
-        WorldContext worldContext;
+        public WorldContext worldContext;
 
-        int[,] worldArray;
-        int[] surfaceHeight;
+        public int[,] worldArray;
+        public int[] surfaceHeight;
         List<(int x, int y)> surfaceBlocks = new List<(int x, int y)>(); //This list contains all the blocks facing the surface, not only the ones that are highest. Eg. cliff faces
         
 
         double[,] perlinNoiseArray;
         BlockGenerationVariables[,] brownianMotionArray;
 
+        List<Biome> biomeList = new List<Biome>();
+        List<Biome> biomeStencilList = new List<Biome>() {
+            new MeadowBiome(),
+            new MountainBiome(),
+            new MountainBiome()
+        };
+        int rightMountainRangeWidth = 0;
 
-        Block[,] oreArray;
-
-        List<(double, double)> initialPoints;
-
+        int horizonLine = 900;
 
         //Perlin Noise Variables:
         int noiseIterations = 8;
@@ -815,38 +817,10 @@ namespace PixelMidpointDisplacement
 
         //Smaller means the blocks are also smaller...
         double frequency = 0.025;
-
-        //BlockThresholdValues:
-        //Initial block threshold
-        //Maximum Y that these variables are used for
-        //Threshold decrease per y value
-        //Maximum threshold
-        //Minimum threshold
-        //Weight of the absolute y value
-        //Weight of the relative y value
-        List<BlockThresholdValues> blockThresholdVariables = new List<BlockThresholdValues>(){
-            new BlockThresholdValues(blockThreshold : 0.9, maximumY : 0, decreasePerY : 0.005, maximumThreshold : 0.9, minimumThreshold : 0.48, absoluteYHeightWeight : 0, relativeYHeightWeight : 1),
-            new BlockThresholdValues(0.9, 130, 0.005, 0.9, 0.48, 0.3, 1),
-
-            new BlockThresholdValues(0.9, 150, 0.01, 0.9, 0.48, 1, 0),
-           
-            new BlockThresholdValues(0.9, 200, 0.005, 0.9, 0.48, 0.2, 1),
-            new BlockThresholdValues(0.9, 210, 0.005, 0.9, 0.48, 0, 1)
-        };
-        
-        
-
         int vectorCount = 6;
         double vectorAngleOffset = (Math.PI);
 
-        //SeededBrownianMotion Variables:
-        BlockGenerationVariables[] ores = new BlockGenerationVariables[]{
-            new BlockGenerationVariables(seedDensity : 1, block : new Block(ID : 2), maxSingleSpread : 8, oreVeinSpread : 360), //Dirt
-            new BlockGenerationVariables(0.1, new Block(1), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
-            new BlockGenerationVariables(0.3, new Block(1), 6, 24)
-            };
-        //n-1 where n is the number of blockIds
-        int maxAttempts = 15;
+
 
     public WorldGenerator(WorldContext wc) {
             worldContext = wc;
@@ -881,25 +855,43 @@ namespace PixelMidpointDisplacement
             perlinNoiseArray = new double[worldDimensions.width, worldDimensions.height];
             brownianMotionArray = new BlockGenerationVariables[worldDimensions.width, worldDimensions.height];
             worldArray = new int[worldDimensions.width, worldDimensions.height];
-            oreArray = new Block[worldDimensions.width, worldDimensions.height];
+            
             surfaceHeight = new int[worldDimensions.width];
+
+            
 
             for (int x = 0; x < worldDimensions.width; x++) {
                 surfaceHeight[x] = worldDimensions.height;
             }
 
+            perlinNoise(worldDimensions, noiseIterations, octaveWeights, frequency, vectorCount, vectorAngleOffset);
+
+            generateBiomes(worldDimensions);
+            /*
             //Both of these will be done in the individual biomes class
             initialPoints = new List<(double, double)>() { (0, 900), (worldContext.pixelsPerBlock * 0.25 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * 0.5 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock *  0.75 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
 
             MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 50, 1.2, 12, 30);
 
+            //So for each biome through the list the process shall go as follows:
+            //Generate the surface terrain
+            //Seed the brownian motion with the ores of the biome
+            //Combine the algorithms with the perlin noise of that section of the world
+
+            //It'll be much easier to convert everything once I know how I'm generating the biomes themselves.
+
+            //This should be very easy to port to biomes. Just pass in the biome's MD algorithm. As long as the algorithm has the points in absolute space
             pointsToBlocks(mda.midpointAlgorithm());
+            //This will only be done once per world to maintain continuity. Perhaps some biomes can generate their own perlin noise. But that's for later. It would just be a second pass
             
-
-            perlinNoise(worldDimensions, noiseIterations, octaveWeights, frequency, vectorCount, vectorAngleOffset);
+            //Just pass in the ores and maxAttempts of the biome, and make it define the variables inside the biome itself to pull from later
             seededBrownianMotion(ores, maxAttempts);
-            combineAlgorithms(blockThresholdVariables);
+            //This is almost something that could be done for a list of biomes? Dunno. I'll have to modify it to adjust it to different Biomes
+            //combineAlgorithms(blockThresholdVariables);*/
 
+
+
+            //This stuff will occur after all the biomes are generated as it doesn't impact anything
             calculateSurfaceBlocks();
 
             convertDirtToGrass();
@@ -907,6 +899,38 @@ namespace PixelMidpointDisplacement
             return worldArray;
         }
 
+        public void generateBiomes((int width, int height) worldDimensions) {
+            //In blocks. The biome offset is in blocks, the points just get converted into pixel space
+            int currentLeadingWidth = 0;
+            //To generate something on the left. Put it here
+            //Blocks aren't generation. What's happening is that there's only blocks at the point when the biomes are generated
+            Biome ocean = biomeStencilList[0].generateBiomeCopy((0, horizonLine), this, (0,0), (0, worldDimensions.height));
+            
+            biomeList.Add(ocean);
+            ocean.generateSurfaceTerrain();
+            
+            ocean.generateOres();
+            
+            combineAlgorithms((0,0), ocean);
+            
+
+            currentLeadingWidth += ocean.biomeDimensions.width;
+            
+            while (worldDimensions.width - currentLeadingWidth > rightMountainRangeWidth)
+            {
+                int biomeNumber = new Random().Next(biomeStencilList.Count);
+                //Generate a copy of the biome and pass in the rightmost point of the most recent biome terrain in the list 
+                
+                Biome biome = biomeStencilList[biomeNumber].generateBiomeCopy(biomeList[biomeList.Count - 1].initialPoints[biomeList[biomeList.Count - 1].initialPoints.Count - 1], this, (currentLeadingWidth, 0), (0, worldDimensions.height));
+                biomeList.Add(biome);
+                biome.generateSurfaceTerrain();
+                biome.generateOres();
+                combineAlgorithms((currentLeadingWidth, 0), biome);
+                currentLeadingWidth += biome.biomeDimensions.width;
+            }
+            
+            //To generate something on the right. Put it here
+        }
         public int[] getSurfaceHeight() {
             return surfaceHeight;
         }
@@ -916,55 +940,8 @@ namespace PixelMidpointDisplacement
             return surfaceBlocks;
         }
 
-        public Block[,] getOreArray()
-        {
-            return oreArray;
-        }
 
-        private void pointsToBlocks(List<(double x, double y)> pointList)
-        {
-            //Convert each point to within the grid-coordinates, then set the worldArray to 1 wherever each lands
-
-            double distanceBetweenPoints = Math.Sqrt(Math.Pow(2, (pointList[0].x - pointList[1].x) + Math.Pow(2, pointList[0].y - pointList[1].y)));
-
-            int numOfInterpolations = 0;
-
-            if (distanceBetweenPoints > Math.Sqrt(2) * worldContext.pixelsPerBlock)
-            {
-                numOfInterpolations = (int)(distanceBetweenPoints / worldContext.pixelsPerBlock) - 1;
-            }
-
-            for (int i = 0; i < pointList.Count; i++)
-            {
-
-                int gridX = (int)Math.Floor(pointList[i].x / worldContext.pixelsPerBlock);
-                int gridY = (int)Math.Floor(pointList[i].y / worldContext.pixelsPerBlock);
-
-                if (gridX < 0)
-                {
-                    gridX = 0;
-                }
-                else if (gridX >= worldArray.GetLength(0))
-                {
-                    gridX = worldArray.GetLength(0) - 1;
-                }
-                if (gridY < 0)
-                {
-                    gridY = 0;
-                }
-                else if (gridY >= worldArray.GetLength(1))
-                {
-                    gridY = worldArray.GetLength(1) - 1;
-                }
-
-                for (int y = gridY; y < worldArray.GetLength(1); y++)
-                {
-                    worldArray[gridX, y] = 1;
-                }
-            }
-
-        }
-
+        
         private void calculateSurfaceBlocks() {
             for (int x = 0; x < surfaceHeight.Length; x++)
             {
@@ -1078,25 +1055,30 @@ namespace PixelMidpointDisplacement
 
             return outputArray;
         }
-        private void seededBrownianMotion(BlockGenerationVariables[] oresArray, int attemptCount)
+        
+        private void combineAlgorithms((int x, int y) biomeOffset, Biome biome)
         {
-            SeededBrownianMotion sbm = new SeededBrownianMotion();
-            brownianMotionArray = sbm.seededBrownianMotion(brownianMotionArray, oresArray);
-            brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, attemptCount);
-        }
-        private void combineAlgorithms(List<BlockThresholdValues> blockThresholdVariables)
-        {
-            for (int x = 0; x < worldArray.GetLength(0); x++)
+            int maxX = biomeOffset.x + biome.biomeDimensions.width;
+            int maxY = biomeOffset.y + biome.biomeDimensions.height;
+            if (maxX > worldArray.GetLength(0)) {
+                maxX = worldArray.GetLength(0);
+            }
+            if (maxY > worldArray.GetLength(1))
             {
-                for (int y = 0; y < worldArray.GetLength(1); y++)
+                maxY = worldArray.GetLength(1);
+            }
+            for (int x = biomeOffset.x; x < maxX; x++)
+            {
+                for (int y = biomeOffset.y; y < maxY; y++)
                 {
-                    if (perlinNoiseArray[x, y] > changeThresholdByDepth(blockThresholdVariables, (x,y)))
+                    if (perlinNoiseArray[x, y] > biome.changeThresholdByDepth((x,y)))
                     { //If it's above the block threshold, set the block to be air, 
                         worldArray[x, y] = 0;
+                       
                     }
-                    else if (brownianMotionArray[x, y] != null && worldArray[x, y] == 1) //If the brownian motion defined it, and it's solid from the midpoint generation
+                    else if (biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y] != null && worldArray[x, y] == 1) //If the brownian motion defined it, and it's solid from the midpoint generation
                     {
-                        worldArray[x, y] = brownianMotionArray[x, y].block.ID;
+                        worldArray[x, y] = biome.brownianMotionArray[x - biomeOffset.x , y - biomeOffset.y].block.ID;
                         if (worldArray[x, y] != 0)
                         {
                             if (surfaceHeight[x] == null || surfaceHeight[x] > y)
@@ -1114,6 +1096,121 @@ namespace PixelMidpointDisplacement
             }
         }
 
+        
+
+    }
+
+    public class Biome {
+
+        //+++++++++++++++
+        //Brownian motion variables:
+        public List<BlockThresholdValues> blockThresholdVariables;
+        public BlockGenerationVariables[] ores;
+
+        //This is the array of block variables that is generated by the algorithm
+        public BlockGenerationVariables[,] brownianMotionArray;
+
+        int maxAttempts = 15;
+        //++++++++++++++
+
+
+
+        //++++++++++++++
+        //Midpoint Displacement variables:
+        public List<(double, double)> initialPoints = new List<(double, double)>();
+        public double initialIterationOffset;
+        public double decayPower;
+        public int iterations;
+        public int positiveWeight;
+        //++++++++++++++
+
+        public List<Entity> spawnableEntities;
+        public List<Structure> spawnableStructures;
+
+        WorldGenerator worldGenerator;
+
+        (int x, int y) biomeOffset;
+        (int width, int height) worldDimensions;
+        public (int width, int height) biomeDimensions;
+
+        public Biome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) {
+            //Initialise various variables
+            initialPoints = new List<(double, double)>();
+            initialPoints.Add(rightMostTerrainPoint);
+            worldGenerator = wg;
+            this.biomeOffset = biomeOffset;
+            this.biomeDimensions = biomeDimensions;
+            
+        }
+        //For the stencils
+        public Biome() { }
+
+        public void generateSurfaceTerrain() {
+            MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, initialIterationOffset, decayPower, iterations, positiveWeight);
+            //Should by nature be in absolute dimensions (aka. don't have to worry about the location of the biome)
+            System.Diagnostics.Debug.WriteLine(initialPoints[0] + " + " + initialPoints[1] + " + " + initialIterationOffset + " + " + decayPower + " + " + iterations + " + " + positiveWeight);
+            pointsToBlocks(mda.midpointAlgorithm());
+        }
+
+        public void generateOres() {
+            brownianMotionArray = new BlockGenerationVariables[biomeDimensions.width, biomeDimensions.height];
+            seededBrownianMotion(ores, maxAttempts);
+        }
+        private void seededBrownianMotion(BlockGenerationVariables[] oresArray, int attemptCount)
+        {
+            SeededBrownianMotion sbm = new SeededBrownianMotion();
+            brownianMotionArray = sbm.seededBrownianMotion(brownianMotionArray, oresArray);
+            brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, attemptCount);
+        }
+        
+        
+        private void pointsToBlocks(List<(double x, double y)> pointList)
+        {
+            //Convert each point to within the grid-coordinates, then set the worldArray to 1 wherever each lands
+
+            double distanceBetweenPoints = Math.Sqrt(Math.Pow(2, (pointList[0].x - pointList[1].x) + Math.Pow(2, pointList[0].y - pointList[1].y)));
+
+            int numOfInterpolations = 0;
+
+            if (distanceBetweenPoints > Math.Sqrt(2) * worldGenerator.worldContext.pixelsPerBlock)
+            {
+                numOfInterpolations = (int)(distanceBetweenPoints / worldGenerator.worldContext.pixelsPerBlock) - 1;
+            }
+
+            for (int i = 0; i < pointList.Count; i++)
+            {
+
+                int gridX = (int)Math.Floor(pointList[i].x / worldGenerator.worldContext.pixelsPerBlock);
+                int gridY = (int)Math.Floor(pointList[i].y / worldGenerator.worldContext.pixelsPerBlock);
+
+                if (gridX < 0)
+                {
+                    gridX = 0;
+                }
+                else if (gridX >= worldGenerator.worldArray.GetLength(0))
+                {
+                    gridX = worldGenerator.worldArray.GetLength(0) - 1;
+                }
+                if (gridY < 0)
+                {
+                    gridY = 0;
+                }
+                else if (gridY >= worldGenerator.worldArray.GetLength(1))
+                {
+                    gridY = worldGenerator.worldArray.GetLength(1) - 1;
+                }
+
+                for (int y = gridY; y < worldGenerator.worldArray.GetLength(1); y++)
+                {
+                    worldGenerator.worldArray[gridX, y] = 1;
+                }
+            }
+
+        }
+
+        public double changeThresholdByDepth((double x, double y) position) {
+            return changeThresholdByDepth(blockThresholdVariables, position);
+        }
         private double changeThresholdByDepth(List<BlockThresholdValues> blockThresholdVariables, (double x, double y) position)
         {
             double blockThreshold = 1;
@@ -1122,7 +1219,7 @@ namespace PixelMidpointDisplacement
             {
                 if (position.y >= blockThresholdVariables[i].maximumY)
                 {
-                    double calculatedYWeight = position.y * blockThresholdVariables[i].absoluteYHeightWeight + (position.y - surfaceHeight[(int)position.x]) * blockThresholdVariables[i].relativeYHeightWeight;
+                    double calculatedYWeight = position.y * blockThresholdVariables[i].absoluteYHeightWeight + (position.y - worldGenerator.surfaceHeight[(int)position.x]) * blockThresholdVariables[i].relativeYHeightWeight;
                     blockThreshold = blockThresholdVariables[i].blockThreshold - blockThresholdVariables[i].decreasePerY * calculatedYWeight;
                     if (blockThreshold > blockThresholdVariables[i].maximumThreshold)
                     {
@@ -1139,19 +1236,92 @@ namespace PixelMidpointDisplacement
             return blockThreshold;
         }
 
+        public virtual Biome generateBiomeCopy((double, double) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int width, int height) biomeDimensions) {
+            return new Biome(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions);
+        }
     }
+    public class MeadowBiome : Biome {
 
-    public class Biome {
-        int biomeWidth;
+        public MeadowBiome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) : base(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions) {
+            //Generate the randomised variables
+            initialIterationOffset = 50;
+            decayPower = 1.2;
+            iterations = 10;
+            positiveWeight = 30;
 
-        List<BlockThresholdValues> blockThresholdVariables;
-        BlockGenerationVariables[] ores;
+            ores = new BlockGenerationVariables[]{
+            new BlockGenerationVariables(seedDensity : 1, block : new Block(ID : 2), maxSingleSpread : 8, oreVeinSpread : 360), //Dirt
+            new BlockGenerationVariables(0.1, new Block(1), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
+            new BlockGenerationVariables(0.3, new Block(1), 6, 24)
+            };
 
-        List<Entity> spawnableEntities;
-        List<Structure> spawnableStructures;
-        List<(double, double)> initialPoints;
+
+            blockThresholdVariables = new List<BlockThresholdValues>(){
+            new BlockThresholdValues(blockThreshold : 0.9, maximumY : 0, decreasePerY : 0.005, maximumThreshold : 0.9, minimumThreshold : 0.48, absoluteYHeightWeight : 0, relativeYHeightWeight : 1),
+            new BlockThresholdValues(0.9, 130, 0.005, 0.9, 0.48, 0.3, 1),
+
+            new BlockThresholdValues(0.9, 150, 0.01, 0.9, 0.48, 1, 0),
+
+            new BlockThresholdValues(0.9, 200, 0.005, 0.9, 0.48, 0.2, 1),
+            new BlockThresholdValues(0.9, 210, 0.005, 0.9, 0.48, 0, 1)
+            };
+            //Generate a random biome Width:
+            Random r = new Random();
+
+            int biomeVariant = r.Next(2);
+            switch (biomeVariant) {
+                case 0:
+                    this.biomeDimensions.width = r.Next(100, 200);
+                    
+                    break;
+                case 1:
+                    this.biomeDimensions.width = r.Next(200, 350);
+                    break;
+            }
+
+            initialPoints.Add((rightMostTerrainPoint.x + this.biomeDimensions.width * wg.worldContext.pixelsPerBlock, rightMostTerrainPoint.y));
+        }
+        public MeadowBiome() { }
+        public override Biome generateBiomeCopy((double, double) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int width, int height) biomeDimensions)
+        {
+            return new MeadowBiome(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions);
+        }
     }
+    public class MountainBiome : Biome {
+        public MountainBiome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) : base(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions)
+        {
+            //Generate the randomised variables
+            iterations = 15;
+            decayPower = 0.9;
+            positiveWeight = 80;
+            initialIterationOffset = 500;
 
+            ores = new BlockGenerationVariables[] {
+                new BlockGenerationVariables(1, new Block((int)blockIDs.stone), 8, 80),
+                new BlockGenerationVariables(0.1, new Block((int)blockIDs.dirt), 3, 10)
+            };
+
+            blockThresholdVariables = new List<BlockThresholdValues> {
+                new BlockThresholdValues(blockThreshold : 0.9, maximumY : 0, decreasePerY : 0.005, maximumThreshold : 0.9, minimumThreshold : 0.45, absoluteYHeightWeight : 0.3, relativeYHeightWeight : 0.7 ),
+                new BlockThresholdValues(blockThreshold : 0.48, maximumY : 400, decreasePerY : 0.001, maximumThreshold : 0.48, minimumThreshold : 0.4, absoluteYHeightWeight : 0, relativeYHeightWeight : 1)
+            };
+
+
+            this.biomeDimensions.width = new Random().Next(200, 400);
+
+
+            initialPoints.Add(((rightMostTerrainPoint.x + this.biomeDimensions.width * wg.worldContext.pixelsPerBlock)/2, rightMostTerrainPoint.y - 500));
+            initialPoints.Add((rightMostTerrainPoint.x + this.biomeDimensions.width * wg.worldContext.pixelsPerBlock, rightMostTerrainPoint.y));
+        }
+
+        public MountainBiome() { }
+
+        public override Biome generateBiomeCopy((double, double) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int width, int height) biomeDimensions)
+        {
+            return new MountainBiome(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions);
+        }
+
+    }
     public class Structure { }
     public class LightingSystem
     {
