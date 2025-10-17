@@ -911,7 +911,7 @@ namespace PixelMidpointDisplacement
             
             ocean.generateOres();
             
-            combineAlgorithms((0,0), ocean);
+            combineAlgorithms((0,0), 0);
             
 
             currentLeadingWidth += ocean.biomeDimensions.width;
@@ -925,7 +925,7 @@ namespace PixelMidpointDisplacement
                 biomeList.Add(biome);
                 biome.generateSurfaceTerrain();
                 biome.generateOres();
-                combineAlgorithms((currentLeadingWidth, 0), biome);
+                combineAlgorithms((currentLeadingWidth, 0), biomeList.Count - 1);
                 currentLeadingWidth += biome.biomeDimensions.width;
             }
             
@@ -1056,8 +1056,9 @@ namespace PixelMidpointDisplacement
             return outputArray;
         }
         
-        private void combineAlgorithms((int x, int y) biomeOffset, Biome biome)
+        private void combineAlgorithms((int x, int y) biomeOffset, int biomeIndex)
         {
+            Biome biome = biomeList[biomeIndex];
             int maxX = biomeOffset.x + biome.biomeDimensions.width;
             int maxY = biomeOffset.y + biome.biomeDimensions.height;
             if (maxX > worldArray.GetLength(0)) {
@@ -1071,7 +1072,14 @@ namespace PixelMidpointDisplacement
             {
                 for (int y = biomeOffset.y; y < maxY; y++)
                 {
-                    if (perlinNoiseArray[x, y] > biome.changeThresholdByDepth((x,y)))
+                    //Compute an averaged value of the noise threshold
+                    double threshold = biome.changeThresholdByDepth((x, y));
+                    //If the block is very close to the border, blend the threshold
+                    int blockBlendRange = 10;
+                    //Final - initial + initial. Calculate the threshold of the block not in the biome, but at the edgedw
+                    
+                    if (x - biomeOffset.x < blockBlendRange && biomeIndex > 0) { threshold = biomeList[biomeIndex - 1].changeThresholdByDepth((biomeOffset.x - 1, y)) +  (x - biomeOffset.x) * (threshold - biomeList[biomeIndex - 1].changeThresholdByDepth((biomeOffset.x - 1,y)))/blockBlendRange; }
+                    if (perlinNoiseArray[x, y] > threshold)
                     { //If it's above the block threshold, set the block to be air, 
                         worldArray[x, y] = 0;
                        
