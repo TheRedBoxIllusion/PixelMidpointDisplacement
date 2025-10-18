@@ -26,7 +26,7 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
 
         = This ended up being slower than rendering each block individually. Also used up more GPU because it had to store so many render targets
 
-    Biomes:     *High Priority
+    Biomes:     *Done: But need to blend biome's blocks together better
         - Rewrite the world generation system to generate from "biomes" -a class that defines world generation variables and includes lists of entities, structures and stuff like trees that can spawn in that biome
         - Figure out how to seamlessly join between different biomes both on the surface (should be easy, just share a common vertex for the midpoint displacement algorithm) 
             and caves (No clue!!) other than perhaps keeping one perlin noise generation and only modifying the block Threshold values?
@@ -63,13 +63,13 @@ namespace PixelMidpointDisplacement
         private SpriteBatch _spriteBatch;
         BasicEffect basicEffect;
 
-        WorldContext worldContext;
+        public WorldContext worldContext;
         RenderTarget2D spriteRendering;
 
         RenderTarget2D workingLightMap;
         RenderTarget2D lightMap;
-        
 
+        public Scene currentScene;
 
         RenderTarget2D world;
 
@@ -155,6 +155,8 @@ namespace PixelMidpointDisplacement
             engineController.initialiseEngines(worldContext);
 
             List<int> surfaceX = new List<int>();
+
+            currentScene = Scene.MainMenu;
             
 
             player = new Player(worldContext);
@@ -200,6 +202,7 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockItemSpriteSheet.png")); //2
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png")); //3
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ArrowSpriteSheet.png")); //4
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\MainMenuUISpriteSheet.png"));
 
             worldContext.engineController.spriteController.setSpriteSheetList(spriteSheetList);
 
@@ -223,9 +226,6 @@ namespace PixelMidpointDisplacement
             basicEffect.LightingEnabled = false;
 
             worldContext.generateIDsFromTextureList(new Rectangle[]{new Rectangle(0, 0, 0, 0), new Rectangle(0, 0, 32, 32), new Rectangle(0, 32, 32, 32), new Rectangle(0, 64, 32, 32)});
-
-            (int width, int height) worldDimensions = (800, 800);
-            worldContext.generateWorld(worldDimensions);
             
             
 
@@ -264,21 +264,103 @@ namespace PixelMidpointDisplacement
 
         protected override void Update(GameTime gameTime)
         {
-            
-            if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
-                Exit();
-
-            updateChatSystem(gameTime);
-            updatePhysicsObjects(gameTime);
-            calculateScreenspaceOffset();
-            updateDigSystem();
-            tickAnimations(gameTime);
-            updateEntities(gameTime);
+            if (currentScene == Scene.MainMenu) {
+                //For each interactive UI element, check if the mouse clicked inside it, then run that UI function
+                updateMainMenuUI(gameTime);
+                updateMainMenuInteractiveUI();
+            }
+            else if (currentScene == Scene.Game)
+            {
+                updateChatSystem(gameTime);
+                updatePhysicsObjects(gameTime);
+                calculateScreenspaceOffset();
+                updateDigSystem();
+                tickAnimations(gameTime);
+                updateEntities(gameTime);
+            }
 
             base.Update(gameTime);
         }
+        protected override void Draw(GameTime gameTime)
+        {
+            
+            if (currentScene == Scene.MainMenu) {
+                GraphicsDevice.SetRenderTarget(world);
+                GraphicsDevice.Clear(Color.MidnightBlue);
+                _spriteBatch.Begin(samplerState : SamplerState.PointClamp);
+                    drawMainMenuUI();
+                _spriteBatch.End();
+            }
+            else if (currentScene == Scene.Game)
+            {
+                GraphicsDevice.SetRenderTarget(spriteRendering);
+                _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+                    drawBlocks();
+                    drawCoords(gameTime);
+                    drawDebugInfo();
+                    drawChat();
+                    drawEntities();
+                    drawPlayer();
+                    drawAnimatorObjects();
+                _spriteBatch.End();
 
-        public void updateChatSystem(GameTime gameTime) {
+                drawLight();
+            }
+            GraphicsDevice.SetRenderTarget(null);
+            _spriteBatch.Begin();
+            
+             _spriteBatch.Draw(world, world.Bounds, Color.White);
+            
+            _spriteBatch.End();
+
+            base.Draw(gameTime);
+        }
+
+        #region Main menu update methods
+        public void updateMainMenuUI(GameTime gameTime) {
+            for (int i = 0; i < worldContext.engineController.UIController.MainMenuUI.Count; i++) {
+                worldContext.engineController.UIController.MainMenuUI[i].updateElement(gameTime.ElapsedGameTime.TotalSeconds, this);
+            }
+        }
+        public void updateMainMenuInteractiveUI() {
+            for (int i = 0; i < worldContext.engineController.UIController.MainMenuInteractiveUI.Count; i++) {
+                if (checkUICollision(worldContext.engineController.UIController.MainMenuInteractiveUI[i])) {
+                    worldContext.engineController.UIController.MainMenuInteractiveUI[i].onLeftClick(this);
+                }
+            }
+        }
+        public bool checkUICollision(InteractiveUIElement uiElement) {
+            if (uiElement.isUIElementActive)
+            {
+                Rectangle uiElementCollisionRect = uiElement.drawRectangle;
+                if (uiElement.alignment == UIAlignOffset.Centre) { uiElementCollisionRect.X += (_graphics.PreferredBackBufferWidth - uiElementCollisionRect.Width) / 2; }
+                if (Mouse.GetState().LeftButton == ButtonState.Pressed && new Rectangle(Mouse.GetState().X, Mouse.GetState().Y, 10, 10).Intersects(uiElementCollisionRect))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        #endregion
+        #region Main menu draw methods
+        public void drawMainMenuUI() {
+            for (int i = 0; i < worldContext.engineController.UIController.MainMenuUI.Count; i++) {
+                UIElement uiElement = worldContext.engineController.UIController.MainMenuUI[i];
+                Rectangle drawRect = new Rectangle();
+                if (uiElement.alignment == UIAlignOffset.TopLeft) { drawRect = uiElement.drawRectangle; }
+                else if (uiElement.alignment == UIAlignOffset.Centre) { drawRect = new Rectangle(uiElement.drawRectangle.X + (_graphics.PreferredBackBufferWidth - uiElement.drawRectangle.Width)/2, uiElement.drawRectangle.Y, uiElement.drawRectangle.Width, uiElement.drawRectangle.Height); }
+                if (uiElement.isUIElementActive)
+                {
+                    _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[uiElement.spriteSheetID], drawRect, uiElement.sourceRectangle, Color.White);
+                }
+            }
+        }
+        #endregion
+
+
+        #region Gameplay update methods
+        public void updateChatSystem(GameTime gameTime)
+        {
             if (Keyboard.GetState().IsKeyDown(Keys.Enter) && chatCountdown < 2.7)
             {
                 if (writeToChat)
@@ -343,7 +425,8 @@ namespace PixelMidpointDisplacement
                 toggleCooldown -= gameTime.ElapsedGameTime.TotalSeconds;
             }
         }
-        public void updatePhysicsObjects(GameTime gameTime) {
+        public void updatePhysicsObjects(GameTime gameTime)
+        {
             for (int i = 0; i < worldContext.physicsObjects.Count; i++)
             {
                 //General Physics simulations
@@ -369,7 +452,8 @@ namespace PixelMidpointDisplacement
             }
 
         }
-        public void calculateScreenspaceOffset() {
+        public void calculateScreenspaceOffset()
+        {
             worldContext.screenSpaceOffset = (-(int)player.x + _graphics.GraphicsDevice.Viewport.Width / 2 - (int)(player.width * worldContext.pixelsPerBlock),
                                                   -(int)player.y + _graphics.GraphicsDevice.Viewport.Height / 2 - (int)(player.height * worldContext.pixelsPerBlock));
 
@@ -391,8 +475,9 @@ namespace PixelMidpointDisplacement
                 worldContext.screenSpaceOffset = (worldContext.screenSpaceOffset.x, (-(int)worldContext.worldArray.GetLength(1) * worldContext.pixelsPerBlock + _graphics.GraphicsDevice.Viewport.Height - (int)(player.height * worldContext.pixelsPerBlock)) + worldContext.pixelsPerBlock / 2);
             }
         }
-        public void updateDigSystem() {
-            if (Keyboard.GetState().IsKeyDown(Keys.LeftShift)) { if (Mouse.GetState().ScrollWheelValue / 120 != lightCount - 1 ) { lightCount = Mouse.GetState().ScrollWheelValue / 120 + 1; } }
+        public void updateDigSystem()
+        {
+            if (Keyboard.GetState().IsKeyDown(Keys.LeftShift)) { if (Mouse.GetState().ScrollWheelValue / 120 != lightCount - 1) { lightCount = Mouse.GetState().ScrollWheelValue / 120 + 1; } }
             else if (Mouse.GetState().ScrollWheelValue / 120 != digSize - 1)
             {
                 digSize = Mouse.GetState().ScrollWheelValue / 120 + 1;
@@ -428,48 +513,19 @@ namespace PixelMidpointDisplacement
             }
 
         }
-        public void tickAnimations(GameTime gameTime) {
+        public void tickAnimations(GameTime gameTime)
+        {
             animationController.tickAnimation(gameTime.ElapsedGameTime.TotalSeconds);
         }
 
-        public void updateEntities(GameTime gameTime) {
+        public void updateEntities(GameTime gameTime)
+        {
             worldContext.engineController.entityController.entityInputUpdate(gameTime.ElapsedGameTime.TotalSeconds);
         }
-        
-        protected override void Draw(GameTime gameTime)
+        #endregion
+        #region Game play draw methods
+        public void drawBlocks()
         {
-            
-            GraphicsDevice.Clear(Color.CornflowerBlue);
-            
-            GraphicsDevice.SetRenderTarget(spriteRendering);
-            _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
-
-           
-            drawBlocks();
-            drawCoords(gameTime);
-            drawDebugInfo();
-            drawChat();
-            drawEntities();
-            drawPlayer();
-            drawAnimatorObjects();
-            _spriteBatch.End();
-
-            
-            drawLight();
-
-
-            GraphicsDevice.SetRenderTarget(null);
-            _spriteBatch.Begin();
-            
-             _spriteBatch.Draw(world, world.Bounds, Color.White);
-            
-            _spriteBatch.End();
-
-            base.Draw(gameTime);
-        }
-
-        
-        public void drawBlocks() {
             exposedBlockCount = 0;
             currentlyRenderedExposedBlocks.Clear();
             for (int x = ((int)-worldContext.screenSpaceOffset.x) / worldContext.pixelsPerBlock - 1; x < ((int)-worldContext.screenSpaceOffset.x + _graphics.PreferredBackBufferWidth) / worldContext.pixelsPerBlock + 1; x++)
@@ -485,14 +541,15 @@ namespace PixelMidpointDisplacement
                         }
                         Color lightLevel = Color.White;
                         if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
-                        if (worldContext.exposedBlocks.ContainsKey((x, y))) { currentlyRenderedExposedBlocks.Add((x,y)); }
+                        if (worldContext.exposedBlocks.ContainsKey((x, y))) { currentlyRenderedExposedBlocks.Add((x, y)); }
                         _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.blocks], new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), worldContext.worldArray[x, y].sourceRectangle, lightLevel);
                     }
                 }
             }
         }
 
-        public void drawDebugInfo() {
+        public void drawDebugInfo()
+        {
             if (Mouse.GetState().MiddleButton == ButtonState.Pressed)
             {
                 double mouseXPixelSpace = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
@@ -527,7 +584,8 @@ namespace PixelMidpointDisplacement
 
         }
 
-        public void drawCoords(GameTime gameTime) {
+        public void drawCoords(GameTime gameTime)
+        {
             _spriteBatch.DrawString(ariel, (int)player.x / worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10, 10), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
@@ -535,16 +593,20 @@ namespace PixelMidpointDisplacement
             _spriteBatch.DrawString(ariel, lightCount + " lights", new Vector2(450, 10), Color.BlueViolet);
         }
 
-        public void drawChat() {
+        public void drawChat()
+        {
             if (chatCountdown > 0 && chat != "")
             {
                 _spriteBatch.DrawString(ariel, chat, new Vector2(1000, 10), Color.BlueViolet);
             }
         }
 
-        public void drawEntities() {
-            for(int i = 0; i < worldContext.engineController.entityController.entities.Count; i++) {
-                if (worldContext.engineController.entityController.entities[i] != null && worldContext.engineController.entityController.entities[i].spriteAnimator != null) {
+        public void drawEntities()
+        {
+            for (int i = 0; i < worldContext.engineController.entityController.entities.Count; i++)
+            {
+                if (worldContext.engineController.entityController.entities[i] != null && worldContext.engineController.entityController.entities[i].spriteAnimator != null)
+                {
                     if (worldContext.engineController.entityController.entities[i] != player)
                     {
                         Entity entity = worldContext.engineController.entityController.entities[i];
@@ -553,11 +615,13 @@ namespace PixelMidpointDisplacement
                 }
             }
         }
-        public void drawPlayer() {
+        public void drawPlayer()
+        {
             _spriteBatch.Draw(player.spriteAnimator.spriteSheet, new Rectangle((int)(player.x - player.spriteAnimator.sourceOffset.X) + worldContext.screenSpaceOffset.x, (int)(player.y - player.spriteAnimator.sourceOffset.Y) + worldContext.screenSpaceOffset.y, (int)(player.drawWidth * worldContext.pixelsPerBlock), (int)(player.drawHeight * worldContext.pixelsPerBlock)), player.spriteAnimator.sourceRect, Color.White, 0f, Vector2.Zero, player.directionalEffect, 0f);
         }
 
-        public void drawAnimatorObjects() {
+        public void drawAnimatorObjects()
+        {
             for (int i = 0; i < animationController.animators.Count; i++)
             {
                 Animator a = animationController.animators[i];
@@ -585,26 +649,22 @@ namespace PixelMidpointDisplacement
 
         }
 
-        public void drawLight() {
+        public void drawLight()
+        {
             if (useShaders)
             {
-                //Vector2 lightPosition = new Vector2((float)Mouse.GetState().X / (float)_graphics.PreferredBackBufferWidth, (float)Mouse.GetState().Y / (float)_graphics.PreferredBackBufferHeight);
                 GraphicsDevice.SetRenderTarget(lightMap);
                 GraphicsDevice.Clear(new Color(0.1f, 0.1f, 0.1f));
-                
+
                 for (int i = 0; i < worldContext.engineController.lightingSystem.lights.Count; i++)
                 {
-                    //No shadows: 22fps??? Only:30-60
+
                     Vector2 lightPosition = new Vector2((float)((worldContext.engineController.lightingSystem.lights[i].x + worldContext.screenSpaceOffset.x)) / _graphics.PreferredBackBufferWidth, (float)((worldContext.engineController.lightingSystem.lights[i].y + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight));
                     calculateShadowMap(worldContext.engineController.lightingSystem.lights[i], lightPosition); //A noticable performance drop at 10 dynamic lights. At 30 lights, it drops to 9-20fps
                     calculateLightmap(worldContext.engineController.lightingSystem.lights[i], lightPosition); //Minor impact on performance
-                    //calculateOccludedLightmap();
                     addLightmapToGlobalLights(worldContext.engineController.lightingSystem.lights[i]);
                 }
-                    //No world updates: 35-60fps
-                    calculateLightedWorld();
-                    
-                
+                calculateLightedWorld();
             }
             else
             {
@@ -614,7 +674,9 @@ namespace PixelMidpointDisplacement
                 _spriteBatch.End();
             }
         }
-        public void calculateLightmap(IEmissive lightObject, Vector2 lightPosition) {
+        #region shader calculation methods
+        public void calculateLightmap(IEmissive lightObject, Vector2 lightPosition)
+        {
             calculateLight.Parameters["lightIntensity"].SetValue(lightObject.luminosity);
             calculateLight.Parameters["lightColor"].SetValue(lightObject.lightColor);
             calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
@@ -624,7 +686,7 @@ namespace PixelMidpointDisplacement
 
             GraphicsDevice.SetRenderTarget(lightObject.lightMap);
 
-            
+
             _spriteBatch.Begin(effect: calculateLight);
             _spriteBatch.Draw(lightObject.shadowMap, Vector2.Zero, Color.White);
             _spriteBatch.End();
@@ -642,19 +704,20 @@ namespace PixelMidpointDisplacement
             GraphicsDevice.RasterizerState = rasterizerState1;
             //List<VertexPositionColorTexture> vertexList = new List<VertexPositionColorTexture>();
             //List<short> indList = new List<short>();
-            
-            foreach ((int, int) coord in currentlyRenderedExposedBlocks) {
+
+            foreach ((int, int) coord in currentlyRenderedExposedBlocks)
+            {
                 int x = coord.Item1;
                 int y = coord.Item2;
-                        
+
                 Vector3[] vertexArray = new Vector3[worldContext.worldArray[x, y].faceVertices.Count];
                 for (int g = 0; g < vertexArray.Length; g++)
                 {
-                vertexArray[g] = new Vector3((worldContext.worldArray[x, y].faceVertices[g].X * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x) / _graphics.PreferredBackBufferWidth, (worldContext.worldArray[x, y].faceVertices[g].Y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight, 0);
+                    vertexArray[g] = new Vector3((worldContext.worldArray[x, y].faceVertices[g].X * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x) / _graphics.PreferredBackBufferWidth, (worldContext.worldArray[x, y].faceVertices[g].Y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight, 0);
                 }
                 for (int i = 0; i < vertexArray.Length - 1; i++)
                 {
-                           
+
                     if (vertexArray[i].X != vertexArray[i + 1].X && vertexArray[i].Y != vertexArray[i + 1].Y) { continue; }
 
                     faceCount += 1;
@@ -726,13 +789,13 @@ namespace PixelMidpointDisplacement
                 }
             }
         }
-
-        public void addLightmapToGlobalLights(IEmissive lightObject) {
+        public void addLightmapToGlobalLights(IEmissive lightObject)
+        {
             addLightmaps.Parameters["Lightmap"].SetValue(lightMap);
 
             GraphicsDevice.SetRenderTarget(workingLightMap);
-            
-            _spriteBatch.Begin(effect:addLightmaps);
+
+            _spriteBatch.Begin(effect: addLightmaps);
             _spriteBatch.Draw(lightObject.lightMap, Vector2.Zero, Color.White);
             _spriteBatch.End();
 
@@ -741,14 +804,16 @@ namespace PixelMidpointDisplacement
             _spriteBatch.Draw(workingLightMap, Vector2.Zero, Color.White);
             _spriteBatch.End();
         }
-        public void calculateLightedWorld() {
+        public void calculateLightedWorld()
+        {
             combineLightAndColor.Parameters["Lightmap"].SetValue(spriteRendering);
             GraphicsDevice.SetRenderTarget(world);
             GraphicsDevice.Clear(Color.White);
-            _spriteBatch.Begin(effect: combineLightAndColor, samplerState : SamplerState.PointClamp);
+            _spriteBatch.Begin(effect: combineLightAndColor, samplerState: SamplerState.PointClamp);
             _spriteBatch.Draw(lightMap, world.Bounds, Color.White);
             _spriteBatch.End();
         }
+        #endregion
         public void drawCollisionBox()
         {
             //A version of the collision code. It runs the same basic collision detection system, 
@@ -774,10 +839,13 @@ namespace PixelMidpointDisplacement
                     _spriteBatch.Draw(redTexture, new Rectangle(x * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, 2, p), Color.White);
                     _spriteBatch.Draw(redTexture, new Rectangle(x * p + worldContext.screenSpaceOffset.x, (y + 1) * p + worldContext.screenSpaceOffset.y, p, 2), Color.White);
                     _spriteBatch.Draw(redTexture, new Rectangle((x + 1) * p + worldContext.screenSpaceOffset.x, y * p + worldContext.screenSpaceOffset.y, 2, p), Color.White);
-                    
+
                 }
             }
         }
+
+        #endregion
+
     }
 
     public class WorldGenerator {
@@ -1108,6 +1176,7 @@ namespace PixelMidpointDisplacement
 
     }
 
+    #region Biome Classes
     public class Biome {
 
         //+++++++++++++++
@@ -1330,7 +1399,10 @@ namespace PixelMidpointDisplacement
         }
 
     }
+    #endregion
+    #region Structure Classes
     public class Structure { }
+    #endregion
     public class LightingSystem
     {
         public int[,] lightArray { get; set; }
@@ -1619,6 +1691,7 @@ namespace PixelMidpointDisplacement
         public CollisionController collisionController;
         public EntityController entityController;
         public SpriteController spriteController;
+        public UIController UIController;
 
         public WorldContext worldContext;
         
@@ -1630,6 +1703,7 @@ namespace PixelMidpointDisplacement
             collisionController = new CollisionController();
             entityController = new EntityController();
             spriteController = new SpriteController();
+            UIController = new UIController();
         }
 
       
@@ -1665,7 +1739,94 @@ namespace PixelMidpointDisplacement
             }
         }
     }
+    public class UIController {
+        public List<UIElement> MainMenuUI = new List<UIElement>();
+        public List<InteractiveUIElement> MainMenuInteractiveUI = new List<InteractiveUIElement>();
 
+        public UIController() {
+            resetMainMenuUI();
+        }
+        private void resetMainMenuUI() {
+            MainMenuUI.Clear();
+            MainMenuInteractiveUI.Clear();
+            MainMenuTitle title = new MainMenuTitle();
+            MainMenuWorldGenText generationText = new MainMenuWorldGenText();
+            MainMenuStartButton start = new MainMenuStartButton(generationText);
+            MainMenuUI.Add(title);
+            MainMenuUI.Add(start);
+            MainMenuUI.Add(generationText);
+            MainMenuInteractiveUI.Add(start);
+        }
+    }
+    #region UI classes
+    public enum UIAlignOffset {
+        TopLeft,
+        Centre
+    }
+    public class UIElement {
+        public int spriteSheetID;
+        public float rotation = 0;
+        public Vector2 rotationOrigin = Vector2.Zero;
+        public float scale = 1;
+        public SpriteEffects effect;
+        public Rectangle sourceRectangle;
+        public Rectangle drawRectangle;
+        public UIAlignOffset alignment;
+        public bool isUIElementActive = true;
+
+        public virtual void updateElement(double elasedTime, Game1 game) { }
+    }
+    public class InteractiveUIElement : UIElement {
+        public virtual void onLeftClick(Game1 game) { }
+        public virtual void onRightClick(Game1 game) { }
+    }
+    public class MainMenuTitle : UIElement {
+        public MainMenuTitle() {
+            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
+            drawRectangle = new Rectangle(0,50,1160, 152);
+            sourceRectangle = new Rectangle(0,0,145,19);
+            alignment = UIAlignOffset.Centre;
+        }
+    }
+    public class MainMenuStartButton : InteractiveUIElement {
+        UIElement generateWorldText;
+        int tickCount = 0;
+        public MainMenuStartButton(UIElement generateWorldText) {
+            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
+            drawRectangle = new Rectangle(0, 400, 192, 66);
+            sourceRectangle = new Rectangle(0,25,33, 12);
+            alignment = UIAlignOffset.Centre;
+            tickCount = 0;
+            this.generateWorldText = generateWorldText;
+        }
+        public override void onLeftClick(Game1 game)
+        {
+            generateWorldText.isUIElementActive = true;
+            tickCount += 1;
+            
+        }
+        public override void updateElement(double elasedTime, Game1 game)
+        {
+            //If the button was pressed for 2 ticks, then generate the world. This allows the UI to update
+            System.Diagnostics.Debug.WriteLine(tickCount);
+            if (tickCount > 10) {
+                (int width, int height) worldDimensions = (800, 800);
+                game.worldContext.generateWorld(worldDimensions);
+                game.currentScene = Scene.Game;
+            }
+        }
+    }
+    public class MainMenuWorldGenText : UIElement {
+        public MainMenuWorldGenText() {
+            isUIElementActive = false;
+            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
+            drawRectangle = new Rectangle(0, 350, 576, 30);
+            sourceRectangle = new Rectangle(0,38,96, 5);
+            alignment = UIAlignOffset.Centre;
+        }
+    }
+    
+    #endregion
     public class SpriteController {
         public Texture2D blockSpriteSheet;
         public Texture2D weaponSpriteSheet;
@@ -1686,7 +1847,8 @@ namespace PixelMidpointDisplacement
         weapons,
         blockItems,
         player,
-        arrow
+        arrow,
+        mainMenuUI
     }
 
     public class WorldContext {
@@ -2505,7 +2667,115 @@ namespace PixelMidpointDisplacement
         }
         
     }
+    public class Arrow : Entity, IEmissive
+    {
+        public Vector3 lightColor { get; set; }
+        public float luminosity { get; set; }
+        public float range { get; set; }
+        public RenderTarget2D shadowMap { get; set; }
+        public RenderTarget2D lightMap { get; set; }
+        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity) : base(wc)
+        {
+            spriteSheet = wc.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.arrow];
+            spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, new Vector2(16, 16), new Vector2(16, 16), new Rectangle(0, 0, 16, 16), this);
+            spriteAnimator.sourceOffset = new Vector2(0f, 16f);
 
+            rotationOrigin = Vector2.Zero;
+            directionalEffect = SpriteEffects.None;
+
+            drawHeight = 1;
+            drawWidth = 1;
+            width = 1;
+            height = 0.5;
+
+            x = arrowLocation.x;
+            y = arrowLocation.y;
+
+
+            kX = 0.01;
+            kY = 0.01;
+
+            minVelocityX = 0.25;
+            minVelocityY = 0;
+
+            int lightType = new Random().Next(4);
+            if (lightType == 0)
+            {
+                lightColor = new Vector3(0.98f, 0.44f, 0.16f);
+            }
+            else if (lightType == 1)
+            {
+                lightColor = new Vector3(0.17f, 0.98f, 0.98f);
+            }
+            else if (lightType == 2)
+            {
+                lightColor = new Vector3(0.8f, 0.18f, 0.06f);
+            }
+            else if (lightType == 3)
+            {
+                lightColor = new Vector3(0.8f, 0.06f, 0.7f);
+            }
+
+
+            luminosity = Mouse.GetState().ScrollWheelValue * 4;
+            range = 10f;
+
+            shadowMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
+            lightMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
+            worldContext.engineController.lightingSystem.lights.Add(this);
+
+            calculateInitialVelocity(initialVelocity);
+            spriteAnimator.animationDictionary = new Dictionary<string, (int frameCount, int yOffset)> {
+                { "fly", (1, 0) }
+            };
+
+            worldContext.engineController.entityController.addEntity(this);
+            //spriteAnimator.startAnimation(1, "fly");
+
+        }
+        private void calculateInitialVelocity(double initialVelocity)
+        {
+            //Compute angle
+            double yDif = -(Mouse.GetState().Y - (y + worldContext.screenSpaceOffset.y));
+            double xDif = ((Mouse.GetState().X - (x + worldContext.screenSpaceOffset.x)));
+            if (xDif < 0)
+            {
+                yDif *= -1;
+            }
+
+            double theta = Math.Atan(-(Mouse.GetState().Y - (y + worldContext.screenSpaceOffset.y)) / ((Mouse.GetState().X - (x + worldContext.screenSpaceOffset.x))));
+            velocityX = initialVelocity * Math.Cos(theta);
+
+            velocityY = initialVelocity * Math.Sin(theta);
+            if (xDif < 0) { velocityX *= -1; velocityY *= -1; directionalEffect = SpriteEffects.FlipHorizontally; }
+
+        }
+
+        public override void inputUpdate(double elapsedTime)
+        {
+            if (velocityX != 0 && calculatePhysics)
+            {
+                rotation = (float)Math.Atan(-velocityY / velocityX);
+            }
+
+            if (Keyboard.GetState().IsKeyDown(Keys.LeftShift))
+            {
+                if (Mouse.GetState().ScrollWheelValue * 4 != luminosity)
+                {
+                    luminosity = Mouse.GetState().ScrollWheelValue * 4;
+                }
+            }
+
+        }
+
+        public override void hasCollided()
+        {
+            calculatePhysics = false;
+            worldContext.engineController.lightingSystem.lights.Remove(this);
+        }
+    }
+
+    #region Item Classes
     public class Item
     {
         public Rectangle sourceRectangle { get; set; }
@@ -2539,7 +2809,6 @@ namespace PixelMidpointDisplacement
             itemAnimator = null;
         }
     }
-
     public class Weapon : Item, INonAxisAlignedActiveCollider
     {
 
@@ -2687,110 +2956,6 @@ namespace PixelMidpointDisplacement
         }
 
     }
-
-    public class Arrow : Entity, IEmissive{
-        public Vector3 lightColor { get; set; }
-        public float luminosity { get; set; }
-        public float range { get; set; }
-        public RenderTarget2D shadowMap { get; set; }
-        public RenderTarget2D lightMap { get; set; }
-        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity) : base(wc)
-        {
-            spriteSheet = wc.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.arrow];
-            spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, new Vector2(16, 16), new Vector2(16, 16), new Rectangle(0, 0, 16, 16), this);
-            spriteAnimator.sourceOffset = new Vector2(0f, 16f);
-
-            rotationOrigin = Vector2.Zero;
-            directionalEffect = SpriteEffects.None;
-
-            drawHeight = 1;
-            drawWidth = 1;
-            width = 1;
-            height = 0.5;
-
-            x = arrowLocation.x;
-            y = arrowLocation.y;
-            
-
-            kX = 0.01;
-            kY = 0.01;
-
-            minVelocityX = 0.25;
-            minVelocityY = 0;
-
-            int lightType = new Random().Next(4);
-            if (lightType == 0)
-            {
-                lightColor = new Vector3(0.98f, 0.44f, 0.16f);
-            }
-            else if (lightType == 1)
-            {
-                lightColor = new Vector3(0.17f, 0.98f, 0.98f);
-            }
-            else if (lightType == 2)
-            {
-                lightColor = new Vector3(0.8f, 0.18f, 0.06f);
-            }
-            else if (lightType == 3) {
-                lightColor = new Vector3(0.8f, 0.06f, 0.7f);
-            }
-
-
-            luminosity = Mouse.GetState().ScrollWheelValue * 4;
-            range = 10f;
-
-            shadowMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
-            lightMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
-            worldContext.engineController.lightingSystem.lights.Add(this);
-
-            calculateInitialVelocity(initialVelocity);
-            spriteAnimator.animationDictionary = new Dictionary<string, (int frameCount, int yOffset)> {
-                { "fly", (1, 0) }
-            };
-
-            worldContext.engineController.entityController.addEntity(this);
-            //spriteAnimator.startAnimation(1, "fly");
-            
-        }
-        private void calculateInitialVelocity(double initialVelocity) {
-            //Compute angle
-            double yDif = -(Mouse.GetState().Y - (y + worldContext.screenSpaceOffset.y));
-            double xDif = ((Mouse.GetState().X - (x + worldContext.screenSpaceOffset.x)));
-            if (xDif < 0)
-            {
-                yDif *= -1;
-            }
-            
-                double theta = Math.Atan(-(Mouse.GetState().Y - (y + worldContext.screenSpaceOffset.y)) / ((Mouse.GetState().X - (x + worldContext.screenSpaceOffset.x))));
-            velocityX = initialVelocity * Math.Cos(theta);
-            
-            velocityY = initialVelocity * Math.Sin(theta);
-            if (xDif < 0) { velocityX *= -1; velocityY *= -1; directionalEffect = SpriteEffects.FlipHorizontally; }
-            
-        }
-
-        public override void inputUpdate(double elapsedTime)
-        {
-            if (velocityX != 0 && calculatePhysics)
-            {
-                rotation = (float)Math.Atan(-velocityY/velocityX);
-            }
-
-            if (Keyboard.GetState().IsKeyDown(Keys.LeftShift)) {
-                if(Mouse.GetState().ScrollWheelValue * 4 != luminosity)
-                {
-                    luminosity = Mouse.GetState().ScrollWheelValue * 4;
-                }
-            }
-            
-        }
-
-        public override void hasCollided()
-        {
-            calculatePhysics = false;
-            worldContext.engineController.lightingSystem.lights.Remove(this);
-        }
-    }
     public class BlockItem : Item {
         public int blockID;
 
@@ -2850,7 +3015,7 @@ namespace PixelMidpointDisplacement
             }
         }
     }
-
+    #endregion
     public class Animator
     {
         public double duration;
@@ -3042,6 +3207,7 @@ namespace PixelMidpointDisplacement
 
     }
 
+    #region Block Classes
     public class Block
     {
         public Rectangle sourceRectangle;
@@ -3212,7 +3378,7 @@ namespace PixelMidpointDisplacement
         }
         
     }
-
+    #endregion
 
     public interface ICollider
     {
@@ -3422,7 +3588,12 @@ namespace PixelMidpointDisplacement
         dirt,
         grass
     }
-    
+
+    public enum Scene {
+        MainMenu,
+        Game
+    }
+
     public class BlockGenerationVariables
     {
         public double seedDensity;
