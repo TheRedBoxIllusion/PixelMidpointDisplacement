@@ -123,22 +123,10 @@ namespace PixelMidpointDisplacement
 
         double timeSinceRepeatedLetter;
         // ++++++++++++++++++++++
-
+        string playerAcceleration="";
         Player player;
 
         int digSize = 1;
-
-        int frameCount = 0;
-
-        string playerAcceleration;
-
-        bool hasCalculatedFirstChunks = false;
-        int blocksPerChunk = 32;
-
-        int chunkXMin;
-        int chunkYMin;
-        int chunkXMax;
-        int chunkYMax;
 
         public Game1()
         {
@@ -442,10 +430,12 @@ namespace PixelMidpointDisplacement
                     engineController.physicsEngine.computeAccelerationToVelocity(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
                     engineController.physicsEngine.applyVelocityToPosition(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
+                    if (i == 0)
+                    {
+                        playerAcceleration = Math.Round(worldContext.physicsObjects[i].accelerationX, 4) + ", " + Math.Round(worldContext.physicsObjects[i].accelerationY, 4);
+                    }
+
                     //Reset acceleration to be calculated next frame
-                    playerAcceleration = worldContext.physicsObjects[i].accelerationX + ", " + worldContext.physicsObjects[i].accelerationY;
-
-
                     worldContext.physicsObjects[i].accelerationX = 0;
                     worldContext.physicsObjects[i].accelerationY = 0;
                 }
@@ -523,7 +513,7 @@ namespace PixelMidpointDisplacement
             worldContext.engineController.entityController.entityInputUpdate(gameTime.ElapsedGameTime.TotalSeconds);
         }
         #endregion
-        #region Game play draw methods
+        #region Gameplay draw methods
         public void drawBlocks()
         {
             exposedBlockCount = 0;
@@ -590,7 +580,7 @@ namespace PixelMidpointDisplacement
             _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, (int)(1 / gameTime.ElapsedGameTime.TotalSeconds) + " fps", new Vector2(200, 10), Color.BlueViolet);
-            _spriteBatch.DrawString(ariel, lightCount + " lights", new Vector2(450, 10), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, worldContext.engineController.lightingSystem.lights.Count + " lights", new Vector2(450, 10), Color.BlueViolet);
         }
 
         public void drawChat()
@@ -980,7 +970,7 @@ namespace PixelMidpointDisplacement
             ocean.generateOres();
             
             combineAlgorithms((0,0), 0);
-            
+            ocean.generateStructures();
 
             currentLeadingWidth += ocean.biomeDimensions.width;
             
@@ -994,6 +984,7 @@ namespace PixelMidpointDisplacement
                 biome.generateSurfaceTerrain();
                 biome.generateOres();
                 combineAlgorithms((currentLeadingWidth, 0), biomeList.Count - 1);
+                biome.generateStructures();
                 currentLeadingWidth += biome.biomeDimensions.width;
             }
             
@@ -1202,9 +1193,9 @@ namespace PixelMidpointDisplacement
         //++++++++++++++
 
         public List<Entity> spawnableEntities;
-        public List<Structure> spawnableStructures;
+        public List<(Structure structure, double density, int yMax, int yMin)> spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>();
 
-        WorldGenerator worldGenerator;
+        public WorldGenerator worldGenerator;
 
         (int x, int y) biomeOffset;
         (int width, int height) worldDimensions;
@@ -1225,8 +1216,27 @@ namespace PixelMidpointDisplacement
         public void generateSurfaceTerrain() {
             MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, initialIterationOffset, decayPower, iterations, positiveWeight);
             //Should by nature be in absolute dimensions (aka. don't have to worry about the location of the biome)
-            System.Diagnostics.Debug.WriteLine(initialPoints[0] + " + " + initialPoints[1] + " + " + initialIterationOffset + " + " + decayPower + " + " + iterations + " + " + positiveWeight);
             pointsToBlocks(mda.midpointAlgorithm());
+        }
+        public void generateStructures() {
+            for (int i = 0; i < spawnableStructures.Count; i++) {
+                int structureCount = (int)((spawnableStructures[i].density / 100f) * biomeDimensions.width * biomeDimensions.height);
+                
+                Random r = new Random();
+                //Randomsie the amount of structures, within a certain range;
+                structureCount = r.Next(structureCount/2, structureCount);
+                for (int s = 0; s < structureCount; s++) {
+                    
+                    //Generate an x and y, ensuring that they are within the biome and the specified spawn dimensions
+                    int x = r.Next(biomeOffset.x, biomeOffset.x + biomeDimensions.width);
+                    int y = r.Next(biomeOffset.y + spawnableStructures[i].yMin, biomeOffset.y + spawnableStructures[i].yMax);
+                   
+                    if (x >= 0 && x < worldGenerator.worldArray.GetLength(0) && y + worldGenerator.surfaceHeight[x] >= 0 && y + worldGenerator.surfaceHeight[x] < worldGenerator.worldArray.GetLength(1))
+                    {
+                        spawnableStructures[i].structure.placeStructure(this, x, y + worldGenerator.surfaceHeight[x]);
+                    }
+                }
+            }
         }
 
         public void generateOres() {
@@ -1342,6 +1352,12 @@ namespace PixelMidpointDisplacement
             new BlockThresholdValues(0.9, 200, 0.005, 0.9, 0.48, 0.2, 1),
             new BlockThresholdValues(0.9, 210, 0.005, 0.9, 0.48, 0, 1)
             };
+
+            spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>()
+            {
+                (new Structure("StructTest"), 0.05, biomeDimensions.y, 0)
+            };
+
             //Generate a random biome Width:
             Random r = new Random();
 
@@ -1383,6 +1399,7 @@ namespace PixelMidpointDisplacement
                 new BlockThresholdValues(blockThreshold : 0.48, maximumY : 400, decreasePerY : 0.001, maximumThreshold : 0.48, minimumThreshold : 0.4, absoluteYHeightWeight : 0, relativeYHeightWeight : 1)
             };
 
+            
 
             this.biomeDimensions.width = new Random().Next(200, 400);
 
@@ -1401,7 +1418,60 @@ namespace PixelMidpointDisplacement
     }
     #endregion
     #region Structure Classes
-    public class Structure { }
+    public class Structure {
+        public string structureName;
+        int[,] structureArray;
+        public Structure(string structureName) {
+            this.structureName = structureName;
+            importStructure();
+        }
+        public void importStructure() {
+            try
+            {
+
+                StreamReader sr = new StreamReader(AppDomain.CurrentDomain.BaseDirectory + "Structures\\" + structureName + ".txt");
+                int width = Convert.ToInt32(sr.ReadLine());
+                int height = Convert.ToInt32(sr.ReadLine());
+                structureArray = new int[width, height];
+                int y = 0;
+                int x = 0;
+                string lineToRead = sr.ReadLine();
+                while (lineToRead != null)
+                {
+
+                    if (lineToRead.Equals("-"))
+                    {
+                        y += 1;
+                        x = 0;
+                    }
+                    else
+                    {
+                        structureArray[x, y] = Convert.ToInt32(lineToRead);
+                        x++;
+                    }
+                    lineToRead = sr.ReadLine();
+                }
+
+            }
+            catch { }
+        }
+
+        public void placeStructure(Biome currentBiome, int xLoc, int yLoc) {
+            for (int x = 0; x < structureArray.GetLength(0); x++) {
+                for (int y = 0; y < structureArray.GetLength(1); y++) {
+                    if (structureArray[x, y] != 0)
+                    {
+                        if (x + xLoc >= 0 && y + yLoc >= 0 && x + xLoc < currentBiome.worldGenerator.worldArray.GetLength(0) && y + yLoc < currentBiome.worldGenerator.worldArray.GetLength(1))
+                        {
+                            currentBiome.worldGenerator.worldArray[x + xLoc, y + yLoc] = structureArray[x, y] - 1;
+                        }
+                    }
+                }
+            }
+           
+        }
+    
+    }
     #endregion
     public class LightingSystem
     {
@@ -1808,7 +1878,7 @@ namespace PixelMidpointDisplacement
         public override void updateElement(double elasedTime, Game1 game)
         {
             //If the button was pressed for 2 ticks, then generate the world. This allows the UI to update
-            System.Diagnostics.Debug.WriteLine(tickCount);
+           
             if (tickCount > 10) {
                 (int width, int height) worldDimensions = (800, 800);
                 game.worldContext.generateWorld(worldDimensions);

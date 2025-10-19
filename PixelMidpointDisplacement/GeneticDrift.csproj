@@ -24,6 +24,7 @@
     <None Remove="Settings\PhysicsEngineSettings.txt" />
     <None Remove="Settings\PlayerSettings.txt" />
     <None Remove="Settings\WorldContextSettings.txt" />
+    <None Remove="Structures\StructTest.txt" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Content\ArrowSpriteSheet.png">
@@ -61,6 +62,9 @@
     </Content>
     <Content Include="Settings\WorldGenerationVariables.txt">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Structures\StructTest.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
   <ItemGroup>
