@@ -7,6 +7,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.Design;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -84,10 +85,7 @@ namespace PixelMidpointDisplacement
         Texture2D redTexture;
 
         Effect calculateLight;
-        Effect calculateShadow;
-        Effect combineLightAndShadow;
         Effect combineLightAndColor;
-        Effect combineShadows;
         Effect addLightmaps;
 
         List<(int x, int y)> currentlyRenderedExposedBlocks = new List<(int x, int y)>();
@@ -107,8 +105,6 @@ namespace PixelMidpointDisplacement
         AnimationController animationController;
 
         SpriteFont ariel;
-
-        BlendState maskBlendState;
         
 
         //++++++++++++++++++
@@ -148,6 +144,8 @@ namespace PixelMidpointDisplacement
             
 
             player = new Player(worldContext);
+
+            worldContext.setPlayer(player);
            
         }
 
@@ -190,7 +188,8 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockItemSpriteSheet.png")); //2
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png")); //3
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ArrowSpriteSheet.png")); //4
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\MainMenuUISpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\MainMenuUISpriteSheet.png")); //5
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockBackgroundSpriteSheet.png"));
 
             worldContext.engineController.spriteController.setSpriteSheetList(spriteSheetList);
 
@@ -237,16 +236,6 @@ namespace PixelMidpointDisplacement
             calculateLight = Content.Load<Effect>("LightCalculator");
             addLightmaps = Content.Load<Effect>("CombineMasks");
             combineLightAndColor = Content.Load<Effect>("CombineLightAndColor");
-
-            maskBlendState = new BlendState
-            {
-                ColorSourceBlend = Blend.DestinationColor,
-                ColorDestinationBlend = Blend.Zero
-            };
-
-
-            
-
         }
 
 
@@ -524,15 +513,28 @@ namespace PixelMidpointDisplacement
                 {
                     if (x > 0 && y > 0 && x < worldContext.worldArray.GetLength(0) && y < worldContext.worldArray.GetLength(1))
                     {
-                        int lightValue = worldContext.lightArray[x, y];
-                        if (lightValue > 255)
+                        if (worldContext.worldArray[x, y].ID != (int)blockIDs.air)
                         {
-                            lightValue = 255;
+                            int lightValue = worldContext.lightArray[x, y];
+                            if (lightValue > 255)
+                            {
+                                lightValue = 255;
+                            }
+                            Color lightLevel = Color.White;
+                            if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
+                            if (worldContext.exposedBlocks.ContainsKey((x, y))) { currentlyRenderedExposedBlocks.Add((x, y)); }
+                            _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.blocks], new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), worldContext.worldArray[x, y].sourceRectangle, lightLevel);
                         }
-                        Color lightLevel = Color.White;
-                        if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
-                        if (worldContext.exposedBlocks.ContainsKey((x, y))) { currentlyRenderedExposedBlocks.Add((x, y)); }
-                        _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.blocks], new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), worldContext.worldArray[x, y].sourceRectangle, lightLevel);
+                        else {
+                            int lightValue = worldContext.lightArray[x, y];
+                            if (lightValue > 255)
+                            {
+                                lightValue = 255;
+                            }
+                            Color lightLevel = Color.White;
+                            if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
+                            _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.blockBackground], new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), new Rectangle(0, worldContext.backgroundArray[x, y] * 32, 32, 32), lightLevel);
+                        }
                     }
                 }
             }
@@ -838,10 +840,227 @@ namespace PixelMidpointDisplacement
 
     }
 
+    public class WorldContext
+    {
+        /*
+         * A class that is passed to all gametime objects. This class contains the arrays that define the world, scaling and any other contextual information required by objects
+         * 
+         * ==========================================
+         * World Context Settings:
+         * 
+         * - initial pixels per block
+         * - pixels per block after world generation
+         */
+
+        /*
+         *  The worlrd array is an integer containing block data as follows: 
+         *  2 bytes store block ID (More than we really need, but having 2^16 possible IDs will be useful)
+         *  2 bytes can store individual data such as texture variation (grass for example can use 3 bits to store 
+         */
+
+        public Block[,] worldArray { get; set; }
+        public int[,] backgroundArray { get; set; }
+        public int[,] intWorldArray { get; set; }
+        public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
+
+        public List<(int x, int y)> surfaceBlocks { get; set; }
+
+        public Dictionary<(int x, int y), Block> exposedBlocks = new Dictionary<(int x, int y), Block>();//This list contains all the blocks that are exposed to air, and hence would cast shadows.
+
+        public int[,] lightArray { get; set; }
+        public int pixelsPerBlock { get; set; } = 4; //Overwritten by the settings file
+
+        public int pixelsPerBlockAfterGeneration;
+
+
+        Dictionary<blockIDs, int> intFromBlockID = Enum.GetValues(typeof(blockIDs)).Cast<blockIDs>().ToDictionary(e => e, e => (int)e);
+        Dictionary<int, blockIDs> blockIDFromInt = Enum.GetValues(typeof(blockIDs)).Cast<blockIDs>().ToDictionary(e => (int)e, e => e);
+        Dictionary<blockIDs, Block> blockFromID = new Dictionary<blockIDs, Block>();
+
+        public (int x, int y) screenSpaceOffset { get; set; }
+
+        public List<PhysicsObject> physicsObjects = new List<PhysicsObject>();
+
+        public EngineController engineController;
+
+        public AnimationController animationController;
+
+        public Player player;
+
+        public string runtimePath { get; set; }
+
+        public WorldContext(EngineController engineController, AnimationController animationController)
+        {
+            this.engineController = engineController;
+            this.animationController = animationController;
+
+            runtimePath = AppDomain.CurrentDomain.BaseDirectory;
+
+            //Load settings from file
+            loadSettings();
+        }
+
+        private void loadSettings()
+        {
+            StreamReader sr = new StreamReader(runtimePath + "Settings\\WorldContextSettings.txt");
+            sr.ReadLine();
+            pixelsPerBlock = Convert.ToInt32(sr.ReadLine());
+            sr.ReadLine();
+            pixelsPerBlockAfterGeneration = Convert.ToInt32(sr.ReadLine());
+        }
+        
+        public void generateWorld((int width, int height) worldDimensions)
+        {
+
+            worldArray = new Block[worldDimensions.width, worldDimensions.height];
+            backgroundArray = new int[worldDimensions.width, worldDimensions.height];
+
+            intWorldArray = new int[worldDimensions.width, worldDimensions.height];
+
+            lightArray = new int[worldDimensions.width, worldDimensions.height];
+
+            surfaceHeight = new int[worldDimensions.width];
+
+            surfaceBlocks = new List<(int x, int y)>();
+
+
+
+
+            WorldGenerator worldGenerator = new WorldGenerator(this);
+
+            intWorldArray = worldGenerator.generateWorld(worldDimensions);
+            backgroundArray = worldGenerator.getBackgroundArray();
+            surfaceHeight = worldGenerator.getSurfaceHeight();
+            surfaceBlocks = worldGenerator.getSurfaceBlocks();
+
+
+
+            lightArray = engineController.lightingSystem.initialiseLight(worldDimensions, surfaceHeight);
+            engineController.lightingSystem.generateSunlight(intWorldArray, surfaceHeight);
+            engineController.lightingSystem.calculateSurfaceLight(intWorldArray, surfaceBlocks);
+
+
+            for (int x = 0; x < worldArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < worldArray.GetLength(1); y++)
+                {
+                    generateInstanceFromID(intWorldArray, blockIDFromInt[intWorldArray[x, y]], x, y);
+                    addBlockToDictionaryIfExposedToAir(intWorldArray, x, y);
+
+                }
+            }
+
+
+            updatePixelsPerBlock(pixelsPerBlockAfterGeneration);
+
+        }
+
+        public void generateInstanceFromID(int[,] intArray, blockIDs ID, int x, int y)
+        {
+            if (ID == blockIDs.air || ID == blockIDs.stone || ID == blockIDs.dirt)
+            {
+                worldArray[x, y] = new Block(blockFromID[ID]);
+            }
+            else if (ID == blockIDs.grass)
+            {
+                worldArray[x, y] = new GrassBlock(blockFromID[ID]);
+            }
+
+            worldArray[x, y].setupInitialData(intArray, (x, y));
+        }
+
+        public void addBlockToDictionaryIfExposedToAir(int[,] blockArray, int x, int y)
+        {
+            if (x > 0 && y > 0 && x < worldArray.GetLength(0) - 1 && y < worldArray.GetLength(1) - 1)
+            {
+
+                if ((blockArray[x - 1, y] == (int)blockIDs.air || blockArray[x + 1, y] == (int)blockIDs.air || blockArray[x, y - 1] == (int)blockIDs.air || blockArray[x, y + 1] == (int)blockIDs.air) && blockArray[x, y] != (int)blockIDs.air) //Then it is exposed to air
+                {
+                    exposedBlocks.Add((x, y), worldArray[x, y]);
+                    worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
+                }
+            }
+        }
+        public Vector4 calculateExposedFaces(int[,] blockArray, int x, int y)
+        {
+            return new Vector4(Convert.ToInt32((blockArray[x, y - 1] == (int)blockIDs.air)), Convert.ToInt32(blockArray[x + 1, y] == (int)blockIDs.air), Convert.ToInt32(blockArray[x, y + 1] == (int)blockIDs.air), Convert.ToInt32(blockArray[x - 1, y] == (int)blockIDs.air));
+        }
+
+        public void addBlockToDictionaryIfExposedToAir(Block[,] blockArray, int x, int y)
+        {
+            if (x > 0 && y > 0 && x < worldArray.GetLength(0) - 1 && y < worldArray.GetLength(1) - 1)
+            {
+
+                if ((blockArray[x - 1, y].ID == (int)blockIDs.air || blockArray[x + 1, y].ID == (int)blockIDs.air || blockArray[x, y - 1].ID == (int)blockIDs.air || blockArray[x, y + 1].ID == (int)blockIDs.air) && blockArray[x, y].ID != (int)blockIDs.air) //Then it is exposed to air
+                {
+                    exposedBlocks.Add((x, y), worldArray[x, y]);
+                    worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
+                }
+            }
+        }
+
+        public Vector4 calculateExposedFaces(Block[,] blockArray, int x, int y)
+        {
+            return new Vector4(Convert.ToInt32((blockArray[x, y - 1].ID == (int)blockIDs.air)), Convert.ToInt32(blockArray[x + 1, y].ID == (int)blockIDs.air), Convert.ToInt32(blockArray[x, y + 1].ID == (int)blockIDs.air), Convert.ToInt32(blockArray[x - 1, y].ID == (int)blockIDs.air));
+        }
+        public void generateIDsFromTextureList(Rectangle[] textureSourceList)
+        {
+            blockFromID.Add(blockIDs.air, new Block(textureSourceList[intFromBlockID[blockIDs.air]], intFromBlockID[blockIDs.air])); //Air block
+            blockFromID.Add(blockIDs.stone, new Block(textureSourceList[intFromBlockID[blockIDs.stone]], intFromBlockID[blockIDs.stone]));
+            blockFromID.Add(blockIDs.dirt, new Block(textureSourceList[intFromBlockID[blockIDs.dirt]], intFromBlockID[blockIDs.dirt]));
+            blockFromID.Add(blockIDs.grass, new GrassBlock(textureSourceList[intFromBlockID[blockIDs.grass]], intFromBlockID[blockIDs.grass]));
+        }
+
+        public Block getBlockFromID(blockIDs ID)
+        {
+            return blockFromID[ID];
+        }
+
+        public void updatePixelsPerBlock(int newPixelsPerBlock)
+        {
+            pixelsPerBlock = newPixelsPerBlock;
+            foreach (PhysicsObject obj in physicsObjects)
+            {
+                obj.recalculateCollider();
+            }
+        }
+
+        public void setPlayer(Player player) {
+            this.player = player;
+        }
+        public bool deleteBlock(int x, int y)
+        {
+            if (worldArray[x, y].ID != 0)
+            {
+                worldArray[x, y].blockDestroyed(exposedBlocks);
+                worldArray[x, y] = new Block(blockFromID[blockIDs.air]);
+                worldArray[x, y].setLocation((x, y));
+
+                return true;
+            }
+
+            return false;
+        }
+        public bool addBlock(int x, int y, int ID)
+        {
+            if (worldArray[x, y].ID == intFromBlockID[blockIDs.air])
+            {
+                worldArray[x, y] = new Block(blockFromID[blockIDFromInt[ID]]);
+                worldArray[x, y].setLocation((x, y));
+                addBlockToDictionaryIfExposedToAir(worldArray, x, y);
+                return true;
+            }
+
+            return false;
+        }
+    }
+
+
     public class WorldGenerator {
         public WorldContext worldContext;
 
         public int[,] worldArray;
+        public int[,] backgroundArray;
         public int[] surfaceHeight;
         List<(int x, int y)> surfaceBlocks = new List<(int x, int y)>(); //This list contains all the blocks facing the surface, not only the ones that are highest. Eg. cliff faces
         
@@ -913,6 +1132,7 @@ namespace PixelMidpointDisplacement
             perlinNoiseArray = new double[worldDimensions.width, worldDimensions.height];
             brownianMotionArray = new BlockGenerationVariables[worldDimensions.width, worldDimensions.height];
             worldArray = new int[worldDimensions.width, worldDimensions.height];
+            backgroundArray = new int[worldDimensions.width, worldDimensions.height];
             
             surfaceHeight = new int[worldDimensions.width];
 
@@ -925,31 +1145,7 @@ namespace PixelMidpointDisplacement
             perlinNoise(worldDimensions, noiseIterations, octaveWeights, frequency, vectorCount, vectorAngleOffset);
 
             generateBiomes(worldDimensions);
-            /*
-            //Both of these will be done in the individual biomes class
-            initialPoints = new List<(double, double)>() { (0, 900), (worldContext.pixelsPerBlock * 0.25 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * 0.5 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock *  0.75 * worldArray.GetLength(0), 900), (worldContext.pixelsPerBlock * worldArray.GetLength(0), 900) }; //Start/end Points must be divisible by the pixelsPerBlock value
-
-            MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, 50, 1.2, 12, 30);
-
-            //So for each biome through the list the process shall go as follows:
-            //Generate the surface terrain
-            //Seed the brownian motion with the ores of the biome
-            //Combine the algorithms with the perlin noise of that section of the world
-
-            //It'll be much easier to convert everything once I know how I'm generating the biomes themselves.
-
-            //This should be very easy to port to biomes. Just pass in the biome's MD algorithm. As long as the algorithm has the points in absolute space
-            pointsToBlocks(mda.midpointAlgorithm());
-            //This will only be done once per world to maintain continuity. Perhaps some biomes can generate their own perlin noise. But that's for later. It would just be a second pass
             
-            //Just pass in the ores and maxAttempts of the biome, and make it define the variables inside the biome itself to pull from later
-            seededBrownianMotion(ores, maxAttempts);
-            //This is almost something that could be done for a list of biomes? Dunno. I'll have to modify it to adjust it to different Biomes
-            //combineAlgorithms(blockThresholdVariables);*/
-
-
-
-            //This stuff will occur after all the biomes are generated as it doesn't impact anything
             calculateSurfaceBlocks();
 
             convertDirtToGrass();
@@ -970,6 +1166,7 @@ namespace PixelMidpointDisplacement
             ocean.generateOres();
             
             combineAlgorithms((0,0), 0);
+            ocean.generateBackground();
             ocean.generateStructures();
 
             currentLeadingWidth += ocean.biomeDimensions.width;
@@ -984,6 +1181,7 @@ namespace PixelMidpointDisplacement
                 biome.generateSurfaceTerrain();
                 biome.generateOres();
                 combineAlgorithms((currentLeadingWidth, 0), biomeList.Count - 1);
+                biome.generateBackground();
                 biome.generateStructures();
                 currentLeadingWidth += biome.biomeDimensions.width;
             }
@@ -999,6 +1197,9 @@ namespace PixelMidpointDisplacement
             return surfaceBlocks;
         }
 
+        public int[,] getBackgroundArray() {
+            return backgroundArray;
+        }
 
         
         private void calculateSurfaceBlocks() {
@@ -1197,6 +1398,8 @@ namespace PixelMidpointDisplacement
 
         public WorldGenerator worldGenerator;
 
+        public int backgroundBlockID;
+
         (int x, int y) biomeOffset;
         (int width, int height) worldDimensions;
         public (int width, int height) biomeDimensions;
@@ -1217,6 +1420,24 @@ namespace PixelMidpointDisplacement
             MidpointDisplacementAlgorithm mda = new MidpointDisplacementAlgorithm(initialPoints, initialIterationOffset, decayPower, iterations, positiveWeight);
             //Should by nature be in absolute dimensions (aka. don't have to worry about the location of the biome)
             pointsToBlocks(mda.midpointAlgorithm());
+            
+        }
+        public void generateBackground() {
+            for (int x = biomeOffset.x; x < biomeOffset.x + biomeDimensions.width; x++) {
+                for (int y = biomeOffset.y; y < biomeOffset.y + biomeDimensions.height; y++) {
+                    if (x >= 0 && x < worldGenerator.surfaceHeight.Length)
+                    {
+                        if (y >= worldGenerator.surfaceHeight[x])
+                        {
+                            worldGenerator.backgroundArray[x, y] = this.backgroundBlockID;
+                        }
+                        else
+                        {
+                            worldGenerator.backgroundArray[x, y] = 0;
+                        }
+                    }
+                }
+            }
         }
         public void generateStructures() {
             for (int i = 0; i < spawnableStructures.Count; i++) {
@@ -1336,6 +1557,8 @@ namespace PixelMidpointDisplacement
             iterations = 10;
             positiveWeight = 30;
 
+            backgroundBlockID = 1;
+
             ores = new BlockGenerationVariables[]{
             new BlockGenerationVariables(seedDensity : 1, block : new Block(ID : 2), maxSingleSpread : 8, oreVeinSpread : 360), //Dirt
             new BlockGenerationVariables(0.1, new Block(1), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
@@ -1389,6 +1612,8 @@ namespace PixelMidpointDisplacement
             positiveWeight = 80;
             initialIterationOffset = 100;
 
+            backgroundBlockID = 1;
+
             ores = new BlockGenerationVariables[] {
                 new BlockGenerationVariables(1, new Block((int)blockIDs.stone), 8, 80),
                 new BlockGenerationVariables(0.1, new Block((int)blockIDs.dirt), 3, 10)
@@ -1421,6 +1646,7 @@ namespace PixelMidpointDisplacement
     public class Structure {
         public string structureName;
         int[,] structureArray;
+        int[,] structureBackgroundArray;
         public Structure(string structureName) {
             this.structureName = structureName;
             importStructure();
@@ -1433,10 +1659,12 @@ namespace PixelMidpointDisplacement
                 int width = Convert.ToInt32(sr.ReadLine());
                 int height = Convert.ToInt32(sr.ReadLine());
                 structureArray = new int[width, height];
+                structureBackgroundArray = new int[width, height];
+
                 int y = 0;
                 int x = 0;
                 string lineToRead = sr.ReadLine();
-                while (lineToRead != null)
+                while (lineToRead != "++")
                 {
 
                     if (lineToRead.Equals("-"))
@@ -1447,6 +1675,22 @@ namespace PixelMidpointDisplacement
                     else
                     {
                         structureArray[x, y] = Convert.ToInt32(lineToRead);
+                        x++;
+                    }
+                    lineToRead = sr.ReadLine();
+                }
+                y = 0;
+                x = 0;
+                lineToRead = sr.ReadLine();
+                while (lineToRead != null) {
+                    if (lineToRead.Equals("-"))
+                    {
+                        y += 1;
+                        x = 0;
+                    }
+                    else
+                    {
+                        structureBackgroundArray[x, y] = Convert.ToInt32(lineToRead);
                         x++;
                     }
                     lineToRead = sr.ReadLine();
@@ -1468,7 +1712,21 @@ namespace PixelMidpointDisplacement
                     }
                 }
             }
-           
+
+            for (int x = 0; x < structureBackgroundArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < structureBackgroundArray.GetLength(1); y++)
+                {
+                    if (structureBackgroundArray[x, y] != 0)
+                    {
+                        if (x + xLoc >= 0 && y + yLoc >= 0 && x + xLoc < currentBiome.worldGenerator.backgroundArray.GetLength(0) && y + yLoc < currentBiome.worldGenerator.backgroundArray.GetLength(1))
+                        {
+                            currentBiome.worldGenerator.backgroundArray[x + xLoc, y + yLoc] = structureBackgroundArray[x, y] - 1;
+                        }
+                    }
+                }
+            }
+
         }
     
     }
@@ -1918,203 +2176,9 @@ namespace PixelMidpointDisplacement
         blockItems,
         player,
         arrow,
-        mainMenuUI
+        mainMenuUI,
+        blockBackground
     }
-
-    public class WorldContext {
-        /*
-         * A class that is passed to all gametime objects. This class contains the arrays that define the world, scaling and any other contextual information required by objects
-         * 
-         * ==========================================
-         * World Context Settings:
-         * 
-         * - initial pixels per block
-         * - pixels per block after world generation
-         */
-
-        /*
-         *  The worlrd array is an integer containing block data as follows: 
-         *  2 bytes store block ID (More than we really need, but having 2^16 possible IDs will be useful)
-         *  2 bytes can store individual data such as texture variation (grass for example can use 3 bits to store 
-         */
-
-        public Block[,] worldArray { get; set; }
-        public int[,] intWorldArray { get; set; }
-        public int[] surfaceHeight { get; set; } //The index is the x value, the value of the array is the actual height of the surface
-
-        public List<(int x, int y)> surfaceBlocks { get; set; }
-
-        public Dictionary<(int x, int y), Block> exposedBlocks = new Dictionary<(int x, int y), Block>();//This list contains all the blocks that are exposed to air, and hence would cast shadows.
-
-        public int[,] lightArray { get; set; }
-        public int pixelsPerBlock { get; set; } = 4; //Overwritten by the settings file
-
-        public int pixelsPerBlockAfterGeneration;
-
-
-        Dictionary<blockIDs, int> intFromBlockID = Enum.GetValues(typeof(blockIDs)).Cast<blockIDs>().ToDictionary(e => e, e => (int)e);
-        Dictionary<int, blockIDs> blockIDFromInt = Enum.GetValues(typeof(blockIDs)).Cast<blockIDs>().ToDictionary(e => (int)e, e => e);
-        Dictionary<blockIDs, Block> blockFromID = new Dictionary<blockIDs, Block>();
-
-        public (int x, int y) screenSpaceOffset { get; set; }
-
-        public List<PhysicsObject> physicsObjects = new List<PhysicsObject>();
-
-        public EngineController engineController;
-
-        public AnimationController animationController;
-
-        public string runtimePath { get; set; }
-
-        public WorldContext(EngineController engineController, AnimationController animationController) {
-            this.engineController = engineController;
-            this.animationController = animationController;
-
-            runtimePath = AppDomain.CurrentDomain.BaseDirectory;
-            
-            //Load settings from file
-            loadSettings();
-        }
-
-        private void loadSettings() {
-            StreamReader sr = new StreamReader(runtimePath + "Settings\\WorldContextSettings.txt");
-            sr.ReadLine();
-            pixelsPerBlock = Convert.ToInt32(sr.ReadLine());
-            sr.ReadLine();
-            pixelsPerBlockAfterGeneration = Convert.ToInt32(sr.ReadLine());
-        }
-        
-        public void generateWorld((int width, int height) worldDimensions) {
-            
-            worldArray = new Block[worldDimensions.width, worldDimensions.height];
-
-            intWorldArray = new int[worldDimensions.width, worldDimensions.height];
-
-            lightArray = new int[worldDimensions.width, worldDimensions.height];
-            
-            surfaceHeight = new int[worldDimensions.width];
-
-            surfaceBlocks = new List<(int x, int y)>();
-
-            
-
-
-            WorldGenerator worldGenerator = new WorldGenerator(this);
-            
-            intWorldArray = worldGenerator.generateWorld(worldDimensions);
-            surfaceHeight = worldGenerator.getSurfaceHeight();
-            surfaceBlocks = worldGenerator.getSurfaceBlocks();
-            
-
-            
-            lightArray = engineController.lightingSystem.initialiseLight(worldDimensions, surfaceHeight);
-            engineController.lightingSystem.generateSunlight(intWorldArray, surfaceHeight);
-            engineController.lightingSystem.calculateSurfaceLight(intWorldArray, surfaceBlocks);
-
-
-            for (int x = 0; x < worldArray.GetLength(0); x++) {
-                for (int y = 0; y < worldArray.GetLength(1); y++)
-                {
-                    generateInstanceFromID(intWorldArray, blockIDFromInt[intWorldArray[x,y]], x,  y);
-                    addBlockToDictionaryIfExposedToAir(intWorldArray, x, y);
-                    
-                }
-            }
-
-            
-            updatePixelsPerBlock(pixelsPerBlockAfterGeneration);
-
-        }
-
-        public void generateInstanceFromID(int[,] intArray, blockIDs ID, int x, int y) {
-            if (ID == blockIDs.air || ID == blockIDs.stone || ID == blockIDs.dirt)
-            {
-                worldArray[x, y] = new Block(blockFromID[ID]);
-            }
-            else if (ID == blockIDs.grass) {
-                worldArray[x, y] = new GrassBlock(blockFromID[ID]);
-            }
-
-            worldArray[x, y].setupInitialData(intArray, (x, y));
-        }
-
-        public void addBlockToDictionaryIfExposedToAir(int[,] blockArray, int x, int y)
-        {
-            if (x > 0 && y > 0 && x < worldArray.GetLength(0) - 1 && y < worldArray.GetLength(1) - 1)
-            {
-
-                if ((blockArray[x - 1, y] == (int)blockIDs.air || blockArray[x + 1, y] == (int)blockIDs.air || blockArray[x, y - 1] == (int)blockIDs.air || blockArray[x, y + 1] == (int)blockIDs.air) && blockArray[x, y] != (int)blockIDs.air) //Then it is exposed to air
-                {
-                    exposedBlocks.Add((x, y), worldArray[x, y]);
-                    worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
-                }
-            }
-        }
-        public Vector4 calculateExposedFaces(int[,] blockArray, int x, int y)
-        {
-            return new Vector4(Convert.ToInt32((blockArray[x, y - 1] == (int)blockIDs.air)), Convert.ToInt32(blockArray[x + 1, y] == (int)blockIDs.air), Convert.ToInt32(blockArray[x, y + 1] == (int)blockIDs.air), Convert.ToInt32(blockArray[x - 1, y] == (int)blockIDs.air));
-        }
-
-        public void addBlockToDictionaryIfExposedToAir(Block[,] blockArray, int x, int y)
-        {
-            if (x > 0 && y > 0 && x < worldArray.GetLength(0) - 1 && y < worldArray.GetLength(1) - 1)
-            {
-
-                if ((blockArray[x - 1, y].ID == (int)blockIDs.air || blockArray[x + 1, y].ID == (int)blockIDs.air || blockArray[x, y - 1].ID == (int)blockIDs.air || blockArray[x, y + 1].ID == (int)blockIDs.air) && blockArray[x, y].ID != (int)blockIDs.air) //Then it is exposed to air
-                {
-                    exposedBlocks.Add((x, y), worldArray[x, y]);
-                    worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
-                }
-            }
-        }
-
-        public Vector4 calculateExposedFaces(Block[,] blockArray, int x, int y)
-        {
-            return new Vector4(Convert.ToInt32((blockArray[x, y - 1].ID == (int)blockIDs.air)), Convert.ToInt32(blockArray[x + 1, y].ID == (int)blockIDs.air), Convert.ToInt32(blockArray[x, y + 1].ID == (int)blockIDs.air), Convert.ToInt32(blockArray[x - 1, y].ID == (int)blockIDs.air));
-        }
-        public void generateIDsFromTextureList(Rectangle[] textureSourceList) {
-            blockFromID.Add(blockIDs.air, new Block(textureSourceList[intFromBlockID[blockIDs.air]], intFromBlockID[blockIDs.air])); //Air block
-            blockFromID.Add(blockIDs.stone, new Block(textureSourceList[intFromBlockID[blockIDs.stone]], intFromBlockID[blockIDs.stone]));
-            blockFromID.Add(blockIDs.dirt, new Block(textureSourceList[intFromBlockID[blockIDs.dirt]], intFromBlockID[blockIDs.dirt]));
-            blockFromID.Add(blockIDs.grass, new GrassBlock(textureSourceList[intFromBlockID[blockIDs.grass]], intFromBlockID[blockIDs.grass]));
-        }
-
-        public Block getBlockFromID(blockIDs ID) {
-            return blockFromID[ID];
-        }
-
-        public void updatePixelsPerBlock(int newPixelsPerBlock) {
-            pixelsPerBlock = newPixelsPerBlock;
-            foreach (PhysicsObject obj in physicsObjects) {
-                obj.recalculateCollider();
-            }
-        }
-        
-        public bool deleteBlock(int x, int y) {
-            if (worldArray[x, y].ID != 0)
-            {
-                worldArray[x, y].blockDestroyed(exposedBlocks);
-                worldArray[x, y] = new Block(blockFromID[blockIDs.air]);
-                worldArray[x, y].setLocation((x, y));
-
-                return true;
-            }
-
-            return false;
-        }
-        public bool addBlock(int x, int y, int ID) {
-            if (worldArray[x, y].ID == intFromBlockID[blockIDs.air])
-            {
-                worldArray[x, y] = new Block(blockFromID[blockIDFromInt[ID]]);
-                worldArray[x, y].setLocation((x, y));
-                addBlockToDictionaryIfExposedToAir(worldArray, x, y);
-                return true;
-            }
-
-            return false;
-        }
-    }
-
     public class MidpointDisplacementAlgorithm
     {
         //An iterative process. Takes in a list of points, returns the same list. Can then be converted to blocks in the worldGeneration function
@@ -2572,6 +2636,7 @@ namespace PixelMidpointDisplacement
         public void removeEntity(Entity entity) {
             if (entities.Contains(entity)) { entities.Remove(entity); }
         }
+       
     }
     public class Player : Entity
     {
@@ -2581,18 +2646,22 @@ namespace PixelMidpointDisplacement
 
         public bool writeToChat;
 
+        public UIItem[,] inventory = new UIItem[9,5];
+
         public int playerDirection { get; set; }
 
 
-        int initialX = 1000;
+        int initialX = 10;
         int initialY = 10;
 
         double horizontalAcceleration = 4; //The acceleration in m/s^-2
         double jumpAcceleration = 12;
 
         Item mainHand;
+        int mainHandIndex;
 
-
+        float discardCooldown;
+        float maxDiscardCooldown = 0.1f;
     
 
 
@@ -2611,12 +2680,19 @@ namespace PixelMidpointDisplacement
             rotationOrigin = Vector2.Zero;
 
             mainHand = new BlockItem(1, worldContext.animationController, this);
+            mainHandIndex = 2;
 
             lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
 
+            //Initialise inentory
+            initialiseInventory();
+            //Setup initial inventory
+            inventory[0,0].setItem(new Weapon(worldContext.animationController, this));
+            inventory[1, 0].setItem(new Bow(worldContext.animationController, this));
+            inventory[2, 0].setItem(new BlockItem(1, worldContext.animationController, this));
+            
 
             spriteAnimator = new SpriteAnimator(animationController : worldContext.animationController, constantOffset : new Vector2(12f, 8f), frameOffset : new Vector2(32, 65), sourceDimensions : new Vector2((float)32, (float)64), animationlessSourceRect : new Rectangle(160, 0, (int)32, (int)64), owner : this);
-           
             
             spriteAnimator.animationDictionary = new Dictionary<string, (int frameCount, int yOffset)> {
                 
@@ -2649,6 +2725,56 @@ namespace PixelMidpointDisplacement
             horizontalAcceleration = Convert.ToDouble(sr.ReadLine()); 
             sr.ReadLine();
             jumpAcceleration = Convert.ToDouble(sr.ReadLine());
+        }
+
+        public void initialiseInventory()
+        {
+            for (int x = 0; x < inventory.GetLength(0); x++) {
+                for (int y = 0; y < inventory.GetLength(1); y++) {
+                    inventory[x, y] = new UIItem();
+                }
+            }
+        }
+
+        public bool addItemToInventory(Item item) {
+            bool foundASlot = false;
+            //Check for any stacks to add the item to
+            for (int y = 0; y < inventory.GetLength(1); y++) {
+                for (int x = 0; x < inventory.GetLength(0); x++)
+                {
+                    if (!foundASlot && inventory[x,y].item != null)
+                    {
+                        
+                        if (inventory[x, y].item.GetType() == item.GetType())
+                        {
+                            if (inventory[x, y].item.currentStackSize < inventory[x, y].item.maxStackSize)
+                            {
+                                inventory[x, y].item.currentStackSize += 1;
+                                foundASlot = true;
+
+                            }
+                        }
+                    }
+                }
+            }
+            if (!foundASlot)
+            {
+                for (int y = 0; y < inventory.GetLength(1); y++)
+                {
+                    for (int x = 0; x < inventory.GetLength(0); x++)
+                    {
+                        if (!foundASlot)
+                        {
+                            if (inventory[x, y].item == null)
+                            {
+                                inventory[x, y].setItem(item);
+                                foundASlot = true;
+                            }
+                        }
+                    }
+                }
+            }
+            return foundASlot;
         }
 
         public override void inputUpdate(double elapsedTime) {
@@ -2700,15 +2826,50 @@ namespace PixelMidpointDisplacement
                 if (Keyboard.GetState().IsKeyDown(Keys.D1))
                 {
 
-                    mainHand = new Weapon(worldContext.animationController, this);
-                    worldContext.engineController.collisionController.addActiveCollider((IActiveCollider)mainHand);
+                    mainHand = inventory[0, 0].item;
+                    mainHandIndex = 0;
+                    if (mainHand != null) { mainHand.onEquip(); }
+                    
                 }
                 else if (Keyboard.GetState().IsKeyDown(Keys.D2))
                 {
-                    mainHand = new Bow(worldContext.animationController, this);
-                } else if (Keyboard.GetState().IsKeyDown(Keys.D3))
+                    mainHand = inventory[1, 0].item;
+                    mainHandIndex = 1;
+                    if (mainHand != null) { mainHand.onEquip(); }
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.D3))
                 {
-                    mainHand = new BlockItem(1, worldContext.animationController, this);
+                    mainHand = inventory[2, 0].item;
+                    mainHandIndex = 2;
+                    if (mainHand != null) { mainHand.onEquip(); }
+                }
+
+                //Update dropCooldown
+                if (discardCooldown > 0) {
+                    discardCooldown -= (float)elapsedTime;
+                }
+
+                else if (Keyboard.GetState().IsKeyDown(Keys.Q)) {
+                    if (mainHand != null)
+                    {
+                        double initialVelocity = 8f;
+                        double pickupDelay = 1f;
+                        if (playerDirection == -1)
+                        {
+                            initialVelocity *= -1;
+                        }
+                        DroppedItem dropItem = new DroppedItem(worldContext, mainHand, (x, y), initialVelocity);
+                        mainHand.currentStackSize -= 1;
+                        if (mainHand.currentStackSize <= 0)
+                        {
+                            inventory[mainHandIndex, 0].item = null;
+                            mainHand = null;
+                        }
+                        dropItem.x = x;
+                        dropItem.y = y;
+                        dropItem.pickupDelay = pickupDelay;
+                        discardCooldown = maxDiscardCooldown;
+                    }
                 }
             }
                 ///Item Action
@@ -2719,8 +2880,6 @@ namespace PixelMidpointDisplacement
                         mainHand.onLeftClick();
                     }
                 }
-            
-            
         }
         public override void updateLocation(double xChange, double yChange) {
             int xBlockChange = (int)(Math.Floor((x + xChange) / worldContext.pixelsPerBlock) - Math.Floor(x / worldContext.pixelsPerBlock));
@@ -2736,6 +2895,17 @@ namespace PixelMidpointDisplacement
             base.updateLocation(xChange, yChange);
         }
         
+    }
+
+    public class UIItem : InteractiveUIElement
+    {
+        public Item item;
+        //A class that represents an item. Each ui element contains it's own corrosponding item. 
+
+        //When a droppedItem entity is picked up, it either adjusts the item of the UIItem element, or it creates both a new UiElement and item class
+        public void setItem(Item item) {
+            this.item = item;
+        }
     }
     public class Arrow : Entity, IEmissive
     {
@@ -2757,6 +2927,8 @@ namespace PixelMidpointDisplacement
             drawWidth = 1;
             width = 1;
             height = 0.5;
+            collider = new Rectangle(0, 0, (int)(1 * wc.pixelsPerBlock), (int)(0.5 * wc.pixelsPerBlock));
+
 
             x = arrowLocation.x;
             y = arrowLocation.y;
@@ -2767,6 +2939,8 @@ namespace PixelMidpointDisplacement
 
             minVelocityX = 0.25;
             minVelocityY = 0;
+
+            velocityX = initialVelocity;
 
             int lightType = new Random().Next(4);
             if (lightType == 0)
@@ -2846,10 +3020,82 @@ namespace PixelMidpointDisplacement
     }
 
     #region Item Classes
+
+    public class DroppedItem : Entity {
+        public Item item { get; set; }
+        float pickupAcceleration = 50f;
+
+        public double pickupDelay;
+        double pickupMoveDistance = 96f;
+        double pickupDistance = 48f;
+
+        public DroppedItem(WorldContext wc, Item item, (double x, double y) location, double initialVelocity) : base(wc) {
+            //Set the texture from the item's spritesheet
+            
+            
+            spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, Vector2.Zero, new Vector2(item.sourceRectangle.Width, item.sourceRectangle.Height), item.sourceRectangle, this);
+            setSpriteTexture(wc.engineController.spriteController.spriteSheetList[item.spriteSheetID]);
+            drawWidth = item.drawDimensions.width/(double)wc.pixelsPerBlock;
+            drawHeight = item.drawDimensions.height / (double)wc.pixelsPerBlock;
+            width = drawWidth;
+            height = drawHeight;
+
+            this.item = item;
+
+            collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
+
+            kX = 5;
+            kY = 0.01;
+
+            minVelocityX = 0.25;
+            minVelocityY = 0.01;
+
+            velocityX = initialVelocity;
+
+            
+
+            wc.engineController.entityController.addEntity(this);
+        }
+
+        public override void inputUpdate(double elapsedTime)
+        {
+            if (pickupDelay > 0)
+            {
+                pickupDelay -= elapsedTime;
+            }
+            else
+            {
+                double distance = Math.Pow(Math.Pow((worldContext.player.y + worldContext.player.height * worldContext.pixelsPerBlock / 2.0) - (y + drawHeight * worldContext.pixelsPerBlock / 2.0f), 2) + Math.Pow((worldContext.player.x + worldContext.player.width * worldContext.pixelsPerBlock / 2.0) - (x + drawWidth * worldContext.pixelsPerBlock / 2.0f), 2), 0.5);
+                if (distance < pickupMoveDistance)
+                {
+                    
+                    accelerationX = pickupAcceleration * (((worldContext.player.x + worldContext.player.width * worldContext.pixelsPerBlock / 2.0) - (x + drawWidth * worldContext.pixelsPerBlock/2.0f) ) / distance);
+                    accelerationY = -pickupAcceleration * (((worldContext.player.y + worldContext.player.height * worldContext.pixelsPerBlock / 2.0) - (y + drawHeight * worldContext.pixelsPerBlock/2.0f)) / distance);
+
+                }
+                if (distance < pickupDistance) {
+                    //Pickup action
+                    //Now I just need to make an inventory system and sorting
+                    
+                    if (worldContext.player.addItemToInventory(item)) {
+                        worldContext.engineController.entityController.removeEntity(this);
+                    }
+                }
+            }
+        }
+    }
     public class Item
     {
+        //Two ways of going about dropping and picking items up. One: Make each item a physics object, and activate the physics when they are dropped.Seems needlessly bulky
+        //Two: Have a "dropped item" class which is itself an entity, and make it point to an Item Class. On the "input" update function of entities, if the player is within
+        //A set range, apply a force towards the player. Items float towards the player, and when they get within a smaller range, they add the item to the players inventory
+        //and destroy the "dropped item" class
         public Rectangle sourceRectangle { get; set; }
         public int spriteSheetID { get; set; }
+
+        public int maxStackSize { get; set; }
+
+        public int currentStackSize { get; set; }
 
         
         public (int width, int height) drawDimensions { get; set; }
@@ -2866,6 +3112,8 @@ namespace PixelMidpointDisplacement
 
         public Vector2 offsetFromEntity { get; set; }
 
+        public float useCooldown;
+
         public Player owner { get; set; }
 
         public Item(Player owner) {
@@ -2874,10 +3122,12 @@ namespace PixelMidpointDisplacement
 
 
         public virtual void onLeftClick() { }
+        public virtual void onEquip() { }
         public virtual void animationFinished()
         {
             itemAnimator = null;
         }
+
     }
     public class Weapon : Item, INonAxisAlignedActiveCollider
     {
@@ -2923,6 +3173,11 @@ namespace PixelMidpointDisplacement
             colliderWidth = 4;
             colliderHeight = 32;
 
+            useCooldown = 0.2f;
+
+            maxStackSize = 1;
+            currentStackSize = 1;
+
         }
         //Adjusted to define the rectangular vertices only once, this should be a bit more efficient
         public override void onLeftClick()
@@ -2965,7 +3220,11 @@ namespace PixelMidpointDisplacement
                 animationController.addAnimator(itemAnimator);
             }
         }
+        public override void onEquip()
+        {
+            owner.worldContext.engineController.collisionController.addActiveCollider((IActiveCollider)this);
 
+        }
         public override void animationFinished()
         {
             isActive = false;
@@ -3008,6 +3267,11 @@ namespace PixelMidpointDisplacement
 
             sourceRectangle = new Rectangle(16, 0, 16, 16);
             drawDimensions = (48, 48);
+
+            maxStackSize = 1;
+            currentStackSize = 1;
+
+            useCooldown = 0f;
         }
 
         public override void onLeftClick()
@@ -3039,7 +3303,8 @@ namespace PixelMidpointDisplacement
             this.animationController = animationController;
             
             this.owner = owner;
-            
+
+            useCooldown = 0f;
 
             spriteSheetID = 2;
             verticalDirection = 1;
@@ -3054,10 +3319,14 @@ namespace PixelMidpointDisplacement
             constantRotationOffset = 0;
 
             spriteEffect = SpriteEffects.None;
-            
 
 
-            
+
+            maxStackSize = 999;
+            currentStackSize = 99;
+
+            //When you pick up an item, you check the inventory for an item of the same type. If that item already exists, check the stack size. If the stack size
+            //is less than the max, just add to the current stacksize, otherwise add the item to the inventory in the next empty slot
         }
 
         public override void onLeftClick()
@@ -4199,5 +4468,4 @@ namespace PixelMidpointDisplacement
 
     }
 
-    
 }
