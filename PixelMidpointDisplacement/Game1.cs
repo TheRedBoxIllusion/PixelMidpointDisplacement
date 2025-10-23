@@ -105,6 +105,7 @@ namespace PixelMidpointDisplacement
         AnimationController animationController;
 
         SpriteFont ariel;
+        SpriteFont itemCountFont;
         
 
         //++++++++++++++++++
@@ -177,6 +178,7 @@ namespace PixelMidpointDisplacement
             
 
             ariel = Content.Load<SpriteFont>("ariel");
+            itemCountFont = Content.Load<SpriteFont>("ItemFont");
            
 
             redTexture = new Texture2D(GraphicsDevice, 1, 1);
@@ -189,7 +191,8 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png")); //3
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ArrowSpriteSheet.png")); //4
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\MainMenuUISpriteSheet.png")); //5
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockBackgroundSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockBackgroundSpriteSheet.png"));//6
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\inventorySpriteSheet.png"));
 
             worldContext.engineController.spriteController.setSpriteSheetList(spriteSheetList);
 
@@ -241,13 +244,12 @@ namespace PixelMidpointDisplacement
 
         protected override void Update(GameTime gameTime)
         {
-            if (currentScene == Scene.MainMenu) {
-                //For each interactive UI element, check if the mouse clicked inside it, then run that UI function
-                updateMainMenuUI(gameTime);
-                updateMainMenuInteractiveUI();
-            }
-            else if (currentScene == Scene.Game)
+            updateUI(gameTime);
+            updateInteractiveUI(gameTime.ElapsedGameTime.TotalSeconds);
+
+            if (currentScene == Scene.Game)
             {
+                
                 updateChatSystem(gameTime);
                 updatePhysicsObjects(gameTime);
                 calculateScreenspaceOffset();
@@ -264,9 +266,7 @@ namespace PixelMidpointDisplacement
             if (currentScene == Scene.MainMenu) {
                 GraphicsDevice.SetRenderTarget(world);
                 GraphicsDevice.Clear(Color.MidnightBlue);
-                _spriteBatch.Begin(samplerState : SamplerState.PointClamp);
-                    drawMainMenuUI();
-                _spriteBatch.End();
+                
             }
             else if (currentScene == Scene.Game)
             {
@@ -279,10 +279,16 @@ namespace PixelMidpointDisplacement
                     drawEntities();
                     drawPlayer();
                     drawAnimatorObjects();
+                
                 _spriteBatch.End();
 
                 drawLight();
             }
+            GraphicsDevice.SetRenderTarget(world);
+            _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+            drawUI();
+            drawInteractiveUIString();
+            _spriteBatch.End();
             GraphicsDevice.SetRenderTarget(null);
             _spriteBatch.Begin();
             
@@ -294,21 +300,35 @@ namespace PixelMidpointDisplacement
         }
 
         #region Main menu update methods
-        public void updateMainMenuUI(GameTime gameTime) {
-            for (int i = 0; i < worldContext.engineController.UIController.MainMenuUI.Count; i++) {
-                worldContext.engineController.UIController.MainMenuUI[i].updateElement(gameTime.ElapsedGameTime.TotalSeconds, this);
+        public void updateUI(GameTime gameTime) {
+            for (int i = 0; i < worldContext.engineController.UIController.UIElements.Count; i++) {
+                if (worldContext.engineController.UIController.UIElements[i].scene == currentScene)
+                {
+                    worldContext.engineController.UIController.UIElements[i].updateElement(gameTime.ElapsedGameTime.TotalSeconds, this);
+                }
             }
         }
-        public void updateMainMenuInteractiveUI() {
-            for (int i = 0; i < worldContext.engineController.UIController.MainMenuInteractiveUI.Count; i++) {
-                if (checkUICollision(worldContext.engineController.UIController.MainMenuInteractiveUI[i])) {
-                    worldContext.engineController.UIController.MainMenuInteractiveUI[i].onLeftClick(this);
+        public void updateInteractiveUI(double elapsedTime) {
+            for (int i = 0; i < worldContext.engineController.UIController.InteractiveUI.Count; i++) {
+                if (worldContext.engineController.UIController.InteractiveUI[i].scene == currentScene)
+                {
+                    if (worldContext.engineController.UIController.InteractiveUI[i].clickCooldown < 0)
+                    {
+                        if (checkUICollision(worldContext.engineController.UIController.InteractiveUI[i]))
+                        {
+                            worldContext.engineController.UIController.InteractiveUI[i].onLeftClick(this);
+                        }
+                    }
+                    else {
+                        worldContext.engineController.UIController.InteractiveUI[i].clickCooldown -= (float)elapsedTime;
+                    }
                 }
             }
         }
         public bool checkUICollision(InteractiveUIElement uiElement) {
             if (uiElement.isUIElementActive)
             {
+                
                 Rectangle uiElementCollisionRect = uiElement.drawRectangle;
                 if (uiElement.alignment == UIAlignOffset.Centre) { uiElementCollisionRect.X += (_graphics.PreferredBackBufferWidth - uiElementCollisionRect.Width) / 2; }
                 if (Mouse.GetState().LeftButton == ButtonState.Pressed && new Rectangle(Mouse.GetState().X, Mouse.GetState().Y, 10, 10).Intersects(uiElementCollisionRect))
@@ -320,15 +340,30 @@ namespace PixelMidpointDisplacement
         }
         #endregion
         #region Main menu draw methods
-        public void drawMainMenuUI() {
-            for (int i = 0; i < worldContext.engineController.UIController.MainMenuUI.Count; i++) {
-                UIElement uiElement = worldContext.engineController.UIController.MainMenuUI[i];
-                Rectangle drawRect = new Rectangle();
-                if (uiElement.alignment == UIAlignOffset.TopLeft) { drawRect = uiElement.drawRectangle; }
-                else if (uiElement.alignment == UIAlignOffset.Centre) { drawRect = new Rectangle(uiElement.drawRectangle.X + (_graphics.PreferredBackBufferWidth - uiElement.drawRectangle.Width)/2, uiElement.drawRectangle.Y, uiElement.drawRectangle.Width, uiElement.drawRectangle.Height); }
-                if (uiElement.isUIElementActive)
+        public void drawUI() {
+            for (int i = 0; i < worldContext.engineController.UIController.UIElements.Count; i++) {
+                if (worldContext.engineController.UIController.UIElements[i].scene == currentScene)
                 {
-                    _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[uiElement.spriteSheetID], drawRect, uiElement.sourceRectangle, Color.White);
+                    UIElement uiElement = worldContext.engineController.UIController.UIElements[i];
+                    Rectangle drawRect = new Rectangle();
+                    if (uiElement.alignment == UIAlignOffset.TopLeft) { drawRect = uiElement.drawRectangle; }
+                    else if (uiElement.alignment == UIAlignOffset.Centre) { drawRect = new Rectangle(uiElement.drawRectangle.X + (_graphics.PreferredBackBufferWidth - uiElement.drawRectangle.Width) / 2, uiElement.drawRectangle.Y, uiElement.drawRectangle.Width, uiElement.drawRectangle.Height); }
+                    if (uiElement.isUIElementActive)
+                    {
+                        _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[uiElement.spriteSheetID], drawRect, uiElement.sourceRectangle, Color.White);
+                    }
+                }
+            }
+        }
+        public void drawInteractiveUIString() {
+            for (int i = 0; i < worldContext.engineController.UIController.InteractiveUI.Count; i++)
+            {
+                if (worldContext.engineController.UIController.InteractiveUI[i].scene == currentScene)
+                {
+                    InteractiveUIElement iue = worldContext.engineController.UIController.InteractiveUI[i];
+                    if (iue.isUIElementActive && iue.buttonText != null) {
+                        _spriteBatch.DrawString(itemCountFont, iue.buttonText, iue.textLocation, Color.White);
+                    }
                 }
             }
         }
@@ -578,11 +613,11 @@ namespace PixelMidpointDisplacement
 
         public void drawCoords(GameTime gameTime)
         {
-            _spriteBatch.DrawString(ariel, (int)player.x / worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10, 10), Color.BlueViolet);
-            _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, 40), Color.BlueViolet);
-            _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, 70), Color.BlueViolet);
-            _spriteBatch.DrawString(ariel, (int)(1 / gameTime.ElapsedGameTime.TotalSeconds) + " fps", new Vector2(200, 10), Color.BlueViolet);
-            _spriteBatch.DrawString(ariel, worldContext.engineController.lightingSystem.lights.Count + " lights", new Vector2(450, 10), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, (int)player.x / worldContext.pixelsPerBlock + ", " + (int)player.y / worldContext.pixelsPerBlock, new Vector2(10,_graphics.PreferredBackBufferHeight - 150 + 10), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, (int)player.velocityX + ", " + (int)player.velocityY, new Vector2(10, _graphics.PreferredBackBufferHeight - 150 + 40), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, _graphics.PreferredBackBufferHeight - 150 +  70), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, (int)(1 / gameTime.ElapsedGameTime.TotalSeconds) + " fps", new Vector2(200, _graphics.PreferredBackBufferHeight - 150 +  10), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, worldContext.engineController.lightingSystem.lights.Count + " lights", new Vector2(450, _graphics.PreferredBackBufferHeight - 150 + 10), Color.BlueViolet);
         }
 
         public void drawChat()
@@ -993,8 +1028,14 @@ namespace PixelMidpointDisplacement
 
                 if ((blockArray[x - 1, y].ID == (int)blockIDs.air || blockArray[x + 1, y].ID == (int)blockIDs.air || blockArray[x, y - 1].ID == (int)blockIDs.air || blockArray[x, y + 1].ID == (int)blockIDs.air) && blockArray[x, y].ID != (int)blockIDs.air) //Then it is exposed to air
                 {
-                    exposedBlocks.Add((x, y), worldArray[x, y]);
-                    worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
+                    if (!exposedBlocks.ContainsKey((x, y)))
+                    {
+                        exposedBlocks.Add((x, y), worldArray[x, y]);
+                        worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
+                    }
+                    else {
+                        worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray,x,y));
+                    }
                 }
             }
         }
@@ -1032,9 +1073,16 @@ namespace PixelMidpointDisplacement
         {
             if (worldArray[x, y].ID != 0)
             {
-                worldArray[x, y].blockDestroyed(exposedBlocks);
+                worldArray[x, y].onBlockDestroyed(exposedBlocks, this);
                 worldArray[x, y] = new Block(blockFromID[blockIDs.air]);
                 worldArray[x, y].setLocation((x, y));
+                for (int checkX = x - 1; checkX <= x + 1; checkX++) {
+                    for (int checkY = y - 1; checkY <= y + 1; checkY++) {
+                        if (worldArray[checkX, checkY].ID != (int)blockIDs.air) {
+                            addBlockToDictionaryIfExposedToAir(worldArray, checkX, checkY);
+                        }
+                    }
+                }
 
                 return true;
             }
@@ -1043,7 +1091,7 @@ namespace PixelMidpointDisplacement
         }
         public bool addBlock(int x, int y, int ID)
         {
-            if (worldArray[x, y].ID == intFromBlockID[blockIDs.air])
+            if (worldArray[x, y].ID == (int)blockIDs.air)
             {
                 worldArray[x, y] = new Block(blockFromID[blockIDFromInt[ID]]);
                 worldArray[x, y].setLocation((x, y));
@@ -2068,22 +2116,22 @@ namespace PixelMidpointDisplacement
         }
     }
     public class UIController {
-        public List<UIElement> MainMenuUI = new List<UIElement>();
-        public List<InteractiveUIElement> MainMenuInteractiveUI = new List<InteractiveUIElement>();
+        public List<UIElement> UIElements = new List<UIElement>();
+        public List<InteractiveUIElement> InteractiveUI = new List<InteractiveUIElement>();
 
         public UIController() {
             resetMainMenuUI();
         }
         private void resetMainMenuUI() {
-            MainMenuUI.Clear();
-            MainMenuInteractiveUI.Clear();
+            UIElements.Clear();
+            InteractiveUI.Clear();
             MainMenuTitle title = new MainMenuTitle();
             MainMenuWorldGenText generationText = new MainMenuWorldGenText();
             MainMenuStartButton start = new MainMenuStartButton(generationText);
-            MainMenuUI.Add(title);
-            MainMenuUI.Add(start);
-            MainMenuUI.Add(generationText);
-            MainMenuInteractiveUI.Add(start);
+            UIElements.Add(title);
+            UIElements.Add(start);
+            UIElements.Add(generationText);
+            InteractiveUI.Add(start);
         }
     }
     #region UI classes
@@ -2101,10 +2149,17 @@ namespace PixelMidpointDisplacement
         public Rectangle drawRectangle;
         public UIAlignOffset alignment;
         public bool isUIElementActive = true;
+        public Scene scene;
 
         public virtual void updateElement(double elasedTime, Game1 game) { }
     }
     public class InteractiveUIElement : UIElement {
+
+        public float clickCooldown;
+        public float maxClickCooldown;
+
+        public string buttonText;
+        public Vector2 textLocation;
         public virtual void onLeftClick(Game1 game) { }
         public virtual void onRightClick(Game1 game) { }
     }
@@ -2114,6 +2169,7 @@ namespace PixelMidpointDisplacement
             drawRectangle = new Rectangle(0,50,1160, 152);
             sourceRectangle = new Rectangle(0,0,145,19);
             alignment = UIAlignOffset.Centre;
+            scene = Scene.MainMenu;
         }
     }
     public class MainMenuStartButton : InteractiveUIElement {
@@ -2125,6 +2181,7 @@ namespace PixelMidpointDisplacement
             sourceRectangle = new Rectangle(0,25,33, 12);
             alignment = UIAlignOffset.Centre;
             tickCount = 0;
+            scene = Scene.MainMenu;
             this.generateWorldText = generateWorldText;
         }
         public override void onLeftClick(Game1 game)
@@ -2151,9 +2208,45 @@ namespace PixelMidpointDisplacement
             drawRectangle = new Rectangle(0, 350, 576, 30);
             sourceRectangle = new Rectangle(0,38,96, 5);
             alignment = UIAlignOffset.Centre;
+            scene = Scene.MainMenu;
         }
     }
-    
+
+    public class InventoryBackground : UIElement{
+        public InventoryBackground() {
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            drawRectangle = new Rectangle(0,66, 594, 266);
+            sourceRectangle = new Rectangle(0,32,297,132);
+            alignment = UIAlignOffset.TopLeft;
+            scene = Scene.Game;
+            isUIElementActive = false;
+        }
+    }
+    public class Hotbar : UIElement {
+        public Hotbar()
+        {
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            drawRectangle = new Rectangle(0, 0, 594, 64);
+            sourceRectangle = new Rectangle(0, 0, 297, 32);
+            alignment = UIAlignOffset.TopLeft;
+            scene = Scene.Game;
+        }
+    }
+    public class HotbarSelected : UIElement {
+        public HotbarSelected()
+        {
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            drawRectangle = new Rectangle(0, 0, 64, 64);
+            sourceRectangle = new Rectangle(1, 165, 32, 32);
+            alignment = UIAlignOffset.TopLeft;
+            scene = Scene.Game;
+        }
+
+        public void swapItem(int x) {
+            int pixelsPerHotbarSlot = 66;
+            drawRectangle = new Rectangle(pixelsPerHotbarSlot * x, 0, 64, 64);
+        }
+    }
     #endregion
     public class SpriteController {
         public Texture2D blockSpriteSheet;
@@ -2177,7 +2270,8 @@ namespace PixelMidpointDisplacement
         player,
         arrow,
         mainMenuUI,
-        blockBackground
+        blockBackground,
+        inventoryUI
     }
     public class MidpointDisplacementAlgorithm
     {
@@ -2647,6 +2741,11 @@ namespace PixelMidpointDisplacement
         public bool writeToChat;
 
         public UIItem[,] inventory = new UIItem[9,5];
+        public FloatingUIItem selectedItem;
+        public Hotbar hotbar = new Hotbar();
+        public HotbarSelected hotbarSelected = new HotbarSelected();
+        
+        public InventoryBackground inventoryBackground = new InventoryBackground();
 
         public int playerDirection { get; set; }
 
@@ -2657,8 +2756,8 @@ namespace PixelMidpointDisplacement
         double horizontalAcceleration = 4; //The acceleration in m/s^-2
         double jumpAcceleration = 12;
 
-        Item mainHand;
-        int mainHandIndex;
+        public Item mainHand;
+        public int mainHandIndex;
 
         float discardCooldown;
         float maxDiscardCooldown = 0.1f;
@@ -2690,6 +2789,9 @@ namespace PixelMidpointDisplacement
             inventory[0,0].setItem(new Weapon(worldContext.animationController, this));
             inventory[1, 0].setItem(new Bow(worldContext.animationController, this));
             inventory[2, 0].setItem(new BlockItem(1, worldContext.animationController, this));
+            if (inventory[2, 0].item is BlockItem b) {
+                b.currentStackSize = 99;
+            }
             
 
             spriteAnimator = new SpriteAnimator(animationController : worldContext.animationController, constantOffset : new Vector2(12f, 8f), frameOffset : new Vector2(32, 65), sourceDimensions : new Vector2((float)32, (float)64), animationlessSourceRect : new Rectangle(160, 0, (int)32, (int)64), owner : this);
@@ -2729,10 +2831,49 @@ namespace PixelMidpointDisplacement
 
         public void initialiseInventory()
         {
+            worldContext.engineController.UIController.UIElements.Add(inventoryBackground);
+            worldContext.engineController.UIController.UIElements.Add(hotbar);
+            worldContext.engineController.UIController.UIElements.Add(hotbarSelected);
             for (int x = 0; x < inventory.GetLength(0); x++) {
                 for (int y = 0; y < inventory.GetLength(1); y++) {
-                    inventory[x, y] = new UIItem();
+                    inventory[x, y] = new UIItem(x, y, this);
+                    worldContext.engineController.UIController.UIElements.Add(inventory[x,y]);
+                    worldContext.engineController.UIController.InteractiveUI.Add(inventory[x,y]);
                 }
+            }
+            selectedItem = new FloatingUIItem(this);
+            worldContext.engineController.UIController.UIElements.Add(selectedItem);
+            worldContext.engineController.UIController.InteractiveUI.Add(selectedItem);
+            
+        }
+
+        public void showInventory()
+        {
+            if (!inventory[0, 1].isUIElementActive) {
+                for (int x = 0; x < inventory.GetLength(0); x++) {
+                    for (int y = 0; y < inventory.GetLength(1); y++) {
+                        inventory[x, y].isUIElementActive = true;
+                    }
+                }
+                
+                inventoryBackground.isUIElementActive = true;
+            }
+            
+        }
+
+        public void hideInventory() {
+            if (inventory[0, 1].isUIElementActive) {
+                for (int x = 0; x < inventory.GetLength(0); x++)
+                {
+                    //Only hide the second row of the inventory, keep the hotbar
+                    for (int y = 1; y < inventory.GetLength(1); y++)
+                    {
+                        inventory[x, y].isUIElementActive = false;
+                    }
+                }
+                inventoryBackground.isUIElementActive = false;
+                
+                selectedItem.dropItem();
             }
         }
 
@@ -2747,11 +2888,30 @@ namespace PixelMidpointDisplacement
                         
                         if (inventory[x, y].item.GetType() == item.GetType())
                         {
-                            if (inventory[x, y].item.currentStackSize < inventory[x, y].item.maxStackSize)
+                            //Class specific checks:
+                            bool isTheRightItem = true;
+                            if (item is BlockItem bItem && inventory[x,y].item is BlockItem inventoryItem) {
+                                if (bItem.blockID != inventoryItem.blockID) {
+                                    isTheRightItem = false;
+                                }
+                            }
+                            if (isTheRightItem)
                             {
-                                inventory[x, y].item.currentStackSize += 1;
-                                foundASlot = true;
+                                int amountUntilMaxStack = inventory[x, y].item.maxStackSize - inventory[x, y].item.currentStackSize;
+                                if (amountUntilMaxStack > 0)
+                                {
+                                    int stackSizeToAdd = item.currentStackSize;
+                                    if (stackSizeToAdd > amountUntilMaxStack) { stackSizeToAdd = amountUntilMaxStack; }
 
+                                    inventory[x, y].item.currentStackSize += stackSizeToAdd;
+                                    item.currentStackSize -= stackSizeToAdd;
+                                    if (item.currentStackSize <= 0)
+                                    {
+                                        foundASlot = true;
+                                    }
+
+
+                                }
                             }
                         }
                     }
@@ -2828,6 +2988,7 @@ namespace PixelMidpointDisplacement
 
                     mainHand = inventory[0, 0].item;
                     mainHandIndex = 0;
+                    hotbarSelected.swapItem(0);
                     if (mainHand != null) { mainHand.onEquip(); }
                     
                 }
@@ -2835,34 +2996,95 @@ namespace PixelMidpointDisplacement
                 {
                     mainHand = inventory[1, 0].item;
                     mainHandIndex = 1;
+                    hotbarSelected.swapItem(1);
                     if (mainHand != null) { mainHand.onEquip(); }
                 }
                 else if (Keyboard.GetState().IsKeyDown(Keys.D3))
                 {
                     mainHand = inventory[2, 0].item;
                     mainHandIndex = 2;
+                    hotbarSelected.swapItem(2);
+                    if (mainHand != null) { mainHand.onEquip(); }
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.D4))
+                {
+                    mainHand = inventory[3, 0].item;
+                    mainHandIndex = 3;
+                    hotbarSelected.swapItem(3);
+                    if (mainHand != null) { mainHand.onEquip(); }
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.D5))
+                {
+                    mainHand = inventory[4, 0].item;
+                    mainHandIndex = 4;
+                    hotbarSelected.swapItem(4);
+                    if (mainHand != null) { mainHand.onEquip(); }
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.D6))
+                {
+                    mainHand = inventory[5, 0].item;
+                    mainHandIndex = 5;
+                    hotbarSelected.swapItem(5);
+                    if (mainHand != null) { mainHand.onEquip(); }
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.D7))
+                {
+                    mainHand = inventory[6, 0].item;
+                    mainHandIndex = 6;
+                    hotbarSelected.swapItem(6);
+                    if (mainHand != null) { mainHand.onEquip(); }
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.D8))
+                {
+                    mainHand = inventory[7, 0].item;
+                    mainHandIndex = 7;
+                    hotbarSelected.swapItem(7);
+                    if (mainHand != null) { mainHand.onEquip(); }
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.D9))
+                {
+                    mainHand = inventory[8, 0].item;
+                    mainHandIndex = 8;
+                    hotbarSelected.swapItem(8);
                     if (mainHand != null) { mainHand.onEquip(); }
                 }
 
-                //Update dropCooldown
-                if (discardCooldown > 0) {
-                    discardCooldown -= (float)elapsedTime;
+                if (Keyboard.GetState().IsKeyDown(Keys.Tab)) {
+                    showInventory();
+                } else {
+                    hideInventory();    
+                }
+                //Check if the mainHand item no longer exists
+                if (mainHand != null)
+                {
+                    if (mainHand.currentStackSize <= 0)
+                    {
+                        inventory[mainHandIndex, 0].setItem(null);
+                        mainHand = null;
+                    }
                 }
 
-                else if (Keyboard.GetState().IsKeyDown(Keys.Q)) {
+                //Update dropCooldown
+                if (discardCooldown > 0)
+                {
+                    discardCooldown -= (float)elapsedTime;
+                }
+                else if (Keyboard.GetState().IsKeyDown(Keys.Q))
+                {
                     if (mainHand != null)
                     {
+
                         double initialVelocity = 8f;
                         double pickupDelay = 1f;
                         if (playerDirection == -1)
                         {
                             initialVelocity *= -1;
                         }
-                        DroppedItem dropItem = new DroppedItem(worldContext, mainHand, (x, y), initialVelocity);
+                        DroppedItem dropItem = new DroppedItem(worldContext, mainHand.itemCopy(1), (x, y), initialVelocity);
                         mainHand.currentStackSize -= 1;
                         if (mainHand.currentStackSize <= 0)
                         {
-                            inventory[mainHandIndex, 0].item = null;
+                            inventory[mainHandIndex, 0].setItem(null);
                             mainHand = null;
                         }
                         dropItem.x = x;
@@ -2881,6 +3103,8 @@ namespace PixelMidpointDisplacement
                     }
                 }
         }
+
+        
         public override void updateLocation(double xChange, double yChange) {
             int xBlockChange = (int)(Math.Floor((x + xChange) / worldContext.pixelsPerBlock) - Math.Floor(x / worldContext.pixelsPerBlock));
             int yBlockChange = (int)(Math.Floor((y + yChange) / worldContext.pixelsPerBlock) - Math.Floor(y / worldContext.pixelsPerBlock));
@@ -2896,15 +3120,161 @@ namespace PixelMidpointDisplacement
         }
         
     }
+    public class FloatingUIItem : InteractiveUIElement {
 
+        public Item item;
+        public Player owner;
+
+        public FloatingUIItem(Player owner) {
+            isUIElementActive = false;
+            scene = Scene.Game;
+            setItem(null);
+            this.owner = owner;
+        }
+        public void setItem(Item item)
+        {
+            if (item != null)
+            {
+                this.item = item;
+
+                if (item.currentStackSize <= 1) { buttonText = null; }
+                isUIElementActive = true;
+                spriteSheetID = item.spriteSheetID;
+                sourceRectangle = item.sourceRectangle;
+                int offsetWidth = item.drawDimensions.width;
+                int offsetHeight = item.drawDimensions.height;
+
+                //If the sprite is the exact same size, don't offset it by anything
+                //If the sprite is smaller, offset it by half - half the width
+                drawRectangle = new Rectangle(Mouse.GetState().X + ((64 - offsetWidth) / 2), Mouse.GetState().Y + ((64 - offsetHeight) / 2), item.drawDimensions.width, item.drawDimensions.height);
+            }
+            else
+            {
+                this.item = null;
+                isUIElementActive = false;
+                sourceRectangle = new Rectangle(0, 0, 0, 0);
+                drawRectangle = new Rectangle(Mouse.GetState().X, Mouse.GetState().Y, 64, 64);
+            }
+        }
+
+        public override void updateElement(double elasedTime, Game1 game)
+        {
+            if (isUIElementActive)
+            {
+                drawRectangle.X = Mouse.GetState().X;
+                drawRectangle.Y = Mouse.GetState().Y;
+                if (item != null)
+                {
+                    if (item.currentStackSize > 1)
+                    {
+                        buttonText = item.currentStackSize.ToString();
+                    }
+                    textLocation = new Vector2(drawRectangle.X + item.drawDimensions.width, drawRectangle.Y + item.drawDimensions.height);
+                }
+            }
+        }
+
+        public void dropItem() {
+            if (item != null)
+            {
+                float pickupDelay = 1f;
+                DroppedItem dropItem = new DroppedItem(owner.worldContext, item.itemCopy(item.currentStackSize), (owner.x, owner.y), 0f);
+                dropItem.x = owner.x;
+                dropItem.y = owner.y;
+                dropItem.pickupDelay = pickupDelay;
+                owner.worldContext.engineController.entityController.addEntity(dropItem);
+                setItem(null);
+            }
+        }
+
+        public override void onLeftClick(Game1 game)
+        {
+            if (item != null && isUIElementActive) {
+                
+                if (drawRectangle.X < owner.inventoryBackground.drawRectangle.X || drawRectangle.Y < owner.hotbar.drawRectangle.Y || drawRectangle.X > owner.inventoryBackground.drawRectangle.X + owner.inventoryBackground.drawRectangle.Width || drawRectangle.Y > owner.inventoryBackground.drawRectangle.Y + owner.inventoryBackground.drawRectangle.Height) {
+                    //If the player clicks outside the inventory, drop the item
+                    dropItem();
+                }
+            }
+        }
+    }
     public class UIItem : InteractiveUIElement
     {
         public Item item;
+        Player owner;
         //A class that represents an item. Each ui element contains it's own corrosponding item. 
+        int drawX;
+        int drawY;
 
+        int inventorySlotSize = 66;
+
+        public (int x, int y) inventoryIndex;
+
+        bool lockedToInventory = true;
         //When a droppedItem entity is picked up, it either adjusts the item of the UIItem element, or it creates both a new UiElement and item class
+        public UIItem(int x, int y, Player owner) {
+            isUIElementActive = false;
+            scene = Scene.Game;
+            this.owner = owner;
+            
+            inventoryIndex = (x, y);
+            setDrawLocation();
+            maxClickCooldown = 0.1f;
+            //Just set the ID to be a random sprite sheet that has opacity
+            spriteSheetID = (int)spriteSheetIDs.weapons;
+            textLocation = Vector2.Zero;
+            setItem(null);
+        }
+
+        public void setDrawLocation() {
+            drawX = inventorySlotSize * inventoryIndex.x;
+            drawY = inventorySlotSize * inventoryIndex.y;
+        }
+        
         public void setItem(Item item) {
-            this.item = item;
+            if (item != null)
+            {
+                this.item = item;
+                if (item.currentStackSize <= 1) { buttonText = null; }
+                spriteSheetID = item.spriteSheetID;
+                sourceRectangle = item.sourceRectangle;
+                int offsetWidth = item.drawDimensions.width;
+                int offsetHeight = item.drawDimensions.height;
+
+                //If the sprite is the exact same size, don't offset it by anything
+                //If the sprite is smaller, offset it by half - half the width
+                drawRectangle = new Rectangle(drawX + ((64 - offsetWidth)/2), drawY + ((64 - offsetHeight) / 2), item.drawDimensions.width, item.drawDimensions.height);
+                textLocation = new Vector2(drawX + offsetWidth + ((64 - offsetWidth) / 2), drawY + offsetWidth + ((64 - offsetHeight) / 2));
+            }
+            else {
+                this.item = null;
+                sourceRectangle = new Rectangle(0,0,0,0);
+                drawRectangle = new Rectangle(drawX,drawY,64,64);
+            }
+        }
+
+        public override void updateElement(double elasedTime, Game1 game)
+        {
+            if (item != null)
+            {
+                if (item.currentStackSize > 1)
+                {
+                    buttonText = item.currentStackSize.ToString();
+                }
+            }
+            else {
+                buttonText = "";
+            }
+        }
+        public override void onLeftClick(Game1 game)
+        {
+            clickCooldown = maxClickCooldown;
+            Item floatingItem = owner.selectedItem.item;
+            owner.selectedItem.setItem(item);
+            setItem(floatingItem);
+            if (inventoryIndex.x == owner.mainHandIndex) {
+                owner.mainHand = null;
+            }
         }
     }
     public class Arrow : Entity, IEmissive
@@ -3128,6 +3498,12 @@ namespace PixelMidpointDisplacement
             itemAnimator = null;
         }
 
+        public virtual Item itemCopy(int stackSize) {
+            Item i = new Item(owner);
+            i.currentStackSize = stackSize;
+            return i;
+        }
+
     }
     public class Weapon : Item, INonAxisAlignedActiveCollider
     {
@@ -3253,6 +3629,12 @@ namespace PixelMidpointDisplacement
             ((INonAxisAlignedActiveCollider)this).calculateRotation(initialRotation);
         }
 
+        public override Item itemCopy(int stackSize)
+        {
+            Weapon i = new Weapon(animationController, owner);
+            i.currentStackSize = stackSize;
+            return i;
+        }
     }
     public class Bow : Item {
         public Bow(AnimationController ac, Player owner) : base(owner) {
@@ -3288,6 +3670,12 @@ namespace PixelMidpointDisplacement
                 
             }
         }
+        public override Item itemCopy(int stackSize)
+        {
+            Bow i = new Bow(animationController, owner);
+            i.currentStackSize = stackSize;
+            return i;
+        }
 
     }
     public class BlockItem : Item {
@@ -3309,7 +3697,7 @@ namespace PixelMidpointDisplacement
             spriteSheetID = 2;
             verticalDirection = 1;
 
-            sourceRectangle = new Rectangle(0, 0, 8, 8);
+            sourceRectangle = new Rectangle(0, (blockID - 1) * 8, 8, 8);
 
             
 
@@ -3323,7 +3711,7 @@ namespace PixelMidpointDisplacement
 
 
             maxStackSize = 999;
-            currentStackSize = 99;
+            currentStackSize = 1;
 
             //When you pick up an item, you check the inventory for an item of the same type. If that item already exists, check the stack size. If the stack size
             //is less than the max, just add to the current stacksize, otherwise add the item to the inventory in the next empty slot
@@ -3341,7 +3729,9 @@ namespace PixelMidpointDisplacement
                 int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
                 int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
 
-                owner.worldContext.addBlock(mouseX, mouseY, blockID);
+                if (owner.worldContext.addBlock(mouseX, mouseY, blockID)) {
+                    currentStackSize -= 1;
+                }
             }
             if(semiAnimationAdditions < maxSemiAdditions ) {
                 int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
@@ -3350,8 +3740,16 @@ namespace PixelMidpointDisplacement
                 if (owner.worldContext.addBlock(mouseX, mouseY, blockID))
                 {
                     semiAnimationAdditions += 1;
+                    currentStackSize -= 1;
                 }
             }
+        }
+
+        public override Item itemCopy(int stackSize)
+        {
+            BlockItem i = new BlockItem(blockID, animationController, owner);
+            i.currentStackSize = stackSize;
+            return i;
         }
     }
     #endregion
@@ -3588,6 +3986,13 @@ namespace PixelMidpointDisplacement
         public void blockPlaced(Vector4 exposedFaces) {
             setupFaceVertices(exposedFaces);
         }
+        public virtual void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc){
+            blockDestroyed(exposedBlocks);
+            DroppedItem dropBlock = new DroppedItem(wc, new BlockItem(ID, wc.animationController, wc.player), (location.x,location.y), 0);
+            dropBlock.x = location.x * wc.pixelsPerBlock + wc.pixelsPerBlock/2.0;
+            dropBlock.y = location.y * wc.pixelsPerBlock + wc.pixelsPerBlock/2.0;
+            dropBlock.pickupDelay = 0f;
+        }
         public void blockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks) {
             if (exposedBlocks.ContainsKey(location)) { exposedBlocks.Remove(location); }
         }
@@ -3661,6 +4066,16 @@ namespace PixelMidpointDisplacement
             sourceRectangle = b.sourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
+        }
+
+        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
+        {
+            blockDestroyed(exposedBlocks);
+            DroppedItem dropBlock = new DroppedItem(wc, new BlockItem((int)blockIDs.dirt, wc.animationController, wc.player), (location.x, location.y), 0);
+            
+            dropBlock.x = location.x * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0;
+            dropBlock.y = location.y * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0;
+            dropBlock.pickupDelay = 0f;
         }
 
         public override void setupInitialData(int[,] worldArray, (int x, int y) blockLocation)

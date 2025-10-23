@@ -14,6 +14,7 @@
     <None Remove="Content\ArrowSpriteSheet.png" />
     <None Remove="Content\blockItemSpriteSheet.png" />
     <None Remove="Content\blockSpriteSheet.png" />
+    <None Remove="Content\inventorySpriteSheet.png" />
     <None Remove="Content\MainMenuUISpriteSheet.png" />
     <None Remove="Content\Player.png" />
     <None Remove="Content\PlayerSpriteSheet.png" />
@@ -37,6 +38,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\blockSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\inventorySpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\MainMenuUISpriteSheet.png">
