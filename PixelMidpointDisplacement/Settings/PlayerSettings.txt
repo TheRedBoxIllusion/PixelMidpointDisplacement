@@ -2,8 +2,8 @@
 10
 10
 kX & kY: The coefficient of friction for the player. As there is no ground friction at the moment, this; combined with acceleration values, defines the players max velocities in both directions								(double)
-8
-0.05
+0.02
+0.02
 collider width and breadth: This defines the dimensions of the player in terms of blocks.																																				(double)
 0.8
 2.7
@@ -12,6 +12,6 @@ Emmissive strength: How brightly the player emmits light. The brighter it is the
 Max emmissive strength: The maximum value that the light emmitted by the player can reach. This is useful for only lighting up dark areas a certain amount																		(int)
 125
 Horizontal acceleration: This is how much the player accelerates sideways when there is an input. In ms^-2																														(double)
-600
+300
 Jump acceleration: How much acceleration the player produces when they jump																																						(double)
 12

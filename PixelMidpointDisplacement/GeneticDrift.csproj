@@ -11,9 +11,13 @@
     <ApplicationIcon>Icon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <None Remove="Content\accessorySpriteSheet.png" />
+    <None Remove="Content\armourSpriteSheet.png" />
     <None Remove="Content\ArrowSpriteSheet.png" />
     <None Remove="Content\blockItemSpriteSheet.png" />
     <None Remove="Content\blockSpriteSheet.png" />
+    <None Remove="Content\deathScreenSpriteSheet.png" />
+    <None Remove="Content\healthUISpriteSheet.png" />
     <None Remove="Content\inventorySpriteSheet.png" />
     <None Remove="Content\MainMenuUISpriteSheet.png" />
     <None Remove="Content\Player.png" />
@@ -25,9 +29,15 @@
     <None Remove="Settings\PhysicsEngineSettings.txt" />
     <None Remove="Settings\PlayerSettings.txt" />
     <None Remove="Settings\WorldContextSettings.txt" />
-    <None Remove="Structures\StructTest.txt" />
+    <None Remove="Structures\Shrine.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Content\accessorySpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\armourSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Content\ArrowSpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
@@ -38,6 +48,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\blockSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\deathScreenSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\healthUISpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\inventorySpriteSheet.png">
@@ -70,8 +86,11 @@
     <Content Include="Settings\WorldGenerationVariables.txt">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="Structures\StructTest.txt">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    <Content Include="Structures\House.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Structures\Shrine.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
   <ItemGroup>
