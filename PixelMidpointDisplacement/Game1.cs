@@ -127,7 +127,7 @@ namespace PixelMidpointDisplacement
         int digSize = 1;
         //++++++++++++++++++
         double biomeTickSpeed;
-        double maxBiomeTickSpeed = 1f;
+        double maxBiomeTickSpeed = 0.5f;
 
         public Game1()
         {
@@ -711,7 +711,7 @@ namespace PixelMidpointDisplacement
                             }
                             Color lightLevel = Color.White;
                             if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
-                            if (worldContext.exposedBlocks.ContainsKey((x, y))) { currentlyRenderedExposedBlocks.Add((x, y)); }
+                            if (worldContext.exposedBlocks.ContainsKey((x, y)) && !worldContext.worldArray[x,y].isBlockTransparent) { currentlyRenderedExposedBlocks.Add((x, y)); }
                             _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.blocks], new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), worldContext.worldArray[x, y].sourceRectangle, lightLevel);
                         }
 
@@ -1353,9 +1353,10 @@ namespace PixelMidpointDisplacement
             if (x > 0 && y > 0 && x < worldArray.GetLength(0) - 1 && y < worldArray.GetLength(1) - 1)
             {
 
-                if ((blockArray[x - 1, y] == (int)blockIDs.air || blockArray[x + 1, y] == (int)blockIDs.air || blockArray[x, y - 1] == (int)blockIDs.air || blockArray[x, y + 1] == (int)blockIDs.air) && blockArray[x, y] != (int)blockIDs.air) //Then it is exposed to air
+                if ((blockArray[x - 1, y] == (int)blockIDs.air || blockArray[x + 1, y] == (int)blockIDs.air || blockArray[x, y - 1] == (int)blockIDs.air || blockArray[x, y + 1] == (int)blockIDs.air ||
+                    blockFromID[(blockIDs)blockArray[x - 1, y]].isBlockTransparent|| blockFromID[(blockIDs)blockArray[x + 1, y]].isBlockTransparent|| blockFromID[(blockIDs)blockArray[x, y - 1]].isBlockTransparent || blockFromID[(blockIDs)blockArray[x, y + 1]].isBlockTransparent) && blockArray[x,y] != (int)blockIDs.air) //Then it is exposed to air
                 {
-                    if (blockArray[x, y] != (int)blockIDs.torch)
+                    if (blockArray[x, y] != (int)blockIDs.torch && blockArray[x,y] != (int)blockIDs.chest )
                     {
                         exposedBlocks.Add((x, y), worldArray[x, y]);
                         worldArray[x, y].setupFaceVertices(calculateExposedFaces(blockArray, x, y));
@@ -1798,7 +1799,7 @@ namespace PixelMidpointDisplacement
         public int maxBiomeEntityCount;
         public int currentBiomeEntityCount;
 
-        public int maxSpawnAttempts = 20;
+        public int maxSpawnAttempts = 30;
 
         public List<(SpawnableEntity  entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface)> spawnableEntities;
         public List<(Structure structure, double density, int yMax, int yMin)> spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>();
@@ -1959,75 +1960,81 @@ namespace PixelMidpointDisplacement
             {
                 for (int i = 0; i < spawnableEntities.Count; i++)
                 {
-                    if (currentBiomeEntityCount < maxBiomeEntityCount && spawnableEntities[i].currentSpecificEntityCount < spawnableEntities[i].maxSpecificEntityCount)
+                    if (spawnableEntities[i].yMax > (int)Math.Floor((- w.screenSpaceOffset.y) / (double)w.pixelsPerBlock) - w.surfaceHeight[(int)Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock)] && spawnableEntities[i].yMin < (int)Math.Floor(-w.screenSpaceOffset.y / (double)w.pixelsPerBlock) - w.surfaceHeight[(int)Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock)])
                     {
-                        //Check to spawn the entity
-                        double percentage = r.NextDouble() * 100;
-                        if (percentage <= spawnableEntities[i].spawnProbability)
+                        System.Diagnostics.Debug.WriteLine("Was able to attempt to spawn an entity at: " + (Math.Floor((-w.screenSpaceOffset.y) / (double)w.pixelsPerBlock)));
+                        if (currentBiomeEntityCount < maxBiomeEntityCount && spawnableEntities[i].currentSpecificEntityCount < spawnableEntities[i].maxSpecificEntityCount)
                         {
-                            //Adjust the current specific entity count
-                            (SpawnableEntity entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface) currentEntityValues = spawnableEntities[i];
-
-                            currentBiomeEntityCount += 1;
-                            currentEntityValues.currentSpecificEntityCount += 1;
-                            spawnableEntities[i] = currentEntityValues;
-
-                            //Adjust entity location:
-
-
-                            int xLoc = r.Next((int)Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock) - spawnableOffscreenDistance, (int)Math.Floor((w.applicationWidth - w.screenSpaceOffset.x) / (double)w.pixelsPerBlock) + spawnableOffscreenDistance);
-                            int yLoc = r.Next((int)Math.Floor(-w.screenSpaceOffset.y / (double)w.pixelsPerBlock) - spawnableOffscreenDistance, (int)Math.Floor((w.applicationHeight - w.screenSpaceOffset.y) / (double)w.pixelsPerBlock) + spawnableOffscreenDistance);
-
-                            //Find a spawnable location:
-                            bool foundALocation = false;
-                            int currentSpawnAttemptCount = 0;
-                            while (!foundALocation && currentSpawnAttemptCount < maxSpawnAttempts)
+                            //Check to spawn the entity
+                            double percentage = r.NextDouble() * 100;
+                            if (percentage <= spawnableEntities[i].spawnProbability)
                             {
-                                currentSpawnAttemptCount += 1;
-                                xLoc = r.Next((int)Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock) - spawnableOffscreenDistance, (int)Math.Floor((w.applicationWidth - w.screenSpaceOffset.x) / (double)w.pixelsPerBlock) + spawnableOffscreenDistance);
-                                yLoc = r.Next((int)Math.Floor(-w.screenSpaceOffset.y / (double)w.pixelsPerBlock) - spawnableOffscreenDistance, (int)Math.Floor((w.applicationHeight - w.screenSpaceOffset.y) / (double)w.pixelsPerBlock) + spawnableOffscreenDistance);
-                                if (spawnableEntities[i].spawnOnSurface)
-                                {
-                                    yLoc = w.surfaceHeight[xLoc] - (int)Math.Ceiling(spawnableEntities[i].entity.height - 1);
-                                }
+                                //Adjust the current specific entity count
+                                (SpawnableEntity entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface) currentEntityValues = spawnableEntities[i];
 
-                                //Check if that location is somewhere that the entity can spawn:
-                                //Off-screen
-                                if ((xLoc < Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock) || xLoc > Math.Floor((w.applicationWidth - w.screenSpaceOffset.x) / (double)w.pixelsPerBlock)) && (yLoc < Math.Floor(-w.screenSpaceOffset.y / (double)w.pixelsPerBlock) || yLoc > Math.Floor((w.applicationHeight - w.screenSpaceOffset.y) / (double)w.pixelsPerBlock))) {
-                                //Sufficient air for the entity to exist in
-                                bool isASolidBlockInSpawnLocation = false;
-                                for (int x = -1; x < (int)Math.Ceiling(spawnableEntities[i].entity.width); x++)
+                                currentBiomeEntityCount += 1;
+                                currentEntityValues.currentSpecificEntityCount += 1;
+                                spawnableEntities[i] = currentEntityValues;
+
+                                //Adjust entity location:
+
+
+                                int xLoc = r.Next((int)Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock) - spawnableOffscreenDistance, (int)Math.Floor((w.applicationWidth - w.screenSpaceOffset.x) / (double)w.pixelsPerBlock) + spawnableOffscreenDistance);
+                                int yLoc = r.Next((int)Math.Floor(-w.screenSpaceOffset.y / (double)w.pixelsPerBlock) - spawnableOffscreenDistance, (int)Math.Floor((w.applicationHeight - w.screenSpaceOffset.y) / (double)w.pixelsPerBlock) + spawnableOffscreenDistance);
+
+                                //Find a spawnable location:
+                                bool foundALocation = false;
+                                int currentSpawnAttemptCount = 0;
+                                while (!foundALocation && currentSpawnAttemptCount < maxSpawnAttempts)
                                 {
-                                    for (int y = -1; y < (int)Math.Ceiling(spawnableEntities[i].entity.height); y++)
+                                    currentSpawnAttemptCount += 1;
+                                    xLoc = r.Next((int)Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock) - spawnableOffscreenDistance, (int)Math.Floor((w.applicationWidth - w.screenSpaceOffset.x) / (double)w.pixelsPerBlock) + spawnableOffscreenDistance);
+                                    yLoc = r.Next((int)Math.Floor(-w.screenSpaceOffset.y / (double)w.pixelsPerBlock) - spawnableOffscreenDistance, (int)Math.Floor((w.applicationHeight - w.screenSpaceOffset.y) / (double)w.pixelsPerBlock) + spawnableOffscreenDistance);
+                                    if (spawnableEntities[i].spawnOnSurface)
                                     {
-                                        if(xLoc + x >= 0 && xLoc + x < w.worldArray.GetLength(0) && yLoc + y >= 0 && yLoc + y < w.worldArray.GetLength(1))
-                                        if (w.worldArray[xLoc + x, yLoc + y].ID != (int)blockIDs.air)
+                                        yLoc = w.surfaceHeight[xLoc] - (int)Math.Ceiling(spawnableEntities[i].entity.height - 1);
+                                    }
+
+                                    //Check if that location is somewhere that the entity can spawn:
+                                    //Off-screen
+                                    if ((xLoc < Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock) || xLoc > Math.Floor((w.applicationWidth - w.screenSpaceOffset.x) / (double)w.pixelsPerBlock)) && (yLoc < Math.Floor(-w.screenSpaceOffset.y / (double)w.pixelsPerBlock) || yLoc > Math.Floor((w.applicationHeight - w.screenSpaceOffset.y) / (double)w.pixelsPerBlock)))
+                                    {
+                                        //Sufficient air for the entity to exist in
+                                        bool isASolidBlockInSpawnLocation = false;
+                                        for (int x = -1; x < (int)Math.Ceiling(spawnableEntities[i].entity.width); x++)
                                         {
-                                            isASolidBlockInSpawnLocation = true;
+                                            for (int y = -1; y < (int)Math.Ceiling(spawnableEntities[i].entity.height); y++)
+                                            {
+                                                if (xLoc + x >= 0 && xLoc + x < w.worldArray.GetLength(0) && yLoc + y >= 0 && yLoc + y < w.worldArray.GetLength(1))
+                                                    if (w.worldArray[xLoc + x, yLoc + y].ID != (int)blockIDs.air)
+                                                    {
+                                                        isASolidBlockInSpawnLocation = true;
+                                                    }
+                                            }
+                                        }
+                                        bool isOnSolidGround = false;
+
+                                        int integerHeight = (int)Math.Ceiling(spawnableEntities[i].entity.height);
+                                        if (xLoc >= 0 && xLoc < w.worldArray.GetLength(0) && yLoc + integerHeight >= 0 && yLoc + integerHeight < w.worldArray.GetLength(1))
+                                        {
+                                            isOnSolidGround = !w.worldArray[xLoc, yLoc + integerHeight].isBlockTransparent;
+                                        }
+
+                                        if (!isASolidBlockInSpawnLocation && isOnSolidGround)
+                                        {
+                                            foundALocation = true;
+                                            SpawnableEntity entity = spawnableEntities[i].entity.copyEntity() as SpawnableEntity;
+                                            entity.setBiome(this, i);
+                                            entity.x = xLoc * w.pixelsPerBlock;
+                                            entity.y = yLoc * w.pixelsPerBlock;
                                         }
                                     }
                                 }
-                                    bool isOnSolidGround = false;
+                                //w.exposedBlocks.ContainsKey();
 
-                                    int integerHeight = (int)Math.Ceiling(spawnableEntities[i].entity.height);
-                                    if (xLoc >= 0 && xLoc < w.worldArray.GetLength(0) && yLoc + integerHeight >= 0 && yLoc + integerHeight < w.worldArray.GetLength(1)) {
-                                        isOnSolidGround = !w.worldArray[xLoc, yLoc + integerHeight].isBlockTransparent;
-                                    }
 
-                                if (!isASolidBlockInSpawnLocation && isOnSolidGround)
-                                {
-                                    foundALocation = true;
-                                    SpawnableEntity entity = spawnableEntities[i].entity.copyEntity() as SpawnableEntity;
-                                    entity.setBiome(this, i);
-                                    entity.x = xLoc * w.pixelsPerBlock;
-                                    entity.y = yLoc * w.pixelsPerBlock;
-                                }
-                                }
+
                             }
-                            //w.exposedBlocks.ContainsKey();
-
-
-
                         }
                     }
                 }
@@ -2048,7 +2055,7 @@ namespace PixelMidpointDisplacement
 
             backgroundBlockID = 1;
 
-            maxBiomeEntityCount = 15;
+            maxBiomeEntityCount = 30;
 
             ores = new BlockGenerationVariables[]{
             new BlockGenerationVariables(seedDensity : 1, block : new Block(ID : 2), maxSingleSpread : 8, oreVeinSpread : 360), //Dirt
@@ -2073,7 +2080,7 @@ namespace PixelMidpointDisplacement
             };
 
             spawnableEntities = new List<(SpawnableEntity entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface)>() {
-                (new ControlledEntity(wg.worldContext, wg.worldContext.player), 50, 0, 20, 0, 100, false)
+                (new ControlledEntity(wg.worldContext, wg.worldContext.player), 50, 0, 20, 500, 10, false)
             };
 
             //Generate a random biome Width:
@@ -2627,7 +2634,6 @@ namespace PixelMidpointDisplacement
         Absolute,
         Relative
     }
-
     public enum Scale {
         Absolute,
         Relative
@@ -2837,19 +2843,44 @@ namespace PixelMidpointDisplacement
     public class Damage : UIElement {
         WorldContext worldContext;
 
-        double yIncrease = 50;
-        double maxExistingDuration = 2;
+        double x;
+        double y;
+
+        int drawOrder;
+
+        double yIncrease = 30;
+        double maxExistingDuration = 0.5;
         double existingDuration;
 
-        public Damage(WorldContext wc, int damageAmount, double x, double y) {
-            drawRectangle = new Rectangle((int)x, (int)y, 16, 24);
+        public Damage(WorldContext wc, int damageAmount, double x, double y, int drawOrder) {
+
+            this.drawOrder = drawOrder;
+            drawRectangle = new Rectangle((int)x + wc.screenSpaceOffset.x, (int)y + wc.screenSpaceOffset.y, 10, 14);
+            this.x = x;
+            this.y = y;
             existingDuration = maxExistingDuration;
+
+            sourceRectangle = new Rectangle(damageAmount * 6, 0, 5, 7);
+            worldContext = wc;
+            spriteSheetID = (int)spriteSheetIDs.pixelNumbers;
+            
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            scene = Scene.Game;
+            isUIElementActive = true;
         }
 
         public override void updateElement(double elapsedTime, Game1 game)
         {
             existingDuration -= elapsedTime;
+            y -= ((yIncrease / maxExistingDuration) * elapsedTime);
 
+            drawRectangle = new Rectangle((int)x + worldContext.screenSpaceOffset.x, (int)(y + worldContext.screenSpaceOffset.y), 10, 14);
+
+            if (existingDuration <= 0) {
+                worldContext.engineController.UIController.UIElements.Remove((drawOrder, this));
+            }
         }
     }
     
@@ -3362,6 +3393,15 @@ namespace PixelMidpointDisplacement
         }
         public virtual void applyDamage(object attacker, DamageType damageType, double damage) {
             currentHealth -= damage;
+            //Create a damage uielement
+            string integerDamageAsAString = ((int)damage).ToString();
+
+
+            for (int i = 0; i < integerDamageAsAString.Length; i++) {
+                Damage d = new Damage(worldContext, Convert.ToInt32(integerDamageAsAString[i].ToString()), x + 11 * i, y, 15);
+                worldContext.engineController.UIController.UIElements.Add((15, d));
+            }
+
             if (currentHealth <= 0) {
                 onDeath();
             }
@@ -3403,7 +3443,7 @@ namespace PixelMidpointDisplacement
         public int spawnableEntityListIndex { get; set; }
 
         public double screenLengthsUntilDespawn = 1.5;
-        public SpawnableEntity(WorldContext worldContext) : base(worldContext) { }
+        public SpawnableEntity(WorldContext worldContext) : base(worldContext) {}
 
         public void setBiome(Biome biome, int spawnableEntityIndex)
         {
@@ -3458,8 +3498,8 @@ namespace PixelMidpointDisplacement
         public double percievedX { get; set; }
         public double percievedY { get; set; }
         public double perceptionDistance { get; set; }
-           
 
+        public double damage = 15;
         public double xDifferenceThreshold { get; set; }
 
         double horizontalAcceleration = 200;
@@ -3473,7 +3513,7 @@ namespace PixelMidpointDisplacement
             player = target;
 
             notJumpThreshold = -100;
-            perceptionDistance = 320;
+            perceptionDistance = 1000;
             xDifferenceThreshold = 10;
             drawWidth = 1.5f;
             drawHeight = 3;
@@ -3481,6 +3521,8 @@ namespace PixelMidpointDisplacement
             playerDirection = 1;
 
             maxMovementVelocityX = 7;
+
+            maxInvincibilityCooldown = 0.2;
 
             accelerationX = 0.0;
             accelerationY = 0.0;
@@ -3650,6 +3692,7 @@ namespace PixelMidpointDisplacement
                 p.velocityY += 7;
                 //Have to move the player up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
                 p.y -= 12;
+                p.applyDamage(this, DamageType.EntityAttack, damage);
                 attackCooldown = maxAttackCooldown;
                 p.knockbackStunDuration = 0.2f;
                 ((ICollider)p).startInvincibilityFrames();
@@ -4642,6 +4685,11 @@ namespace PixelMidpointDisplacement
 
         }
 
+        public override void onBlockCollision(Vector2 collisionNormal, WorldContext worldContext, int blockX, int blockY)
+        {
+            //Don't take fall damage
+        }
+
         public override void hasCollided()
         {
             calculatePhysics = false;
@@ -4687,6 +4735,11 @@ namespace PixelMidpointDisplacement
             y = location.y;
 
             wc.engineController.entityController.addEntity(this);
+        }
+
+        public override void onBlockCollision(Vector2 collisionNormal, WorldContext worldContext, int blockX, int blockY)
+        {
+            //Do nothing, don't take fall damage or anything of the sorts
         }
 
         public override void inputUpdate(double elapsedTime)
@@ -4782,6 +4835,8 @@ namespace PixelMidpointDisplacement
 
         //A null field as the collider is non-axis aligned
         public Rectangle collider { get; set; }
+
+        public double weaponDamage = 20;
 
         public double x { get; set; }
         public double y { get; set; }
@@ -4903,10 +4958,11 @@ namespace PixelMidpointDisplacement
 
         public void onCollision(ICollider externalCollider) {
             if (externalCollider is Entity e) {
-                e.velocityX = 21 * owner.playerDirection;
+                e.velocityX = 7 * owner.playerDirection;
                 e.velocityY += 7;
                 //Have to move the player up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
                 e.y -= 12;
+                e.applyDamage(owner, DamageType.EntityAttack, weaponDamage);
                 e.knockbackStunDuration = 0.5f;
                 ((ICollider)e).startInvincibilityFrames();
             }
@@ -5229,7 +5285,7 @@ namespace PixelMidpointDisplacement
         public bool hasSetWaitTimeOnce = false;
         public bool hasUsedItem = false;
 
-        public double jumpAcceleration = 12;
+        public double jumpAcceleration = 9;
         public CloudInAJar(AnimationController ac, Player owner) : base(owner) {
             spriteSheetID = (int)spriteSheetIDs.accessories;
             sourceRectangle = new Rectangle(0, 0, 16, 16);
@@ -5263,7 +5319,7 @@ namespace PixelMidpointDisplacement
                             if (owner.velocityY < 0) {
                                 owner.velocityY = 0;
                             }
-                            owner.accelerationY += 12 / elapsedTime;
+                            owner.accelerationY += jumpAcceleration / elapsedTime;
                         }
                     }
                 }
@@ -5901,6 +5957,8 @@ namespace PixelMidpointDisplacement
 
         List<LootTable> lootTables;
 
+        
+
         public ChestBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID) {
             maximumCooldown = 0.1f;
             isBlockTransparent = true;
@@ -5910,8 +5968,8 @@ namespace PixelMidpointDisplacement
             isBlockTransparent = true;
         }
 
-        public ChestBlock(Block b) : base(b) { }
-        public ChestBlock(int ID) : base(ID) { }
+        public ChestBlock(Block b) : base(b) { isBlockTransparent = true; }
+        public ChestBlock(int ID) : base(ID) { isBlockTransparent = true; }
         public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
         {
             base.onBlockPlaced(worldContext, location);

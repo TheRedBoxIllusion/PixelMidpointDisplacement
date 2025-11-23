@@ -14,4 +14,4 @@ Max emmissive strength: The maximum value that the light emmitted by the player 
 Horizontal acceleration: This is how much the player accelerates sideways when there is an input. In ms^-2																														(double)
 300
 Jump acceleration: How much acceleration the player produces when they jump																																						(double)
-12
+9
