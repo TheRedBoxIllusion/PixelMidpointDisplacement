@@ -28,14 +28,14 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
     Entity spawning:
         - Implement yMin and Max constraints
 
-    Enemy entity collisions:
+    Enemy entity collisions:                                                                          - Done
         - Damange from colliding (aka attacking)
         - Knockback
         - Passive colliders on enemies and active colliders on players and player controlled objects
 
         - Iframes!!
 
-    Improve physics engine:
+    Improve physics engine:                                                                           - Done
         - Implement surface friction
             -> direction and magnitude, if the acceleration is opposite to the direction of friction, subtract the two, otherwise do nothing
                 Eg. When walking, the frictional force is in the same direction as the player's motion: so don't do anything. But when they stop walking, the friction force swaps direction
@@ -44,6 +44,14 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
                 Ice has low friction and is hard to accelerate on
             -> Each physics update, the friction coefficient is reset to some baseline constant
                 -> This is the possible acceleration in the air
+
+    *Bug fix*
+    Entity death issues:
+            -> When an entity dies, it causes index overflow issues in the for loops.
+                    -> Physics calulations (due to fall damage)
+                    -> Collision detection
+
+            Perhaps causing collision functions to return a value that could cause an index check to occur?
  */
 
 /*
@@ -1962,7 +1970,6 @@ namespace PixelMidpointDisplacement
                 {
                     if (spawnableEntities[i].yMax > (int)Math.Floor((- w.screenSpaceOffset.y) / (double)w.pixelsPerBlock) - w.surfaceHeight[(int)Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock)] && spawnableEntities[i].yMin < (int)Math.Floor(-w.screenSpaceOffset.y / (double)w.pixelsPerBlock) - w.surfaceHeight[(int)Math.Floor(-w.screenSpaceOffset.x / (double)w.pixelsPerBlock)])
                     {
-                        System.Diagnostics.Debug.WriteLine("Was able to attempt to spawn an entity at: " + (Math.Floor((-w.screenSpaceOffset.y) / (double)w.pixelsPerBlock)));
                         if (currentBiomeEntityCount < maxBiomeEntityCount && spawnableEntities[i].currentSpecificEntityCount < spawnableEntities[i].maxSpecificEntityCount)
                         {
                             //Check to spawn the entity
@@ -3502,6 +3509,9 @@ namespace PixelMidpointDisplacement
         public double damage = 15;
         public double xDifferenceThreshold { get; set; }
 
+        //Each list of loot tables inside the list is exclusive. Only one of each loot table would be generated
+        List<List<(double percentage, LootTable)>> deathLootTables = new List<List<(double percentage, LootTable)>>();
+
         double horizontalAcceleration = 200;
         double jumpAcceleration = 12;
 
@@ -3568,6 +3578,25 @@ namespace PixelMidpointDisplacement
             spriteAnimator.startAnimation(0.1, "walk");
 
             wc.engineController.entityController.addEntity(this);
+        }
+
+        public virtual void generateDeathLoot() {
+            deathLootTables = new List<List<(double percentage, LootTable)>>()
+            {
+                //Primary loot tables
+                new List<(double percentage, LootTable)>(){
+                    (50, new LootTable(new List<(double percentage, int min, int max, Item item)>(){(100, 1, 1, new Bow(worldContext.animationController, worldContext.player))})),
+                    (50, new LootTable(new List<(double percentage, int min, int max, Item item)>(){ (100, 1, 1, new CloudInAJar(worldContext.animationController, worldContext.player))}))
+                },
+
+                //Secondary loot tables
+                new List<(double percentage, LootTable)>(){
+                    (100, new LootTable(new List<(double percentage, int min, int max, Item item)>(){
+                        (40, 30, 10, new BlockItem((int)blockIDs.torch, worldContext.animationController, worldContext.player)),
+                        (25, 20, 5, new BlockItem((int)blockIDs.grass, worldContext.animationController, worldContext.player))
+                    }))
+                }
+            };
         }
 
         public override void inputUpdate(double elapsedTime)
@@ -3681,7 +3710,34 @@ namespace PixelMidpointDisplacement
         {
             despawn();
             //Drop loot:
+            System.Diagnostics.Debug.WriteLine("Died?");
+            List<Item> loot = generateDroppedLoot();
+            Random r = new Random();
+            for (int i = 0; i < loot.Count; i++) {
+                new DroppedItem(worldContext, loot[i], (x,y), new Vector2((float)r.NextDouble() * 4f, (float)r.NextDouble() * 4f));
+            }
         }
+
+        public List<Item> generateDroppedLoot() {
+            Random r = new Random();
+            List<Item> generatedItems = new List<Item>();
+            for (int i = 0; i < deathLootTables.Count; i++) {
+                double cummulativePercentage = 0;
+                for (int l = 0; l < deathLootTables[i].Count; l++) {
+                    cummulativePercentage += deathLootTables[i][l].percentage;
+                    if (r.NextDouble() * 100 < cummulativePercentage) {
+                        //This loot table was chosen:
+                        foreach (Item item in deathLootTables[i][l].Item2.generateLootFromTable()) {
+                            generatedItems.Add(item);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            return generatedItems;
+        }
+
         public override Entity copyEntity(){
             return new ControlledEntity(worldContext, player);
         }
@@ -4580,22 +4636,33 @@ namespace PixelMidpointDisplacement
         }
     }
     
-    public class Arrow : Entity, IEmissive
+    public class Arrow : Entity, IEmissive, IActiveCollider
     {
         public Vector3 lightColor { get; set; }
         public float luminosity { get; set; }
         public float range { get; set; }
+        public Player owner { get; set; }
+        public bool isActive { get; set; }
+
+        public double weaponDamage = 10;
+
+        public double initialVelocity;
+
+        public double invincibilityCooldown { get; set; }
+        public double maxInvincibilityCooldown { get; set; }
         public RenderTarget2D shadowMap { get; set; }
         public RenderTarget2D lightMap { get; set; }
-        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity) : base(wc)
+        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity, Player shooter) : base(wc)
         {
             spriteSheet = wc.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.arrow];
             spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, new Vector2(16, 16), new Vector2(16, 16), new Rectangle(0, 0, 16, 16), this);
             spriteAnimator.sourceOffset = new Vector2(0f, 16f);
 
+            this.initialVelocity = initialVelocity;
+
             rotationOrigin = Vector2.Zero;
             directionalEffect = SpriteEffects.None;
-
+            isActive = true;
             drawHeight = 1;
             drawWidth = 1;
             width = 1;
@@ -4647,6 +4714,7 @@ namespace PixelMidpointDisplacement
             };
 
             worldContext.engineController.entityController.addEntity(this);
+            worldContext.engineController.collisionController.addActiveCollider(this);
             //spriteAnimator.startAnimation(1, "fly");
 
         }
@@ -4690,9 +4758,31 @@ namespace PixelMidpointDisplacement
             //Don't take fall damage
         }
 
+        public void onCollision(ICollider externalCollider) {
+            if (externalCollider is Entity e)
+            {
+                e.velocityX = velocityX / 2 ;
+                e.velocityY += 7;
+                //Have to move the entity up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
+                e.y -= 12;
+                e.applyDamage(owner, DamageType.EntityAttack, weaponDamage * (Math.Pow(Math.Pow(velocityX, 2) + Math.Pow(velocityY, 2), 0.5)/initialVelocity));
+                e.knockbackStunDuration = 0.5f;
+                ((ICollider)e).startInvincibilityFrames();
+
+                worldContext.engineController.entityController.removeEntity(this);
+                worldContext.physicsObjects.Remove(this);
+                worldContext.engineController.lightingSystem.lights.Remove(this);
+                worldContext.engineController.collisionController.removeActiveCollider(this);
+
+            }
+        }
+
         public override void hasCollided()
         {
             calculatePhysics = false;
+            velocityX = 0;
+            velocityY = 0;
+            worldContext.engineController.collisionController.removeActiveCollider(this);
             worldContext.engineController.lightingSystem.lights.Remove(this);
         }
     }
@@ -5008,7 +5098,7 @@ namespace PixelMidpointDisplacement
                     (Mouse.GetState().X > owner.x + owner.worldContext.screenSpaceOffset.x) { owner.playerDirection = 1; owner.directionalEffect = SpriteEffects.None; }
                 animationController.addAnimator(itemAnimator);
                 //Generate an arrow entity
-                Arrow firedArrow = new Arrow(owner.worldContext, (owner.x, owner.y), 30);
+                Arrow firedArrow = new Arrow(owner.worldContext, (owner.x, owner.y), 30, owner);
 
             }
         }
@@ -6044,30 +6134,26 @@ namespace PixelMidpointDisplacement
             Random r = new Random();
             //Pick loot table to generate from:
             int lootTableID = r.Next(lootTables.Count);
-            foreach((double percentage, int minItemCount, int maxItemCount, Item item) in lootTables[lootTableID].lootTable) {
-                //Determine if the item should be added to the chest
-                if (r.Next(100) < percentage)
+            lootTables[lootTableID].generateLootFromTable();
+            foreach (Item item in lootTables[lootTableID].generateLootFromTable())
+            {
+                //Add it to a random, empty slot in the chests inventory
+                bool foundASlot = false;
+                int maxAttempts = 20;
+                int attempts = 0;
+                while (!foundASlot && maxAttempts > attempts)
                 {
-                    //Pick the amount:
-                    int itemCount = r.Next(minItemCount, maxItemCount + 1);
-
-                    item.currentStackSize = itemCount;
-
-                    //Add it to a random, empty slot in the chests inventory
-                    bool foundASlot = false;
-                    int maxAttempts = 20;
-                    int attempts = 0;
-                    while (!foundASlot && maxAttempts > attempts) {
-                        int slotX = r.Next(inventory.GetLength(0));
-                        int slotY = r.Next(inventory.GetLength(1));
-                        if (inventory[slotX, slotY].item == null) {
-                            inventory[slotX, slotY].setItem(item);
-                            foundASlot = true;
-                        }
-                        attempts += 1;
+                    int slotX = r.Next(inventory.GetLength(0));
+                    int slotY = r.Next(inventory.GetLength(1));
+                    if (inventory[slotX, slotY].item == null)
+                    {
+                        inventory[slotX, slotY].setItem(item);
+                        foundASlot = true;
                     }
+                    attempts += 1;
                 }
             }
+            
         }
 
         public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
@@ -6106,6 +6192,25 @@ namespace PixelMidpointDisplacement
 
         public LootTable(List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)> lootTable) {
             this.lootTable = lootTable;
+        }
+
+        public List<Item> generateLootFromTable() {
+            List<Item> generatedLoot = new List<Item>();
+            Random r = new Random();
+            foreach ((double percentage, int minItemCount, int maxItemCount, Item item) in lootTable)
+            {
+                //Determine if the item should be added to the chest
+                if (r.Next(100) < percentage)
+                {
+                    //Pick the amount:
+                    int itemCount = r.Next(minItemCount, maxItemCount + 1);
+                    item.currentStackSize = itemCount;
+
+                    generatedLoot.Add(item);
+                }
+            }
+
+            return generatedLoot;
         }
     }
 
