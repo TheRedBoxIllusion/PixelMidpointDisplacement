@@ -8,6 +8,7 @@ using System.Collections.Generic;
 
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Security.Cryptography.X509Certificates;
 using Vector2 = Microsoft.Xna.Framework.Vector2;
 using Vector3 = Microsoft.Xna.Framework.Vector3;
@@ -16,7 +17,6 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * Things to do:
-    Make it so that closing your inventory closes all open inventories (chests mainly)
 
     Optimise the lighting system further:
         Reduce vertex count by extending adjacent faces, should very significantly reduce the vertex count in standard situations
@@ -25,7 +25,7 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
     Decrease entity cluttering:
         - Item entities despawn after a certain period of time
        
-    Entity spawning:
+    Entity spawning:                                                                                  - Done
         - Implement yMin and Max constraints
 
     Enemy entity collisions:                                                                          - Done
@@ -46,12 +46,43 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
                 -> This is the possible acceleration in the air
 
     *Bug fix*
-    Entity death issues:
+    Entity death issues:                                                                              - Temporarily Fixed, will need to redo
             -> When an entity dies, it causes index overflow issues in the for loops.
                     -> Physics calulations (due to fall damage)
                     -> Collision detection
 
             Perhaps causing collision functions to return a value that could cause an index check to occur?
+
+    Evolution:                                                                                        - Done
+        - Implement a new scene that pops up after the player dies / hits respawn                     
+        - Use InteractiveUI with a link to an evolution.                                              
+                -> ask the evolution tree to enable the evolution
+        - Order the evolution UI based on the size of each layer and automatically sort               
+        - Draw a line between an evolution and its dependencies                                       
+                -> Draw a line (somehow) between the icon's location ( plus height and 1/2 width) to the dependencies location (plus 1/2 width)
+                -> Because UI is currently only using sprites, do this in a seperate function in Game1
+                -> Because SpriteBatch can't natively draw lines, figure out how to draw a rectangle and rotate it to match at two points
+
+        - Add 'experience' and limit if an evolution can be activated 
+            -> Enum that indicates different 'fields' of experience
+            -> Each evolution has a list of (field, experience cost)
+                -> Changes if an evolution can be activeted, so more complex than just pre-requisits.
+
+
+    Biomes:
+        - Implement subterranian biomes                                                                                                               - In Progress
+            -> A secondary iteration after the initial biomes are generated
+                -> Each subterranian biome has a list of biomes that it can spawn in. If list is empty, spawns in any biome
+        - Have to incorporate height into spawning entities from biomes
+            -> Perhaps check the biome of 5 different spots on screen: top right, top left, bottom right, bottom left, centre and add them to a list of biomes to tick
+            -> Have to determine a better method of determining if a block is in a certain biome                                                       - Done but needs testing
+                -> Would it be easier for each block to contain a biome instance, so when a block is created, the biome that its in is passed in
+                    - This would still require identifying the biome 
+
+            -> Perhaps check each subterranian biome first: then check the surface biomes if the location is not contained in any subterranian biome   - Done
+                -> Two different lists in the world context?
+
+        Biomes are supposedly spawning, but theres no indication in the actual game.
  */
 
 /*
@@ -92,6 +123,7 @@ namespace PixelMidpointDisplacement
 
         Texture2D collisionSprite;
         Texture2D redTexture;
+        Texture2D lineTexture;
 
         Effect calculateLight;
         Effect combineLightAndColor;
@@ -187,6 +219,9 @@ namespace PixelMidpointDisplacement
 
             worldContext.engineController.lightingSystem.graphics = _graphics;
 
+            lineTexture = new Texture2D(GraphicsDevice, 1, 1);
+            lineTexture.SetData<Color>(new Color[] { Color.White});
+
             basicEffect.World = worldMatrix;
             basicEffect.View = viewMatrix;
             basicEffect.Projection = projectionMatrix;
@@ -213,6 +248,12 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\armourSpriteSheet.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\accessorySpriteSheet.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\pixelNumbers.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionBackground.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionIconsSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionCounterCharacters.png"));
+
+
+
 
 
             worldContext.engineController.spriteController.setSpriteSheetList(spriteSheetList);
@@ -259,11 +300,19 @@ namespace PixelMidpointDisplacement
             combineLightAndColor = Content.Load<Effect>("CombineLightAndColor");
         }
 
+        public void changeScene(Scene newScene) {
+            currentScene = newScene;
+
+            if (currentScene == Scene.Evolution) {
+                worldContext.engineController.evolutionController.updateExperienceCounters();
+            }
+        }
 
         protected override void Update(GameTime gameTime)
         {
             updateUI(gameTime);
             updateInteractiveUI(gameTime.ElapsedGameTime.TotalSeconds);
+            updateLines(gameTime);
 
             if (currentScene == Scene.Game)
             {
@@ -307,6 +356,7 @@ namespace PixelMidpointDisplacement
             }
             GraphicsDevice.SetRenderTarget(world);
             _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+            drawLines();
             drawUI();
             drawInteractiveUIString();
             _spriteBatch.End();
@@ -345,6 +395,13 @@ namespace PixelMidpointDisplacement
                         worldContext.engineController.UIController.InteractiveUI[i].clickCooldown -= (float)elapsedTime;
                     }
                 }
+            }
+        }
+
+        public void updateLines(GameTime gameTime) {
+            List<UILine> lines = worldContext.engineController.UIController.UILines;
+            for (int i = 0; i < lines.Count; i++) {
+                lines[i].updateLine();
             }
         }
         public bool checkUICollision(InteractiveUIElement uiElement) {
@@ -391,6 +448,17 @@ namespace PixelMidpointDisplacement
                     if (iue.isUIElementActive && iue.buttonText != null) {
                         _spriteBatch.DrawString(itemCountFont, iue.buttonText, iue.textLocation, Color.White);
                     }
+                }
+            }
+        }
+
+        public void drawLines() {
+            List<UILine> lines = worldContext.engineController.UIController.UILines;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (currentScene == lines[i].scene)
+                {
+                    _spriteBatch.Draw(lineTexture, lines[i].drawRectangle, new Rectangle(0, 0, 1, 1), lines[i].drawColor, lines[i].rotation, new Vector2(0, 0), SpriteEffects.None, 0);
                 }
             }
         }
@@ -466,6 +534,23 @@ namespace PixelMidpointDisplacement
                 }
             }
             else if(chat != null && chat != ""){
+                if (chat.StartsWith("/CLEAR")) {
+                    while (worldContext.physicsObjects.Count > 1) {
+                        worldContext.physicsObjects.RemoveAt(1);
+                    }
+                    while (worldContext.engineController.entityController.entities.Count > 1)
+                    {
+                        if (worldContext.engineController.entityController.entities[1] is IActiveCollider c) {
+                            worldContext.engineController.collisionController.removeActiveCollider(c);
+                        } else if (worldContext.engineController.entityController.entities[1] is IPassiveCollider p) {
+                            worldContext.engineController.collisionController.removePassiveCollider(p);
+                        }
+
+                            worldContext.engineController.entityController.entities.RemoveAt(1);
+                    }
+                    chat = "";
+                }
+
                 if (chat.StartsWith("/GIVE"))
                 {
                     if (chat.Contains("SWORD"))
@@ -614,16 +699,14 @@ namespace PixelMidpointDisplacement
                 bool foundABiomeThePlayerIsIn = false;
                 bool stopAttemptingToFindBiomes = false;
 
-                for (int i = 0; i < worldContext.worldBiomeList.Count; i++) {
+                for (int i = 0; i < worldContext.surfaceWorldBiomeList.Count; i++) {
                     //If the player is within a range of the current biome:
                     //If the player is between the start and the end of the biome
-                    //System.Diagnostics.Debug.WriteLine(cummulativebiomeBlockWidth * worldContext.pixelsPerBlock + " | " + (-worldContext.screenSpaceOffset.x - biomeLeniency));
-                    //System.Diagnostics.Debug.WriteLine((cummulativebiomeBlockWidth + worldContext.worldBiomeList[i].biomeDimensions.width) * worldContext.pixelsPerBlock + " | " + (-worldContext.screenSpaceOffset.x + worldContext.applicationWidth + biomeLeniency));
-                    //System.Diagnostics.Debug.WriteLine("");
-                    if (cummulativebiomeBlockWidth * worldContext.pixelsPerBlock < -worldContext.screenSpaceOffset.x + biomeLeniency && (cummulativebiomeBlockWidth + worldContext.worldBiomeList[i].biomeDimensions.width) * worldContext.pixelsPerBlock > -worldContext.screenSpaceOffset.x + worldContext.applicationWidth - biomeLeniency)
+                   
+                    if (cummulativebiomeBlockWidth * worldContext.pixelsPerBlock < -worldContext.screenSpaceOffset.x + biomeLeniency && (cummulativebiomeBlockWidth + worldContext.surfaceWorldBiomeList[i].biomeDimensions.width) * worldContext.pixelsPerBlock > -worldContext.screenSpaceOffset.x + worldContext.applicationWidth - biomeLeniency)
                     {
-                        currentBiome = worldContext.worldBiomeList[i];
-                        worldContext.worldBiomeList[i].tickBiome(worldContext);
+                        currentBiome = worldContext.surfaceWorldBiomeList[i];
+                        worldContext.surfaceWorldBiomeList[i].tickBiome(worldContext);
                         foundABiomeThePlayerIsIn = true;
                         stopAttemptingToFindBiomes = true;
                     }
@@ -637,7 +720,7 @@ namespace PixelMidpointDisplacement
                     }
 
 
-                        cummulativebiomeBlockWidth += worldContext.worldBiomeList[i].biomeDimensions.width;
+                        cummulativebiomeBlockWidth += worldContext.surfaceWorldBiomeList[i].biomeDimensions.width;
                 }
                 biomeTickSpeed = maxBiomeTickSpeed;
             }
@@ -1234,7 +1317,8 @@ namespace PixelMidpointDisplacement
 
         public Dictionary<(int x, int y), Block> exposedBlocks = new Dictionary<(int x, int y), Block>();//This list contains all the blocks that are exposed to air, and hence would cast shadows.
 
-        public List<Biome> worldBiomeList = new List<Biome>();
+        public List<Biome> surfaceWorldBiomeList = new List<Biome>();
+        public List<SubterraneanBiome> subterraneanWorldBiomeList = new List<SubterraneanBiome>();
         public int[,] lightArray { get; set; }
         public int pixelsPerBlock { get; set; } = 4; //Overwritten by the settings file
 
@@ -1305,7 +1389,7 @@ namespace PixelMidpointDisplacement
             surfaceHeight = worldGenerator.getSurfaceHeight();
             surfaceBlocks = worldGenerator.getSurfaceBlocks();
 
-            worldBiomeList = worldGenerator.biomeList;
+            surfaceWorldBiomeList = worldGenerator.biomeList;
 
             lightArray = engineController.lightingSystem.initialiseLight(worldDimensions, surfaceHeight);
             engineController.lightingSystem.generateSunlight(intWorldArray, surfaceHeight);
@@ -1429,8 +1513,37 @@ namespace PixelMidpointDisplacement
             }
         }
 
+        public Biome getBiomeFromBlockLocation(int x, int y) {
+            //Go through each subterrainean biome
+            for (int i = 0; i < subterraneanWorldBiomeList.Count; i++) {
+                bool withinX = false;
+                if (x >= subterraneanWorldBiomeList[i].x && x <= subterraneanWorldBiomeList[i].x + subterraneanWorldBiomeList[i].biomeDimensions.width) {
+                    withinX = true;
+                }
+                bool withinY = false;
+                if(y >= subterraneanWorldBiomeList[i].y && y <= subterraneanWorldBiomeList[i].y + subterraneanWorldBiomeList[i].biomeDimensions.height)
+                {
+                    withinY = true;
+                }
+
+                if (withinX && withinY) {
+                    return subterraneanWorldBiomeList[i];
+                }
+            }
+
+            //Presuming no biomes were found, then determine which surface biome:
+            int cummulativeLength = 0;
+            for (int i = 0; i < surfaceWorldBiomeList.Count; i++) {
+                if (x > cummulativeLength && x < cummulativeLength + surfaceWorldBiomeList[i].biomeDimensions.width) {
+                    return surfaceWorldBiomeList[i];
+                }
+            }
+
+            return null;
+        }
         public void setPlayer(Player player) {
             this.player = player;
+            engineController.evolutionController.setTree(player.evolutionTree);
         }
         public bool deleteBlock(int x, int y)
         {
@@ -1480,11 +1593,18 @@ namespace PixelMidpointDisplacement
         BlockGenerationVariables[,] brownianMotionArray;
 
         public List<Biome> biomeList = new List<Biome>();
+        public List<SubterraneanBiome> subterraneanBiomeList = new List<SubterraneanBiome>();
         List<Biome> biomeStencilList = new List<Biome>() {
             new MeadowBiome(),
             new MountainBiome(),
             new MountainBiome()
         };
+        List<SubterraneanBiome> subterraneanBiomeStencilList = new List<SubterraneanBiome>() {
+            new CaveBiome()
+        };
+
+        const int subterraneanBiomeSpawnAttempt = 15;
+
         int rightMountainRangeWidth = 0;
 
         int horizonLine = 900;
@@ -1543,6 +1663,7 @@ namespace PixelMidpointDisplacement
             perlinNoiseArray = new double[worldDimensions.width, worldDimensions.height];
             brownianMotionArray = new BlockGenerationVariables[worldDimensions.width, worldDimensions.height];
             worldArray = new int[worldDimensions.width, worldDimensions.height];
+
             backgroundArray = new int[worldDimensions.width, worldDimensions.height];
 
             surfaceHeight = new int[worldDimensions.width];
@@ -1556,6 +1677,8 @@ namespace PixelMidpointDisplacement
             perlinNoise(worldDimensions, noiseIterations, octaveWeights, frequency, vectorCount, vectorAngleOffset);
 
             generateBiomes(worldDimensions);
+
+            generateSubterraneanBiomes(worldDimensions);
 
             calculateSurfaceBlocks();
 
@@ -1598,6 +1721,55 @@ namespace PixelMidpointDisplacement
             }
 
             //To generate something on the right. Put it here
+        }
+
+        public void generateSubterraneanBiomes((int width, int height) worldDimensions) {
+            for (int i = 0; i < subterraneanBiomeStencilList.Count; i++)
+            {
+                System.Diagnostics.Debug.WriteLine("Twas a biome ");
+                for (int c = 0; c < subterraneanBiomeStencilList[i].biomesPerWorld; c++)
+                {
+                    System.Diagnostics.Debug.WriteLine(c + ", " + subterraneanBiomeSpawnAttempt);
+                    SubterraneanBiome biome = (SubterraneanBiome)subterraneanBiomeStencilList[i].generateBiomeCopy((0, 900), this, (0, 0), (0, 0));
+
+                    bool foundASpot = false;
+                    
+                    int attempts = 0;
+                    Random r = new Random();
+                    int biomeX = r.Next(0, worldDimensions.width);
+                    int biomeY = r.Next(biome.minY, biome.maxY);
+                    int externalBiomeIndex = 0;
+                    
+                    while (!foundASpot && attempts < subterraneanBiomeSpawnAttempt) {
+                        biomeX = r.Next(0, worldDimensions.width);
+                        biomeY = r.Next(surfaceHeight[biomeX] + biome.minY, surfaceHeight[biomeX] + biome.maxY);
+                        //Get the biome the x and y is in                        
+                        int cummulativeWidth = 0;
+                        for (int b = 0; b < biomeList.Count; b++) {
+                            if (biomeX > cummulativeWidth && biomeX < cummulativeWidth + biomeList[b].biomeDimensions.width) {
+                                System.Diagnostics.Debug.WriteLine(biomeList[b].GetType());
+                                if (biome.biomesThisCanSpawnIn.Contains(biomeList[b].GetType())) {
+                                    foundASpot = true;
+                                    externalBiomeIndex = b;
+                                    biome.setBiomeLocation(biomeX, biomeY);
+                                    System.Diagnostics.Debug.WriteLine(biomeList[b] + " " + biomeX + ", " + biomeY);
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    if (foundASpot)
+                    {
+                        subterraneanBiomeList.Add(biome);
+                        //biome.generateSurfaceTerrain();
+                        biome.generateOres();
+                        combineAlgorithmsSubterranean((biome.x, biome.y), subterraneanBiomeList.Count - 1, externalBiomeIndex);
+                        biome.generateBackground();
+                        biome.generateStructures();
+                    }
+                }
+            }
         }
         public int[] getSurfaceHeight() {
             return surfaceHeight;
@@ -1755,7 +1927,7 @@ namespace PixelMidpointDisplacement
                         worldArray[x, y] = 0;
 
                     }
-                    else if (biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y] != null && worldArray[x, y] == 1) //If the brownian motion defined it, and it's solid from the midpoint generation
+                    else if (biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y] != null && worldArray[x, y] != 0) //If the brownian motion defined it, and it's solid from the midpoint generation
                     {
                         worldArray[x, y] = biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y].block.ID;
                         if (worldArray[x, y] != 0)
@@ -1776,6 +1948,56 @@ namespace PixelMidpointDisplacement
         }
 
 
+        private void combineAlgorithmsSubterranean((int x, int y) biomeOffset, int biomeIndex, int externalBiomeIndex)
+        {
+            Biome biome = subterraneanBiomeList[biomeIndex];
+            int maxX = biomeOffset.x + biome.biomeDimensions.width;
+            int maxY = biomeOffset.y + biome.biomeDimensions.height;
+            if (maxX > worldArray.GetLength(0))
+            {
+                maxX = worldArray.GetLength(0);
+            }
+            if (maxY > worldArray.GetLength(1))
+            {
+                maxY = worldArray.GetLength(1);
+            }
+            for (int x = biomeOffset.x; x < maxX; x++)
+            {
+                for (int y = biomeOffset.y; y < maxY; y++)
+                {
+                    //Compute an averaged value of the noise threshold
+                    double threshold = biome.changeThresholdByDepth((x, y));
+                    //If the block is very close to the border, blend the threshold
+                    int blockBlendRange = 10;
+                    //Final - initial + initial. Calculate the threshold of the block not in the biome, but at the edgedw
+
+                    //Use old/current cave systems: Don't re-do the caves
+
+                    //if (x - biomeOffset.x < blockBlendRange || (biome.biomeDimensions.width - (x - biomeOffset.x) < blockBlendRange) || y - biomeOffset.y < blockBlendRange || (biome.biomeDimensions.height - (y - biomeOffset.y) < blockBlendRange)) { threshold = biomeList[externalBiomeIndex].changeThresholdByDepth((biomeOffset.x - 1, y)) + (x - biomeOffset.x) * (threshold - biomeList[externalBiomeIndex].changeThresholdByDepth((biomeOffset.x - 1, y))) / blockBlendRange; }
+                    /*if (perlinNoiseArray[x, y] > threshold)
+                    { //If it's above the block threshold, set the block to be air, 
+                        worldArray[x, y] = 0;
+
+                    }*/
+                    if (biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y] != null && worldArray[x, y] != 0) //If the brownian motion defined it, and it's solid from the midpoint generation
+                    {
+                        worldArray[x, y] = biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y].block.ID;
+                        if (worldArray[x, y] != 0)
+                        {
+                            if (surfaceHeight[x] == null || surfaceHeight[x] > y)
+                            {
+                                surfaceHeight[x] = y;
+                            }
+
+                        }
+                    }
+                    else
+                    {
+                        worldArray[x, y] = 0;
+                    }
+                }
+            }
+        }
 
     }
 
@@ -1816,7 +2038,7 @@ namespace PixelMidpointDisplacement
 
         public int backgroundBlockID;
 
-        (int x, int y) biomeOffset;
+        public (int x, int y) biomeOffset;
         (int width, int height) worldDimensions;
         public (int width, int height) biomeDimensions;
 
@@ -2051,6 +2273,39 @@ namespace PixelMidpointDisplacement
             return new Biome(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions);
         }
     }
+    public class SubterraneanBiome : Biome {
+        //A biome that exists only under the surface of the world
+
+
+        public int x;
+        public int y;
+
+        public int biomesPerWorld;
+
+        public List<Type> biomesThisCanSpawnIn = new List<Type>();
+
+        public int minY;
+        public int maxY;
+
+        public SubterraneanBiome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) : base(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions)
+        {
+            x = biomeOffset.x;
+            y = biomeOffset.y;
+        }
+
+        public SubterraneanBiome() { }
+
+        public void setBiomeLocation(int x, int y) {
+            this.x = x;
+            this.y = y;
+            biomeOffset.x = x;
+            biomeOffset.y = y;
+        }
+
+        public override Biome generateBiomeCopy((double, double) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int width, int height) biomeDimensions){
+            return new SubterraneanBiome(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions);
+        }
+    }
     public class MeadowBiome : Biome {
 
         public MeadowBiome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) : base(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions) {
@@ -2152,6 +2407,47 @@ namespace PixelMidpointDisplacement
         }
 
     }
+
+    public class CaveBiome : SubterraneanBiome {
+        
+        public CaveBiome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) : base(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions) {
+            ores = new BlockGenerationVariables[] {
+                new BlockGenerationVariables(1, new Block((int)blockIDs.stone), 8, 80),
+                new BlockGenerationVariables(0.1, new Block((int)blockIDs.dirt), 3, 10)
+            };
+
+            blockThresholdVariables = new List<BlockThresholdValues> {
+                new BlockThresholdValues(blockThreshold : 0.9, maximumY : 0, decreasePerY : 0.005, maximumThreshold : 0.9, minimumThreshold : 0.45, absoluteYHeightWeight : 0.3, relativeYHeightWeight : 0.7 ),
+                new BlockThresholdValues(blockThreshold : 0.48, maximumY : 400, decreasePerY : 0.001, maximumThreshold : 0.48, minimumThreshold : 0.4, absoluteYHeightWeight : 0, relativeYHeightWeight : 1)
+            };
+
+            biomesThisCanSpawnIn.Add(typeof(MeadowBiome));
+
+            biomesPerWorld = 5;
+            minY = 50;
+            maxY = 250;
+
+            backgroundBlockID = 1;
+
+            Random r = new Random();
+            this.biomeDimensions.width = r.Next(50, 100);
+            this.biomeDimensions.height = r.Next(50, 100);
+
+        }
+
+        public CaveBiome() {
+            biomesPerWorld = 5;
+            minY = 50;
+            maxY = 250;
+            biomesThisCanSpawnIn.Add(typeof(MeadowBiome));
+
+        }
+
+        public override Biome generateBiomeCopy((double, double) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int width, int height) biomeDimensions)
+        {
+            return new CaveBiome(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions);
+        }
+    }
     #endregion
     #region Structure Classes
     public class Structure {
@@ -2206,6 +2502,8 @@ namespace PixelMidpointDisplacement
                     }
                     lineToRead = sr.ReadLine();
                 }
+
+                sr.Close();
 
             }
             catch { }
@@ -2532,6 +2830,7 @@ namespace PixelMidpointDisplacement
         public EntityController entityController;
         public SpriteController spriteController;
         public UIController UIController;
+        public EvolutionUIController evolutionController;
 
         public WorldContext worldContext;
 
@@ -2544,6 +2843,7 @@ namespace PixelMidpointDisplacement
             entityController = new EntityController();
             spriteController = new SpriteController();
             UIController = new UIController();
+            evolutionController = new EvolutionUIController(wc);
         }
 
 
@@ -2564,15 +2864,19 @@ namespace PixelMidpointDisplacement
                 
                 for (int a = 0; a < activeColliders.Count; a++) {
                     for (int p = 0; p < passiveColliders.Count; p++) {
-                        if (activeColliders[a].isActive && passiveColliders[p].isActive) {
-                            
-                            if (activeColliders[a] is INonAxisAlignedActiveCollider n)
+                        if (a < activeColliders.Count && p < passiveColliders.Count)
+                        {
+                            if (activeColliders[a].isActive && passiveColliders[p].isActive)
                             {
-                                n.calculateCollision(passiveColliders[p]);
-                            }
-                            else
-                            {
-                                activeColliders[a].calculateCollision(passiveColliders[p]);
+
+                                if (activeColliders[a] is INonAxisAlignedActiveCollider n)
+                                {
+                                    n.calculateCollision(passiveColliders[p]);
+                                }
+                                else
+                                {
+                                    activeColliders[a].calculateCollision(passiveColliders[p]);
+                                }
                             }
                         }
                     }
@@ -2614,6 +2918,7 @@ namespace PixelMidpointDisplacement
     public class UIController {
         public List<(int drawOrder, UIElement uiElement)> UIElements = new List<(int drawOrder, UIElement uiElement)>();
         public List<InteractiveUIElement> InteractiveUI = new List<InteractiveUIElement>();
+        public List<UILine> UILines = new List<UILine>();
         public List<UIElement> inventoryBackgrounds = new List<UIElement>();
         public List<UIItem> inventorySlots = new List<UIItem>();
         public UIController() {
@@ -2658,6 +2963,9 @@ namespace PixelMidpointDisplacement
         public Position positionType;
         public Scale scaleType;
 
+        public const int defaultScreenWidth = 1920;
+        public const int defaultScreenHeight = 1080;
+
         public bool isUIElementActive = true;
         public Scene scene;
 
@@ -2672,6 +2980,58 @@ namespace PixelMidpointDisplacement
         public Vector2 textLocation;
         public virtual void onLeftClick(Game1 game) { }
         public virtual void onRightClick(Game1 game) { }
+    }
+
+    public class UILine {
+        public Vector2 point1;
+        public Vector2 point2;
+
+        public float rotation;
+        public Rectangle drawRectangle;
+
+        public Color drawColor;
+
+        public int lineWidth = 3;
+
+        public Scene scene;
+
+        public UILine(Vector2 point1, Vector2 point2)
+        {
+            this.point1 = point1;
+            this.point2 = point2;
+
+            drawRectangle = new Rectangle((int)point1.X, (int)point1.Y, lineWidth, 10);
+        }
+
+        public void updateSecondPoint(Vector2 secondPoint)
+        {
+            point2 = secondPoint;   
+        }
+
+        public void updateFirstPoint(Vector2 firstPoint) {
+            point1 = firstPoint;
+            drawRectangle.X = (int)point1.X - (int)(lineWidth / 2.0);
+            drawRectangle.Y = (int)point1.Y;
+        }
+
+        public virtual void updateLine() {
+
+
+            int distance = (int)Math.Pow(Math.Pow(point1.X - point2.X, 2) + Math.Pow(point1.Y - point2.Y, 2), 0.5);
+            drawRectangle.Height = distance;
+
+            //Rotation:
+            rotation = (float)Math.Atan((point1.Y - point2.Y) / (point1.X - point2.X));
+
+            if (point2.X > point1.X)
+            {
+                rotation -= MathHelper.PiOver2;
+            }
+            else
+            {
+                rotation += MathHelper.PiOver2;
+            }
+        }
     }
     public class MainMenuTitle : UIElement {
         public MainMenuTitle() {
@@ -2712,7 +3072,7 @@ namespace PixelMidpointDisplacement
             if (tickCount > 10) {
                 (int width, int height) worldDimensions = (800, 800);
                 game.worldContext.generateWorld(worldDimensions);
-                game.currentScene = Scene.Game;
+                game.changeScene(Scene.Game);
             }
         }
     }
@@ -2842,8 +3202,43 @@ namespace PixelMidpointDisplacement
         public override void onLeftClick(Game1 game)
         {
             player.respawn();
+            game.changeScene(Scene.Evolution);
             rs.isUIElementActive = false;
             isUIElementActive = false;
+        }
+    }
+
+    public class EndEvolutionButton : InteractiveUIElement {
+
+        double mouseMovementCoefficient = 0.027;
+        public EndEvolutionButton()
+        {
+            spriteSheetID = (int)spriteSheetIDs.deathScreen;
+            sourceRectangle = new Rectangle(177, 74, 40, 12);
+            drawRectangle = new Rectangle(885, 900, 200, 60);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            scene = Scene.Evolution;
+            isUIElementActive = true;
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
+            {
+                drawRectangle.X = 885 + (int)(mouseMovementCoefficient * Mouse.GetState().X);
+            }
+
+            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
+            {
+                drawRectangle.Y = 900 + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
+            }
+        }
+
+        public override void onLeftClick(Game1 game)
+        {
+            game.changeScene(Scene.Game);
         }
     }
 
@@ -2890,8 +3285,324 @@ namespace PixelMidpointDisplacement
             }
         }
     }
-    
+
+    public class EvolutionStarBackground : UIElement {
+
+        public double mouseMovementCoefficient;
+
+
+        int startXOffset = 1920;
+        int startYOffset = 1080;
+
+        int sourceY = 0;
+        int sourceX = 0;
+        
+        public EvolutionStarBackground()
+        {
+            spriteSheetID = (int)spriteSheetIDs.evolutionBackground;
+            sourceRectangle = new Rectangle(0, 0, 960, 540);
+            drawRectangle = new Rectangle(0, 0, 1920, 1080);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Relative;
+            scene = Scene.Evolution;
+            isUIElementActive = true;
+
+
+            mouseMovementCoefficient = 1;
+        }
+
+        public void setSourceLocation(int x, int y) {
+            
+            sourceY = y;
+            sourceX = x;
+        }
+
+        public void zeroStartingOffset()
+        {
+            startXOffset = 0;
+            startYOffset = 0;
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game) {
+            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width) {
+                sourceRectangle.X = sourceX + (int)(startXOffset * mouseMovementCoefficient) - (int)(mouseMovementCoefficient * Mouse.GetState().X);
+            }
+
+            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
+            {
+                sourceRectangle.Y = sourceY + (int)(startYOffset * mouseMovementCoefficient)- (int)(mouseMovementCoefficient * Mouse.GetState().Y);
+            }
+        }
+    }
+
+    public class EvolutionButton : InteractiveUIElement {
+        double mouseMovementCoefficient = 0.027;
+
+        const int iconWidth = 15;
+
+        const int heightBetweenLayers = 75;
+
+        int defaultX;
+        int defaultY;
+
+        const int heightOffset = 200;
+
+        public Evolution ownerEvolution;
+
+        bool isClicked = false;
+        public EvolutionButton(Evolution owner)
+        {
+            spriteSheetID = (int)spriteSheetIDs.evolutionIcons;
+            sourceRectangle = new Rectangle(0, owner.iconSourceY, 15, 15);
+            //Adjust the draw location based on the location within the tree
+            drawRectangle = new Rectangle(50, 50, 45, 45);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            scene = Scene.Evolution;
+            isUIElementActive = true;
+
+            ownerEvolution = owner;
+        }
+
+        public void setSourceLocation(int x, int y) {
+            sourceRectangle.X = x;
+            sourceRectangle.Y = y;
+        }
+
+        public void setLocationFromTree() {
+            //Set the x and y location on screen based on the tree layer
+            int evolutionsInLayer = ownerEvolution.tree.evolutionTree[ownerEvolution.treeLayer].evolutionLayer.Count;
+            defaultX = (ownerEvolution.indexWithinLayer + 1) * (defaultScreenWidth / (evolutionsInLayer + 1));
+            defaultY = defaultScreenHeight - ((ownerEvolution.treeLayer + 1) * heightBetweenLayers + heightOffset);
+            System.Diagnostics.Debug.WriteLine(drawRectangle.X + ", " + drawRectangle.Y);
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
+            {
+                drawRectangle.X = defaultX + (int)(mouseMovementCoefficient * Mouse.GetState().X);
+            }
+
+            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
+            {
+                drawRectangle.Y = defaultY + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
+            }
+
+            if (ownerEvolution.isEvolutionActive)
+            {
+                sourceRectangle.X = 3 * iconWidth;
+            }
+            else if (!ownerEvolution.canBeActivated)
+            {
+                if (isClicked)
+                {
+                    sourceRectangle.X = iconWidth;
+                }
+                else
+                {
+                    sourceRectangle.X = 0;
+                }
+            }
+            else {
+                sourceRectangle.X = 2 * iconWidth;
+            }
+
+                isClicked = false;
+        }
+
+        public override void onLeftClick(Game1 game)
+        {
+            isClicked = true;
+            ownerEvolution.requestActivation();
+        }
+    }
+
+    public class EvolutionDependencyLine : UILine {
+        EvolutionButton evolution;
+        EvolutionButton dependencyEvolution;
+        public EvolutionDependencyLine(EvolutionButton evolution, EvolutionButton dependency, Vector2 point1, Vector2 point2) : base(point1, point2) {
+            this.evolution = evolution;
+            dependencyEvolution = dependency;
+
+            scene = Scene.Evolution;
+
+            point1 = new Vector2(evolution.drawRectangle.X + evolution.drawRectangle.Width/2, evolution.drawRectangle.Y + evolution.drawRectangle.Height);
+            point2 = new Vector2(dependencyEvolution.drawRectangle.X + dependencyEvolution.drawRectangle.Width / 2, dependencyEvolution.drawRectangle.Y + dependencyEvolution.drawRectangle.Height);
+
+        }
+
+        public override void updateLine()
+        {
+            
+            point1 = new Vector2(evolution.drawRectangle.X + evolution.drawRectangle.Width / 2, evolution.drawRectangle.Y + evolution.drawRectangle.Height);
+            
+            point2 = new Vector2(dependencyEvolution.drawRectangle.X + dependencyEvolution.drawRectangle.Width / 2, dependencyEvolution.drawRectangle.Y);
+
+            drawRectangle.X = (int)point1.X;
+            drawRectangle.Y = (int)point1.Y;
+
+
+            if (dependencyEvolution.ownerEvolution.isEvolutionActive)
+            {
+                drawColor = Color.White;
+            }
+            else {
+                drawColor = new Color(50, 50, 50);
+            }
+                base.updateLine();
+        }
+    }
+
+    public class ExperienceStringCharacter : UIElement {
+        const int characterSizeInPixels = 6;
+
+        double mouseMovementCoefficient = 0.027;
+
+        int defaultX;
+        int defaultY;
+        public ExperienceStringCharacter(int character, int x, int y) {
+            spriteSheetID = (int)spriteSheetIDs.evolutionCounterCharacters;
+            sourceRectangle = new Rectangle(character * characterSizeInPixels, 0, 5, 7);
+            drawRectangle = new Rectangle(x, y, 10, 14);
+            defaultX = x;
+            defaultY = y;
+            scene = Scene.Evolution;
+            alignment = UIAlignOffset.TopLeft;
+            scaleType = Scale.Relative;
+            positionType = Position.Relative;
+
+            isUIElementActive = true;
+
+
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
+            {
+                drawRectangle.X = defaultX + (int)(mouseMovementCoefficient * Mouse.GetState().X);
+            }
+
+            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
+            {
+                drawRectangle.Y = defaultY + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
+            }
+        }
+        }
+
+    public class ExperienceCounter{
+        public List<ExperienceStringCharacter> stringCharacters = new List<ExperienceStringCharacter>();
+        const int stringDrawLayer = 14;
+        public WorldContext worldContext;
+
+        public string stringNumber;
+
+        int x;
+        int y;
+
+        const int characterSizeInPixels = 10;
+        public ExperienceCounter(WorldContext wc, int x, int y) {
+            worldContext = wc;
+            this.x = x;
+            this.y = y;
+        }
+        public void updateString(string newString) {
+            while(stringCharacters.Count > 0) {
+                worldContext.engineController.UIController.UIElements.Remove((stringDrawLayer, stringCharacters[0]));
+                stringCharacters.RemoveAt(0);
+            }
+
+
+            stringNumber = newString;
+
+            //for each character of the string:
+            for (int i = 0; i < newString.Length; i++) {
+                string character = newString[i].ToString();
+                ExperienceStringCharacter esc = new ExperienceStringCharacter(Convert.ToInt32(character), x + i * characterSizeInPixels, y);
+                stringCharacters.Add(esc);
+                worldContext.engineController.UIController.UIElements.Add((stringDrawLayer, esc));
+            }
+        }
+    }
     #endregion
+
+    public class EvolutionUIController {
+        WorldContext worldContext;
+        EvolutionTree tree;
+
+        List<(ExperienceField field, ExperienceCounter counter)> experienceCounters = new List<(ExperienceField field, ExperienceCounter counter)>();
+        public EvolutionUIController(WorldContext wc) {
+            worldContext = wc;
+            EvolutionStarBackground eb1 = new EvolutionStarBackground();
+            eb1.mouseMovementCoefficient = 0.01;
+            wc.engineController.UIController.UIElements.Add((1, eb1));
+
+            EvolutionStarBackground eb2 = new EvolutionStarBackground();
+            eb2.mouseMovementCoefficient = 0.005;
+            eb2.setSourceLocation(0, 1080);
+            wc.engineController.UIController.UIElements.Add((2, eb2));
+
+            EndEvolutionButton eeb = new EndEvolutionButton();
+            wc.engineController.UIController.UIElements.Add((18, eeb));
+            wc.engineController.UIController.InteractiveUI.Add(eeb);
+
+            /*EvolutionStarBackground eb3 = new EvolutionStarBackground();
+            eb3.mouseMovementCoefficient = 0;
+            eb3.setSourceLocation(1920, 0);
+            eb3.zeroStartingOffset();
+            wc.engineController.UIController.UIElements.Add((0, eb3));*/
+
+            //Add a counter for each experienceField
+            experienceCounters.Add((ExperienceField.Knowledge, new ExperienceCounter(worldContext, 50, 400)));
+            experienceCounters.Add((ExperienceField.Durability, new ExperienceCounter(worldContext, 50, 450)));
+            experienceCounters.Add((ExperienceField.Maneuverability, new ExperienceCounter(worldContext, 50, 500)));
+            experienceCounters.Add((ExperienceField.Damage, new ExperienceCounter(worldContext, 50, 550)));
+
+
+        }
+
+        public void setTree(EvolutionTree tree) {
+            this.tree = tree;
+        }
+
+        public void setupPlayerEvolutionUI(EvolutionTree e) {
+            List<EvolutionButton> previousLayerButtons = new List<EvolutionButton>();
+
+            for (int x = 0; x < e.evolutionTree.Count; x++) {
+                List<EvolutionButton> currentLayerButtons = new List<EvolutionButton>();
+
+                for (int y = 0; y < e.evolutionTree[x].evolutionLayer.Count; y++) {
+                    Evolution ev = e.evolutionTree[x].evolutionLayer[y].evolution;
+
+                    EvolutionButton evolutionButton = new EvolutionButton(ev);
+                    currentLayerButtons.Add(evolutionButton);
+                    evolutionButton.setLocationFromTree();
+                    worldContext.engineController.UIController.UIElements.Add((15, evolutionButton));
+                    worldContext.engineController.UIController.InteractiveUI.Add(evolutionButton);
+
+                    if (x > 0) {
+                        List<int> dependencies = e.evolutionTree[x].evolutionLayer[y].prerequisiteEvolutions;
+                        for (int i = 0; i < dependencies.Count; i++)
+                        {
+                            EvolutionDependencyLine el = new EvolutionDependencyLine(evolutionButton, previousLayerButtons[dependencies[i]], Vector2.Zero, Vector2.Zero);
+                            worldContext.engineController.UIController.UILines.Add(el);
+                        }
+                    }
+                }
+                previousLayerButtons = currentLayerButtons;
+            }
+        }
+
+        public void updateExperienceCounters() {
+            for (int i = 0; i < experienceCounters.Count; i++) {
+                experienceCounters[i].counter.updateString(((int)tree.getExperience(experienceCounters[i].field)).ToString());
+                System.Diagnostics.Debug.WriteLine(experienceCounters[i].field + " : " + experienceCounters[i].counter.stringNumber);
+            }
+        }
+    }
     public class SpriteController {
         public Texture2D blockSpriteSheet;
         public Texture2D weaponSpriteSheet;
@@ -2906,21 +3617,6 @@ namespace PixelMidpointDisplacement
             spriteSheetList = spriteSheets;
 
         }
-    }
-    public enum spriteSheetIDs {
-        blocks,
-        weapons,
-        blockItems,
-        player,
-        arrow,
-        mainMenuUI,
-        blockBackground,
-        inventoryUI,
-        healthUI,
-        deathScreen,
-        armour,
-        accessories,
-        pixelNumbers
     }
     public class MidpointDisplacementAlgorithm
     {
@@ -3297,6 +3993,7 @@ namespace PixelMidpointDisplacement
         public double minVelocityY { get; set; }
 
         public double maxMovementVelocityX { get; set; }
+        public double baseMaxMovementVelocityX { get; set; }
 
         public Rectangle collider { get; set; }
 
@@ -3360,6 +4057,30 @@ namespace PixelMidpointDisplacement
         public Vector2 rotationOrigin;
         public SpriteEffects directionalEffect;
 
+        //Have to add Lists of listeners to certain events
+        public List<IEntityActionListener> damageListeners = new List<IEntityActionListener>();
+        public List<IEntityActionListener> inputListeners = new List<IEntityActionListener>();
+        public List<IEntityActionListener> entityCollisionListeners = new List<IEntityActionListener>();
+        public List<IEntityActionListener> blockCollisionListeners = new List<IEntityActionListener>();
+
+
+        public double horizontalAccelerationIncreasePerExperience;
+        public double maxSpeedIncreasePerExperience;
+        public double verticalAccelerationIncreasePerExperience;
+
+        public double healthIncreasePerExperience;
+        public double toughnessIncreasePerExperience;
+
+        public double experienceGainIncreasePerExperience;
+
+        public double damageIncreasePerExperience;
+
+        public double baseEntityDamageMultiplier = 1;
+        public double entityDamageMultiplier;
+
+        public double baseExperienceMultiplier = 1;
+        public double experienceMultiplier;
+
         public double knockbackStunDuration;
 
         //The entities current health at a point in time
@@ -3368,6 +4089,15 @@ namespace PixelMidpointDisplacement
         public double baseHealth;
         //The entities max health after equipment is applied
         public double maxHealth;
+
+        //Variables for motion
+        public double baseHorizontalAcceleration;
+        public double horizontalAcceleration;
+
+        public double baseJumpAcceleration;
+        public double jumpAcceleration;
+
+
 
         public Entity(WorldContext wc) : base(wc) {
             worldContext = wc;
@@ -3379,11 +4109,19 @@ namespace PixelMidpointDisplacement
             spriteAnimator.spriteSheet = spriteSheet;
         }
         public virtual void inputUpdate(double elapsedTime)
-        { }
+        {
+            for (int i = 0; i < inputListeners.Count; i++) {
+                inputListeners[i].onInput(elapsedTime);
+            }
+
+            
+        }
 
         public override void onBlockCollision(Vector2 collisionNormal, WorldContext worldContext, int blockX, int blockY)
         {
-
+            for (int i = 0; i < blockCollisionListeners.Count; i++) {
+                blockCollisionListeners[i].onBlockCollision();
+            }
             if (!worldContext.worldArray[blockX, blockY].isBlockTransparent)
             {
                 //If the collision is upwards acting
@@ -3399,6 +4137,9 @@ namespace PixelMidpointDisplacement
 
         }
         public virtual void applyDamage(object attacker, DamageType damageType, double damage) {
+            for (int i = 0; i < damageListeners.Count; i++) {
+                damage = damageListeners[i].onDamage(attacker, damageType, damage);
+            }
             currentHealth -= damage;
             //Create a damage uielement
             string integerDamageAsAString = ((int)damage).ToString();
@@ -3410,16 +4151,19 @@ namespace PixelMidpointDisplacement
             }
 
             if (currentHealth <= 0) {
-                onDeath();
+                onDeath(attacker, damageType, damage);
             }
         }
+
 
         //Currently depricated
         public virtual void applyEffect() { }
 
-        public virtual void onDeath() {
+        public virtual void onDeath(object attacker, DamageType damageType, double damageThatKilled) {
             
         }
+
+        
 
         public virtual Entity copyEntity() {
             return new Entity(worldContext);
@@ -3510,10 +4254,8 @@ namespace PixelMidpointDisplacement
         public double xDifferenceThreshold { get; set; }
 
         //Each list of loot tables inside the list is exclusive. Only one of each loot table would be generated
-        List<List<(double percentage, LootTable)>> deathLootTables = new List<List<(double percentage, LootTable)>>();
-
-        double horizontalAcceleration = 200;
-        double jumpAcceleration = 12;
+        LootTable entityDropLoot = new LootTable();
+        
 
         Player player;
 
@@ -3549,6 +4291,9 @@ namespace PixelMidpointDisplacement
             width = 0.8;
             height = 2.7;
 
+            baseHorizontalAcceleration = 200;
+            baseJumpAcceleration = 12;
+
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
 
             drawWidth = 1.5f;
@@ -3563,6 +4308,8 @@ namespace PixelMidpointDisplacement
 
             worldContext.engineController.collisionController.addPassiveCollider(this);
             isActive = true;
+
+            generateLootTable();
 
 
             spriteAnimator = new SpriteAnimator(animationController: worldContext.animationController, constantOffset: new Vector2(12f, 8f), frameOffset: new Vector2(32, 65), sourceDimensions: new Vector2((float)32, (float)64), animationlessSourceRect: new Rectangle(160, 0, (int)32, (int)64), owner: this);
@@ -3580,23 +4327,26 @@ namespace PixelMidpointDisplacement
             wc.engineController.entityController.addEntity(this);
         }
 
-        public virtual void generateDeathLoot() {
-            deathLootTables = new List<List<(double percentage, LootTable)>>()
-            {
-                //Primary loot tables
-                new List<(double percentage, LootTable)>(){
-                    (50, new LootTable(new List<(double percentage, int min, int max, Item item)>(){(100, 1, 1, new Bow(worldContext.animationController, worldContext.player))})),
-                    (50, new LootTable(new List<(double percentage, int min, int max, Item item)>(){ (100, 1, 1, new CloudInAJar(worldContext.animationController, worldContext.player))}))
-                },
+        public virtual void generateLootTable()
+        {
+            //Primary loot tables
+
+            entityDropLoot.addLootTable(
+                new List<(double percentage, IndividualLootTable)>() {
+                    (50, new IndividualLootTable(new List<(double percentage, int min, int max, Item item)>() { (100, 1, 1, new Bow(worldContext.animationController, worldContext.player)) })),
+                    (50, new IndividualLootTable(new List<(double percentage, int min, int max, Item item)>() { (100, 1, 1, new CloudInAJar(worldContext.animationController, worldContext.player)) }))
+                }
+            );
 
                 //Secondary loot tables
-                new List<(double percentage, LootTable)>(){
-                    (100, new LootTable(new List<(double percentage, int min, int max, Item item)>(){
-                        (40, 30, 10, new BlockItem((int)blockIDs.torch, worldContext.animationController, worldContext.player)),
-                        (25, 20, 5, new BlockItem((int)blockIDs.grass, worldContext.animationController, worldContext.player))
+            entityDropLoot.addLootTable(
+                new List<(double percentage, IndividualLootTable)>(){
+                    (100, new IndividualLootTable(new List<(double percentage, int min, int max, Item item)>(){
+                        (40, 10, 30, new BlockItem((int)blockIDs.torch, worldContext.animationController, worldContext.player)),
+                        (25, 5, 20, new BlockItem((int)blockIDs.grass, worldContext.animationController, worldContext.player))
                     }))
                 }
-            };
+            );
         }
 
         public override void inputUpdate(double elapsedTime)
@@ -3626,9 +4376,9 @@ namespace PixelMidpointDisplacement
                 if (velocityX < maxMovementVelocityX)
                 {
                     //The or is not on ground is there to allow air control for QOL
-                    if (horizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
+                    if (baseHorizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
                     {
-                        accelerationX += horizontalAcceleration;
+                        accelerationX += baseHorizontalAcceleration;
                         frictionDirection += 1;
                     }
                     else
@@ -3655,9 +4405,9 @@ namespace PixelMidpointDisplacement
                 if (velocityX >  -maxMovementVelocityX)
                 {
                     //The or is not on ground is there to allow air control for QOL
-                    if (horizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
+                    if (baseHorizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
                     {
-                        accelerationX -= horizontalAcceleration;
+                        accelerationX -= baseHorizontalAcceleration;
                         frictionDirection -= 1;
                     }
                     else
@@ -3685,7 +4435,7 @@ namespace PixelMidpointDisplacement
             {
                 if (isOnGround)
                 {
-                    accelerationY += jumpAcceleration / elapsedTime;
+                    accelerationY += baseJumpAcceleration / elapsedTime;
                 }
             }
 
@@ -3706,36 +4456,16 @@ namespace PixelMidpointDisplacement
             worldContext.engineController.collisionController.removePassiveCollider(this);
         }
 
-        public override void onDeath()
+        public override void onDeath(object attacker, DamageType damageType, double damageThatKilled)
         {
-            despawn();
             //Drop loot:
-            System.Diagnostics.Debug.WriteLine("Died?");
-            List<Item> loot = generateDroppedLoot();
+            List<Item> loot = entityDropLoot.generateLoot();
             Random r = new Random();
             for (int i = 0; i < loot.Count; i++) {
                 new DroppedItem(worldContext, loot[i], (x,y), new Vector2((float)r.NextDouble() * 4f, (float)r.NextDouble() * 4f));
             }
-        }
 
-        public List<Item> generateDroppedLoot() {
-            Random r = new Random();
-            List<Item> generatedItems = new List<Item>();
-            for (int i = 0; i < deathLootTables.Count; i++) {
-                double cummulativePercentage = 0;
-                for (int l = 0; l < deathLootTables[i].Count; l++) {
-                    cummulativePercentage += deathLootTables[i][l].percentage;
-                    if (r.NextDouble() * 100 < cummulativePercentage) {
-                        //This loot table was chosen:
-                        foreach (Item item in deathLootTables[i][l].Item2.generateLootFromTable()) {
-                            generatedItems.Add(item);
-                        }
-                        break;
-                    }
-                }
-            }
-
-            return generatedItems;
+            despawn();
         }
 
         public override Entity copyEntity(){
@@ -3746,6 +4476,7 @@ namespace PixelMidpointDisplacement
             if (externalCollider is Player p) {
                 p.velocityX = 7 * playerDirection;
                 p.velocityY += 7;
+
                 //Have to move the player up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
                 p.y -= 12;
                 p.applyDamage(this, DamageType.EntityAttack, damage);
@@ -3774,6 +4505,8 @@ namespace PixelMidpointDisplacement
         public Hotbar hotbar = new Hotbar();
         public HotbarSelected hotbarSelected = new HotbarSelected();
 
+        public List<IInventory> activeInventories = new List<IInventory>();
+
         public UIElement inventoryBackground { get; set; }
         public UIElement equipmentBackground;
 
@@ -3784,9 +4517,6 @@ namespace PixelMidpointDisplacement
 
         int initialX = 10;
         int initialY = 10;
-
-        double horizontalAcceleration = 4; //The acceleration in m/s^-2
-        double jumpAcceleration = 12;
 
         public Item mainHand;
         public int mainHandIndex;
@@ -3802,6 +4532,8 @@ namespace PixelMidpointDisplacement
         RespawnScreen rs;
         RespawnButton rb;
 
+        public EvolutionTree evolutionTree;
+
         public Player(WorldContext wc) : base(wc)
         {
             loadSettings();
@@ -3814,6 +4546,7 @@ namespace PixelMidpointDisplacement
             maxInvincibilityCooldown = 0.5;
 
             maxMovementVelocityX = 8;
+            baseMaxMovementVelocityX = 8;
 
             objectCoefficientOfFriction = 0;
 
@@ -3821,6 +4554,9 @@ namespace PixelMidpointDisplacement
 
             drawWidth = 1.5f;
             drawHeight = 3;
+
+            baseEntityDamageMultiplier = 1;
+            entityDamageMultiplier = 1;
 
             rotation = 0;
             rotationOrigin = Vector2.Zero;
@@ -3841,6 +4577,8 @@ namespace PixelMidpointDisplacement
 
             lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
 
+            initialiseEvolutionTree();
+
             //Add a second system 
             //Initialise inventory
             int inventoryWidth = 9;
@@ -3850,7 +4588,7 @@ namespace PixelMidpointDisplacement
 
             inventory[0, 0].setItem(new Pickaxe(worldContext.animationController, this));
 
-            inventory[1, 0].setItem(new BlockItem((int)blockIDs.torch, worldContext.animationController, this));
+            inventory[1, 0].setItem(new BlockItem((int)blockIDs.stone, worldContext.animationController, this));
             if (inventory[1, 0].item is BlockItem b3)
             {
                 b3.currentStackSize = 99;
@@ -3869,6 +4607,9 @@ namespace PixelMidpointDisplacement
             };
 
             wc.engineController.entityController.addEntity(this);
+
+
+            initialiseStatGainPerExperience();
 
             showInventory();
             hideInventory();
@@ -3892,11 +4633,57 @@ namespace PixelMidpointDisplacement
             sr.ReadLine();
             emmissiveMax = Convert.ToInt32(sr.ReadLine());
             sr.ReadLine();
-            horizontalAcceleration = Convert.ToDouble(sr.ReadLine());
+            baseHorizontalAcceleration = Convert.ToDouble(sr.ReadLine());
             sr.ReadLine();
-            jumpAcceleration = Convert.ToDouble(sr.ReadLine());
+            baseJumpAcceleration = Convert.ToDouble(sr.ReadLine());
         }
 
+        public void initialiseEvolutionTree() {
+            evolutionTree = new EvolutionTree(this);
+            List<EvolutionButton> buttons = new List<EvolutionButton>();
+
+            EvolutionTreeLayer e1 = new EvolutionTreeLayer();
+            JumpEvolution jumpEvolution = new JumpEvolution(evolutionTree, 0,0);
+            
+            
+            e1.evolutionLayer.Add((jumpEvolution, new List<int>() {0}));
+
+            EvolutionTreeLayer e2 = new EvolutionTreeLayer();
+            DoubleJumpEvolution doublejumpEvolution = new DoubleJumpEvolution(evolutionTree, 1, 0);
+            JumpEvolution jumpEvolution2 = new JumpEvolution(evolutionTree, 1, 1);
+
+
+            e2.evolutionLayer.Add((doublejumpEvolution, new List<int>() { 0 }));
+            e2.evolutionLayer.Add((jumpEvolution2, new List<int>() { 0 }));
+
+
+
+            evolutionTree.addEvolutionTreeLayer(e1);
+            evolutionTree.addEvolutionTreeLayer(e2);
+
+            worldContext.engineController.evolutionController.setupPlayerEvolutionUI(evolutionTree);
+
+           
+        }
+
+        public void initialiseStatGainPerExperience() {
+            //For every experience, 1 percent increase
+            experienceGainIncreasePerExperience = 0.01;
+
+            //For every experience, gain 1 health
+            healthIncreasePerExperience = 1;
+
+            toughnessIncreasePerExperience = 0.01;
+
+            damageIncreasePerExperience = 0.1;
+            
+
+            horizontalAccelerationIncreasePerExperience = 3;
+            verticalAccelerationIncreasePerExperience = 0.1;
+
+            maxSpeedIncreasePerExperience = 0.05;
+
+        }
         public void initialiseInventory(WorldContext worldContext, int inventoryWidth, int inventoryHeight)
         {
             inventory = new UIItem[inventoryWidth, inventoryHeight];
@@ -3977,7 +4764,7 @@ namespace PixelMidpointDisplacement
                     }
                 }
                 inventoryBackground.isUIElementActive = false;
-                
+
                 for (int x = 0; x < equipmentInventory.GetLength(0); x++) {
                     for (int y = 0; y < equipmentInventory.GetLength(1); y++) {
                         equipmentInventory[x, y].isUIElementActive = false;
@@ -3986,9 +4773,13 @@ namespace PixelMidpointDisplacement
                 equipmentBackground.isUIElementActive = false;
                 selectedItem.dropItem();
             }
-        }
 
-        
+            for (int i = 0; i < activeInventories.Count; i++)
+            {
+                activeInventories[i].hideInventory();
+            }
+            activeInventories.Clear();
+        }
         public bool addItemToInventory(Item item) {
             bool foundASlot = false;
             //Check for any stacks to add the item to
@@ -4026,7 +4817,9 @@ namespace PixelMidpointDisplacement
             return foundASlot;
         }
         public override void inputUpdate(double elapsedTime) {
+            base.inputUpdate(elapsedTime);
 
+            increaseVariablesBasedOnExperience();
             if (!writeToChat)
             {
                 if (currentHealth > 0)
@@ -4305,6 +5098,25 @@ namespace PixelMidpointDisplacement
             }
         }
 
+        public void increaseVariablesBasedOnExperience() {
+            //Incorporate adjusting all the base values depending on the experience:
+            
+            //Durability:
+            maxHealth = baseHealth + healthIncreasePerExperience * evolutionTree.getExperience(ExperienceField.Durability);
+
+            //Damage
+            entityDamageMultiplier = baseEntityDamageMultiplier + damageIncreasePerExperience * evolutionTree.getExperience(ExperienceField.Damage);
+
+            //Maneuverability
+            horizontalAcceleration = baseHorizontalAcceleration + horizontalAccelerationIncreasePerExperience * evolutionTree.getExperience(ExperienceField.Maneuverability);
+            jumpAcceleration = baseJumpAcceleration + verticalAccelerationIncreasePerExperience * evolutionTree.getExperience(ExperienceField.Maneuverability);
+            maxMovementVelocityX = baseMaxMovementVelocityX + maxSpeedIncreasePerExperience * evolutionTree.getExperience(ExperienceField.Maneuverability);
+
+            //Knowledge
+            experienceMultiplier = baseExperienceMultiplier + experienceGainIncreasePerExperience * evolutionTree.getExperience(ExperienceField.Knowledge);
+
+
+        }
         public void setSpawn(int x, int y) {
             initialX = x;
             initialY = y;
@@ -4321,27 +5133,57 @@ namespace PixelMidpointDisplacement
 
         public override void applyDamage(object attacker, DamageType damageType, double damage)
         {
-
-            for (int x = 0; x < equipmentInventory.GetLength(0); x++)
+            if (currentHealth > 0) //If the player isn't already dead
             {
-                for (int y = 0; y < equipmentInventory.GetLength(1); y++)
+                for (int x = 0; x < equipmentInventory.GetLength(0); x++)
                 {
-                    if (equipmentInventory[x, y].item is EquipableItem e)
+                    for (int y = 0; y < equipmentInventory.GetLength(1); y++)
                     {
-                        damage = e.onDamageTaken(damageType, damage, attacker);
+                        if (equipmentInventory[x, y].item is EquipableItem e)
+                        {
+                            damage = e.onDamageTaken(damageType, damage, attacker);
+                        }
                     }
                 }
-            }
-            
-            base.applyDamage(attacker, damageType, damage);
 
-            if (currentHealth <= 0) {
-                onDeath();
-                rb.isUIElementActive = true;
-                rs.isUIElementActive = true;
-            }
+                base.applyDamage(attacker, damageType, damage);
 
+                if (currentHealth <= 0)
+                {
+                    rb.isUIElementActive = true;
+                    rs.isUIElementActive = true;
+                }
+            }
             healthBar.drawRectangle.Width = (int)((currentHealth / (double)maxHealth) * healthBar.maxHealthDrawWidth);
+        }
+
+        public override void onDeath(object attacker, DamageType damageType, double damageThatKilled)
+        {
+            Entity entityAttacker = null ;
+            if (attacker != null) {
+                if (attacker is Entity e) {
+                    entityAttacker = e;
+                }
+            }
+            if (damageType == DamageType.Falldamage)
+            {
+                evolutionTree.addExperience(ExperienceField.Durability, 10 * experienceMultiplier);
+            }
+            if (entityAttacker != null) {
+                //Later on, check if the attacker isn't a boss
+                if (entityAttacker.maxHealth > maxHealth || entityAttacker.currentHealth > 0.3 * entityAttacker.maxHealth) {
+                    evolutionTree.addExperience(ExperienceField.Durability, 10 * experienceMultiplier);
+                    evolutionTree.addExperience(ExperienceField.Damage, 10 * experienceMultiplier);
+
+                }
+            }
+
+            evolutionTree.addExperience(ExperienceField.Maneuverability, 8 * experienceMultiplier);
+            evolutionTree.addExperience(ExperienceField.Knowledge, 10 * experienceMultiplier);
+
+
+            evolutionTree.recalculateAvailableEvolutions();
+            base.onDeath(attacker, damageType, damageThatKilled);
         }
 
         public override void updateLocation(double xChange, double yChange) {
@@ -4660,6 +5502,8 @@ namespace PixelMidpointDisplacement
 
             this.initialVelocity = initialVelocity;
 
+            owner = shooter;
+
             rotationOrigin = Vector2.Zero;
             directionalEffect = SpriteEffects.None;
             isActive = true;
@@ -4765,7 +5609,7 @@ namespace PixelMidpointDisplacement
                 e.velocityY += 7;
                 //Have to move the entity up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
                 e.y -= 12;
-                e.applyDamage(owner, DamageType.EntityAttack, weaponDamage * (Math.Pow(Math.Pow(velocityX, 2) + Math.Pow(velocityY, 2), 0.5)/initialVelocity));
+                e.applyDamage(owner, DamageType.EntityAttack, owner.entityDamageMultiplier * weaponDamage * (Math.Pow(Math.Pow(velocityX, 2) + Math.Pow(velocityY, 2), 0.5)/initialVelocity));
                 e.knockbackStunDuration = 0.5f;
                 ((ICollider)e).startInvincibilityFrames();
 
@@ -5052,7 +5896,7 @@ namespace PixelMidpointDisplacement
                 e.velocityY += 7;
                 //Have to move the player up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
                 e.y -= 12;
-                e.applyDamage(owner, DamageType.EntityAttack, weaponDamage);
+                e.applyDamage(owner, DamageType.EntityAttack, weaponDamage * owner.entityDamageMultiplier);
                 e.knockbackStunDuration = 0.5f;
                 ((ICollider)e).startInvincibilityFrames();
             }
@@ -5399,24 +6243,52 @@ namespace PixelMidpointDisplacement
 
             if (!owner.isOnGround)
             {
-                if (hasSetWaitTimeOnce)
+                DoubleJumpEvolution j = (DoubleJumpEvolution)owner.evolutionTree.getEvolution(typeof(DoubleJumpEvolution));
+                bool canJump = false;
+                if (j == null)
+                {
+                    canJump = true;
+                }
+                else {
+                    if (j.isEvolutionActive)
+                    {
+                        if (j.hasDoubleJumped)
+                        {
+                            canJump = true;
+                        }
+                        else
+                        {
+                            canJump = false;
+                        }
+                    }
+                    else {
+                        canJump = true;
+                    }
+                }
+
+
+                        if (hasSetWaitTimeOnce && canJump)
                 {
                     if (jumpWaitTime <= 0)
                     {
                         if ((Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space)) && !hasUsedItem)
                         {
                             hasUsedItem = true;
-                            if (owner.velocityY < 0) {
+                            if (owner.velocityY < 0)
+                            {
                                 owner.velocityY = 0;
                             }
                             owner.accelerationY += jumpAcceleration / elapsedTime;
                         }
                     }
                 }
-                else {
+                else
+                {
                     jumpWaitTime = maxJumpWaitTime;
                     hasSetWaitTimeOnce = true;
                 }
+                    
+                
             }
             else if(hasSetWaitTimeOnce || hasUsedItem){
                 hasSetWaitTimeOnce = false;
@@ -5430,6 +6302,8 @@ namespace PixelMidpointDisplacement
         }
     }
     #endregion
+
+    #region Animation
     public class Animator
     {
         public double duration;
@@ -5612,6 +6486,7 @@ namespace PixelMidpointDisplacement
         
 
     }
+    #endregion
 
     #region Block Classes
     public class Block
@@ -6045,9 +6920,7 @@ namespace PixelMidpointDisplacement
         public UIItem[,] inventory { get; set; }
         public UIElement inventoryBackground { get; set; }
 
-        List<LootTable> lootTables;
-
-        
+        LootTable lootTable;
 
         public ChestBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID) {
             maximumCooldown = 0.1f;
@@ -6085,8 +6958,7 @@ namespace PixelMidpointDisplacement
             Random r = new Random();
             //Destroy the inventory, and randomise the item drop locations a 'lil
             ((IInventory)this).destroyInventory(wc, x * wc.pixelsPerBlock + r.Next(wc.pixelsPerBlock), y * wc.pixelsPerBlock + r.Next(wc.pixelsPerBlock));
-            base.onBlockDestroyed(exposedBlocks, wc);
-            
+            base.onBlockDestroyed(exposedBlocks, wc);   
         }
         public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
         {
@@ -6100,42 +6972,44 @@ namespace PixelMidpointDisplacement
             Player p = worldContext.player;
             AnimationController a = worldContext.animationController;
             //A crappy way of determining what structure the chest is in. If it's the shrine then the block below is dirt. I'll adjust everything later.
+            lootTable = new LootTable();
+
             if (worldContext.backgroundArray[x, y - 1] == (int)backgroundBlockIDs.stone)
             {
-                lootTables = new List<LootTable> {
-                    new LootTable(new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>{
+                lootTable.addLootTable(new List<(double percentage, IndividualLootTable)> {
+                    (100,
+                    new IndividualLootTable(new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>{
                         (100, 30, 40, new BlockItem((int)blockIDs.stone, a, p)),
                         (40, 1, 1, new Helmet(a, p)),
                         (70, 1, 1, new AmuletOfFallDamage(a,p))
                     }
-                    )
-                };
+                    ))
+                });
             }
             else
             {
-                lootTables = new List<LootTable>
-            {
-            new LootTable(
-                new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>{
-                    (100, 20, 30, new BlockItem((int)blockIDs.stone, a, p)),
-                    (50, 1, 1, new Weapon(a,p))
-                }
-                ),
-            new LootTable(new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>{
+                lootTable.addLootTable(new List<(double percentage, IndividualLootTable itable)>() {
+                (50, new IndividualLootTable(
+                    new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)> {
+                        (100, 20, 30, new BlockItem((int)blockIDs.stone, a, p)),
+                        (50, 1, 1, new Weapon(a, p))
+                    }
+                    )),
+                (50, new IndividualLootTable(
+                    new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>{
                 (100, 45,90, new BlockItem((int)blockIDs.torch, a,p)),
                 (30, 1, 1, new Bow(a,p))
-            })
+                }))
 
 
-            };
+             });
             }
         }
         private void generateLootFromLootTable() {
             Random r = new Random();
             //Pick loot table to generate from:
-            int lootTableID = r.Next(lootTables.Count);
-            lootTables[lootTableID].generateLootFromTable();
-            foreach (Item item in lootTables[lootTableID].generateLootFromTable())
+            
+            foreach (Item item in lootTable.generateLoot())
             {
                 //Add it to a random, empty slot in the chests inventory
                 bool foundASlot = false;
@@ -6174,6 +7048,10 @@ namespace PixelMidpointDisplacement
                 {
                     ((IInventory)this).showInventory();
                     worldContext.player.showInventory();
+                    if (!worldContext.player.activeInventories.Contains(this))
+                    {
+                        worldContext.player.activeInventories.Add(this);
+                    }
                 }
             }
         }
@@ -6186,11 +7064,43 @@ namespace PixelMidpointDisplacement
     }
     #endregion
 
-
+    #region Loot Table classes
     public class LootTable {
+        public List<List<(double percentage, IndividualLootTable)>> lootTable = new List<List<(double percentage, IndividualLootTable)>>();
+
+        public void addLootTable(List<(double percentage, IndividualLootTable individualTable)> lootTable) {
+            this.lootTable.Add(lootTable);
+        }
+
+        public List<Item> generateLoot()
+        {
+            Random r = new Random();
+            List<Item> generatedItems = new List<Item>();
+            for (int i = 0; i < lootTable.Count; i++)
+            {
+                double cummulativePercentage = 0;
+                for (int l = 0; l < lootTable[i].Count; l++)
+                {
+                    cummulativePercentage += lootTable[i][l].percentage;
+                    if (r.NextDouble() * 100 < cummulativePercentage)
+                    {
+                        //This loot table was chosen:
+                        foreach (Item item in lootTable[i][l].Item2.generateLootFromTable())
+                        {
+                            generatedItems.Add(item);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            return generatedItems;
+        }
+    }
+    public class IndividualLootTable {
         public List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)> lootTable = new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>();
 
-        public LootTable(List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)> lootTable) {
+        public IndividualLootTable(List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)> lootTable) {
             this.lootTable = lootTable;
         }
 
@@ -6213,7 +7123,278 @@ namespace PixelMidpointDisplacement
             return generatedLoot;
         }
     }
+    #endregion
+    
+    #region Evolutions
+    public class Evolution
+    {
+        public Entity owner;
+        public EvolutionTree tree;
 
+        public int iconSourceY;
+
+        public int treeLayer;
+        public int indexWithinLayer;
+
+        public bool isEvolutionActive = false;
+        
+        public bool canBeActivated = false;
+
+        public List<(ExperienceField field, double cost)> evolutionCost = new List<(ExperienceField field, double cost)>();
+        //Just defines some functions or variable changes
+        public Evolution(EvolutionTree tree, int treeLayer, int indexWithinLayer)
+        {
+            this.owner = tree.owner;
+            this.treeLayer = treeLayer;
+            this.indexWithinLayer = indexWithinLayer;
+            this.tree = tree;
+        }
+
+        public void requestActivation() {
+            if (tree != null) {
+                tree.activateEvolution(treeLayer, indexWithinLayer);
+            }
+        }
+
+        public virtual void onAppliedToEntity() {
+            isEvolutionActive = true;
+            //Add whatever action listeers that the evolution needs
+        }
+
+        public virtual void onRemovedFromEntity() {
+        }
+    }
+
+    public class EvolutionTreeLayer {
+        //A single layer of the evolution tree. The prerequisite evolutions must come from the previous layer, and there can be multiple
+        public List<(Evolution evolution, List<int> prerequisiteEvolutions)> evolutionLayer;
+
+        public EvolutionTreeLayer() {
+            evolutionLayer = new List<(Evolution evolution, List<int>)>();
+        }
+    }
+
+    public class EvolutionTree {
+        //A class that contains a structured list of evolutions and their prerequesits.
+        public Entity owner;
+        //Not sure how to contain a tree
+        public List<EvolutionTreeLayer> evolutionTree = new List<EvolutionTreeLayer>();
+        List<Evolution> activeEvolutions = new List<Evolution>();
+        Dictionary<ExperienceField, double> entityExperience = new Dictionary<ExperienceField, double>();
+
+        public EvolutionTree(Entity treeOwner) {
+            owner = treeOwner;
+
+            entityExperience.Add(ExperienceField.Knowledge, 0);
+            entityExperience.Add(ExperienceField.Durability, 0);
+            entityExperience.Add(ExperienceField.Maneuverability, 0);
+            entityExperience.Add(ExperienceField.Damage, 0);
+        }
+
+        public Evolution getEvolution(Type evolutionTpe) {
+
+            for (int x = 0; x < evolutionTree.Count; x++)
+            {
+                for (int y = 0; y < evolutionTree[x].evolutionLayer.Count; y++)
+                {
+                    if (evolutionTpe.IsInstanceOfType(evolutionTree[x].evolutionLayer[y].evolution)) {
+                        return evolutionTree[x].evolutionLayer[y].evolution;
+                    }
+                }
+            }
+
+            return null;
+        }
+        public void addEvolutionTreeLayer(EvolutionTreeLayer e) {
+            if (evolutionTree.Count == 0) {
+                for(int i = 0; i < e.evolutionLayer.Count; i++)
+                {
+                    e.evolutionLayer[i].evolution.canBeActivated = true;
+                }
+            }
+            evolutionTree.Add(e);
+            
+        }
+
+        public void activateEvolution(int treeLayer, int indexWithinLayer)
+        {
+            if (treeLayer >= 0 && treeLayer < evolutionTree.Count) {
+                if (canEvolutionBeActivated(treeLayer, indexWithinLayer)) {
+                    evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution.onAppliedToEntity();
+                    activeEvolutions.Add(evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution);
+
+                    //Reduce the entities experience based on the costs of the evolution
+                    
+                    List<(ExperienceField field, double cost)> cost = evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution.evolutionCost;
+                    for (int i = 0; i < cost.Count; i++)
+                    {
+                        entityExperience[cost[i].field] -= cost[i].cost;
+
+                    }
+
+                    owner.worldContext.engineController.evolutionController.updateExperienceCounters();
+
+                    //Check up the tree to see if any evolutions can now be activated and update them corrospondingly:
+                    recalculateAvailableEvolutions();
+
+                }
+            }
+        }
+
+        public void recalculateAvailableEvolutions() {
+            for (int x = 0; x < evolutionTree.Count; x++) {
+                for (int y = 0; y < evolutionTree[x].evolutionLayer.Count; y++) {
+                    int evolutionTreeLayer = evolutionTree[x].evolutionLayer[y].evolution.treeLayer;
+                    int evolutionIndexWithinLayer = evolutionTree[x].evolutionLayer[y].evolution.indexWithinLayer;
+                    evolutionTree[x].evolutionLayer[y].evolution.canBeActivated = canEvolutionBeActivated(evolutionTreeLayer, evolutionIndexWithinLayer);
+                }
+            }
+        }
+
+        public bool canEvolutionBeActivated(int treeLayer, int indexWithinLayer)
+        {
+            bool allPrerequisitesAreActive = true;
+            if (treeLayer > 0)
+            {
+                foreach (int index in evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].prerequisiteEvolutions)
+                {
+                    if (!evolutionTree[treeLayer - 1].evolutionLayer[index].evolution.isEvolutionActive)
+                    {
+                        allPrerequisitesAreActive = false;
+                        break;
+                    }
+                }
+            }
+
+            bool canPayCost = true;
+            
+            List<(ExperienceField field, double cost)> cost = evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution.evolutionCost;
+            for (int i = 0; i < cost.Count; i++)
+            {
+                if (entityExperience[cost[i].field] < cost[i].cost)
+                {
+                    canPayCost = false;
+                    break;
+                }
+            }
+
+            bool canEvolutionBeActivated = false;
+            if (allPrerequisitesAreActive && canPayCost && !activeEvolutions.Contains(evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution))
+            {
+                canEvolutionBeActivated = true;
+            }
+            return canEvolutionBeActivated;
+        }
+        public void addExperience(ExperienceField field, double experienceGain) {
+            entityExperience[field] += experienceGain;
+            owner.worldContext.engineController.evolutionController.updateExperienceCounters();
+        }
+
+        public double getExperience(ExperienceField field) {
+            return entityExperience[field];
+        }
+    }
+
+    public class JumpEvolution : Evolution 
+    {
+
+        double jumpIncrease;
+        public JumpEvolution(EvolutionTree tree, int treeLayer, int indexWithinLayer) : base(tree, treeLayer, indexWithinLayer) {
+            iconSourceY = 16;
+            evolutionCost.Add((ExperienceField.Maneuverability, 10));
+        }
+
+
+
+        public override void onAppliedToEntity()
+        {
+            jumpIncrease = owner.baseJumpAcceleration;
+            System.Diagnostics.Debug.WriteLine("Jump increase was applied with " + jumpIncrease + " amount");
+            owner.baseJumpAcceleration += jumpIncrease;
+            base.onAppliedToEntity();
+        }
+
+        public override void onRemovedFromEntity()
+        {
+            owner.baseJumpAcceleration -= jumpIncrease;
+            jumpIncrease = 0;
+            base.onRemovedFromEntity();
+        }
+    }
+
+    public class DoubleJumpEvolution : Evolution, IEntityActionListener {
+        public double jumpWaitTime;
+        public double maxJumpWaitTime = 0.4f;
+        public bool hasSetWaitTimeOnce = false;
+        public bool hasDoubleJumped = false;
+
+        public double jumpAcceleration;
+        public DoubleJumpEvolution(EvolutionTree tree, int treeLayer, int indexWithinLayer) : base(tree, treeLayer, indexWithinLayer) {
+            iconSourceY = 32;
+            evolutionCost.Add((ExperienceField.Maneuverability, 15));
+        }
+
+        public override void onAppliedToEntity()
+        {
+            owner.inputListeners.Add(this);
+            //Turn off the jump Evolution from before. Eg. Replace it:
+            JumpEvolution j = (JumpEvolution)tree.getEvolution(typeof(JumpEvolution));
+            if (j != null) {
+                if (j.isEvolutionActive) {
+                    j.onRemovedFromEntity();
+                }
+            }
+            base.onAppliedToEntity();
+        }
+
+        public override void onRemovedFromEntity()
+        {
+            owner.inputListeners.Remove(this);
+            base.onRemovedFromEntity();
+        }
+
+        public void onInput(double elapsedTime) {
+           
+            if (jumpWaitTime > 0)
+            {
+                jumpWaitTime -= elapsedTime;
+            }
+
+            jumpAcceleration = owner.jumpAcceleration;
+
+            if (!owner.isOnGround)
+            {
+                if (hasSetWaitTimeOnce)
+                {
+                    if (jumpWaitTime <= 0)
+                    {
+                        if ((Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space)) && !hasDoubleJumped)
+                        {
+                            hasDoubleJumped = true;
+                            if (owner.velocityY < 0)
+                            {
+                                owner.velocityY = 0;
+                            }
+                            owner.accelerationY += jumpAcceleration / elapsedTime;
+                        }
+                    }
+                }
+                else
+                {
+                    jumpWaitTime = maxJumpWaitTime;
+                    hasSetWaitTimeOnce = true;
+                }
+            }
+            else if (hasSetWaitTimeOnce || hasDoubleJumped)
+            {
+                hasSetWaitTimeOnce = false;
+                hasDoubleJumped = false;
+            }
+        }
+    }
+    #endregion
+
+    #region Interfaces
     public interface ICollider
     {
         bool isActive { get; set; }
@@ -6680,6 +7861,20 @@ namespace PixelMidpointDisplacement
         }
     }
 
+
+    public interface IEntityActionListener {
+        //An interface that allows a class to listen and respond to events within an entity
+        public double onDamage(Object source, DamageType damageType, double damage) {
+            return damage;
+        }
+
+        public void onInput(double elapsedTime) { }
+        public void onEntityCollision() { }
+        public void onBlockCollision() { }
+    }
+    #endregion
+
+    #region Enums
     public enum blockIDs {
         //Written in order of their integer IDs
         air,
@@ -6694,19 +7889,36 @@ namespace PixelMidpointDisplacement
         stone,
         woodenPlanks
     }
-
+    public enum spriteSheetIDs
+    {
+        blocks,
+        weapons,
+        blockItems,
+        player,
+        arrow,
+        mainMenuUI,
+        blockBackground,
+        inventoryUI,
+        healthUI,
+        deathScreen,
+        armour,
+        accessories,
+        pixelNumbers,
+        evolutionBackground,
+        evolutionIcons,
+        evolutionCounterCharacters
+    }
     public enum Scene {
         MainMenu,
-        Game
+        Game,
+        Evolution
     }
-
     public enum ArmorType {
         Head,
         Chest,
         Legs,
         Boots
     }
-
     public enum DamageType {
         Falldamage,
         Drowning,
@@ -6714,7 +7926,15 @@ namespace PixelMidpointDisplacement
         EntityPassive,
         Effect,
     }
-
+    public enum ExperienceField {
+        Knowledge,
+        Durability,
+        Damage,
+        Maneuverability,
+    }
+    
+    #endregion
+    #region World Generation Algorithms
     public class BlockGenerationVariables
     {
         public double seedDensity;
@@ -7249,4 +8469,5 @@ namespace PixelMidpointDisplacement
         }
 
     }
+    #endregion
 }

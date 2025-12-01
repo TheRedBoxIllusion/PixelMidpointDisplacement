@@ -17,6 +17,9 @@
     <None Remove="Content\blockItemSpriteSheet.png" />
     <None Remove="Content\blockSpriteSheet.png" />
     <None Remove="Content\deathScreenSpriteSheet.png" />
+    <None Remove="Content\evolutionBackground.png" />
+    <None Remove="Content\evolutionCounterCharacters.png" />
+    <None Remove="Content\evolutionIconsSpriteSheet.png" />
     <None Remove="Content\healthUISpriteSheet.png" />
     <None Remove="Content\inventorySpriteSheet.png" />
     <None Remove="Content\MainMenuUISpriteSheet.png" />
@@ -52,6 +55,15 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\deathScreenSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\evolutionBackground.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\evolutionCounterCharacters.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\evolutionIconsSpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\healthUISpriteSheet.png">
