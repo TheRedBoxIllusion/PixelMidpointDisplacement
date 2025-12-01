@@ -70,7 +70,7 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
 
 
     Biomes:
-        - Implement subterranian biomes                                                                                                               - In Progress
+        - Implement subterranian biomes                                                                                                               - Done
             -> A secondary iteration after the initial biomes are generated
                 -> Each subterranian biome has a list of biomes that it can spawn in. If list is empty, spawns in any biome
         - Have to incorporate height into spawning entities from biomes
@@ -82,7 +82,16 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
             -> Perhaps check each subterranian biome first: then check the surface biomes if the location is not contained in any subterranian biome   - Done
                 -> Two different lists in the world context?
 
-        Biomes are supposedly spawning, but theres no indication in the actual game.
+        -Could improve:
+            -> Allow for the biome to generate different cave sizes compared to the ones that currently exist, then figure out a better way to adjust the threshold change/smoothing in all axis'
+
+
+    Adjust world generation:
+        - Each biome seeds the world with the ores that its designed to, then, once all the biomes (and subterranean biomes) have seeded the world, you do an ore generation stage,
+            then loop back through the biomes, generating structures, backgrounds and the likes. This would hopefully reduce the straight edges that appear on the boundary of different biomes
+                -> Must include a list in the world generation class that contains all ores, and somehow figure out how to change the midpoint displacement to function properly
+        
+
  */
 
 /*
