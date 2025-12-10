@@ -86,12 +86,76 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
             -> Allow for the biome to generate different cave sizes compared to the ones that currently exist, then figure out a better way to adjust the threshold change/smoothing in all axis'
 
 
-    Adjust world generation:
+    Adjust world generation:                                                                                                                            - Done
         - Each biome seeds the world with the ores that its designed to, then, once all the biomes (and subterranean biomes) have seeded the world, you do an ore generation stage,
             then loop back through the biomes, generating structures, backgrounds and the likes. This would hopefully reduce the straight edges that appear on the boundary of different biomes
                 -> Must include a list in the world generation class that contains all ores, and somehow figure out how to change the midpoint displacement to function properly
+
+        - Instead of generating ores and combining algorithms:
+            -> for each biome generate the seeds, and put the seeds onto the global array
+            -> Append the ores to a list in the world generator
+            -> Run the brownian motion inside the world generator
+            -> Go through each biome and combine algorithms, but instead of using the biomes brownian motion array, use the worlds; with the appropriate offset
         
 
+    Fluids:                                                                                                                                             - Done
+            -> A block that updates every _ number of frames
+            -> If theres air to either side and below, become a flowing liquid and flow to there (create another flowing liquid block there)
+            -> if any block below it is not flowing / air, then spread to either side
+
+    Add fluid generation:
+        - start simple: replace a few random exposed blocks with a fluid source block:
+                -> generates waterfalls
+        - Next: pick a random point inside of a few caves (found using the exposed block system)
+            Fill all the blocks that are air to the side or below with a source block: Cave lakes
+
+    Add viscosity:
+        - The fluids adjust or set the coefficient of "air" friction
+
+    Fluid Fix:                                                                                                                                          - Done
+        - Improve the buoyancy system. Currently each block that the player collides with adds its buoyancy force to the entity. However, each block does this, so the total force isn't very consistent. 
+            This is good if it only affects vertical submersion (the more blocks vertically, the greater the force). Sadly, there's variance when the player collides horizontally. It should be identical, 
+            but stretching across the boundary of columns makes the force double. This makes the force very inconsistent and unruly.
+
+
+        - I could make it so the first fluid block that collides applies the force.                                                                     - This was implemented for simplicity
+            Issues
+            ->  Being between two fluids would cause inconsistency depending on which one was left/right
+                    -> Not the worst, especially if it only applies to fluid acceleration, and effects would still apply for all collision blocks
+
+
+    Crafting System:                                                                                                                                    - Done
+        - Implement the scrolling feature of a list:
+            -> Set number of elements are visible
+            -> Their location is set relative to the location of the list / manager itself, then offset by theie position within the visible elements
+
+        - Crafting UI:
+            -> The element is a child of UIItem with custom features
+                -> Upon a click, it checks if its parent recipe can be crafted, if so, it acts like a normal UIItem but doesn't diminish when taken from. If the item can be crafted, it removes the ingredients from the users inventory
+                -> Only functions if the hovering UIItem has a null item value. THis stops it from crafting a crap ton of the item
+                    -> Will have to check if the item type is the same, however (for stacking) so I'll have to add a crafting cooldown, that can reduce if the player holds the mouse down for x period of time
+
+        - Removing ingredients from inventory
+            -> Might be a custom function within IInventory, but searchs for an item, reduces the quantity by either the full "required amount" or until the item is depleted. If depleted destroy the item and continue searching
+            
+        - Bug fix:                                                                                                                                      - Done
+            -> All items show up as swords...
+    
+    Combine items fix:                                                                                                                                  - Done
+            - Adding an item to the inventory when there are multiple available stacks adds an item to both. 
+            - Now, it doesn't add anything at all. At least for ingot blocks, but I presume a similar thing for all. This is because the player was cast as an IInventory in the dropped item function. I think
+
+        -> The items from the crafting system were not copies. All the same instance
+
+
+
+    Hardness and breaking duration:
+        - Blocks have a "hardness" and "durability" value
+            -> The hardness defines the pickaxe strength required to be able to break the block
+            -> THe durability is how close a block is to breaking. If it hits zero, then the block is broken
+
+        - Pickaxes currently have a 'use duration,' so just add a "pickaxe strength" value and possibly a second "durability per hit" value
+    
  */
 
 /*
@@ -178,6 +242,9 @@ namespace PixelMidpointDisplacement
         double biomeTickSpeed;
         double maxBiomeTickSpeed = 0.5f;
 
+        double fluidTickSpeed;
+        double maxFluidTickSpeed = 0.3;
+
         public Game1()
         {
             _graphics = new GraphicsDeviceManager(this);
@@ -199,7 +266,6 @@ namespace PixelMidpointDisplacement
 
             player = new Player(worldContext);
 
-            worldContext.setPlayer(player);
 
         }
 
@@ -260,6 +326,10 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionBackground.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionIconsSpriteSheet.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionCounterCharacters.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\oreSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ingotSpriteSheet.png"));
+
+
 
 
 
@@ -334,6 +404,16 @@ namespace PixelMidpointDisplacement
                 updateBiome(gameTime);
                 tickAnimations(gameTime);
                 updateEntities(gameTime);
+                worldContext.engineController.craftingManager.managerUpdate();
+
+                if (fluidTickSpeed <= 0)
+                {
+                    fluidTickSpeed = maxFluidTickSpeed;
+                }
+                else
+                {
+                    fluidTickSpeed -= gameTime.ElapsedGameTime.TotalSeconds;
+                }
             }
 
             base.Update(gameTime);
@@ -356,7 +436,6 @@ namespace PixelMidpointDisplacement
                 drawChat();
                 drawEntities();
                 drawPlayer();
-                //drawMainHandCollisionBounds();
                 drawAnimatorObjects();
 
                 _spriteBatch.End();
@@ -622,10 +701,15 @@ namespace PixelMidpointDisplacement
 
 
                     worldContext.physicsObjects[i].isOnGround = false;
+                    worldContext.physicsObjects[i].isInFluid = false;
 
                     engineController.physicsEngine.addGravity(worldContext.physicsObjects[i]);
                     
                     engineController.physicsEngine.computeAccelerationWithAirResistance(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
+
+                    worldContext.physicsObjects[i].kX = worldContext.physicsObjects[i].defaultkX;
+                    worldContext.physicsObjects[i].kY = worldContext.physicsObjects[i].defaultkY;
+
                     engineController.physicsEngine.computeImpulse(worldContext.physicsObjects[i], gameTime.ElapsedGameTime.TotalSeconds);
 
                     //Reset coefficient of friction:
@@ -804,6 +888,13 @@ namespace PixelMidpointDisplacement
                         }
                         if (worldContext.worldArray[x, y].ID != (int)blockIDs.air)
                         {
+                            if (fluidTickSpeed <= 0)
+                            {
+                                if (worldContext.worldArray[x, y] is FluidBlock f)
+                                {
+                                    f.tickFluid(worldContext);
+                                }
+                            }
                             int lightValue = worldContext.lightArray[x, y];
                             if (lightValue > 255)
                             {
@@ -1442,11 +1533,19 @@ namespace PixelMidpointDisplacement
             {
                 worldArray[x, y] = new TorchBlock(blockFromID[ID]);
             }
-            else if (ID == blockIDs.chest) {
+            else if (ID == blockIDs.chest)
+            {
                 worldArray[x, y] = new ChestBlock(blockFromID[ID]);
             }
+            else if (ID == blockIDs.water)
+            {
+                worldArray[x, y] = new FluidBlock(blockFromID[ID]);
+            }
+            else if (ID == blockIDs.ironOre) {
+                worldArray[x, y] = new OreBlock(blockFromID[ID]);
+            }
 
-            worldArray[x, y].setupInitialData(this, intArray, (x, y));
+                worldArray[x, y].setupInitialData(this, intArray, (x, y));
         }
 
         public void addBlockToDictionaryIfExposedToAir(int[,] blockArray, int x, int y)
@@ -1465,6 +1564,11 @@ namespace PixelMidpointDisplacement
                 }
             }
         }
+
+        /*
+         * This is why blocks that are transparent are still blocking other blocks from casing shadows that are below them!
+         
+         */
         public Vector4 calculateExposedFaces(int[,] blockArray, int x, int y)
         {
             return new Vector4(Convert.ToInt32((blockArray[x, y - 1] == (int)blockIDs.air)), Convert.ToInt32(blockArray[x + 1, y] == (int)blockIDs.air), Convert.ToInt32(blockArray[x, y + 1] == (int)blockIDs.air), Convert.ToInt32(blockArray[x - 1, y] == (int)blockIDs.air));
@@ -1506,6 +1610,9 @@ namespace PixelMidpointDisplacement
             blockFromID.Add(blockIDs.grass, new GrassBlock(new Rectangle(0, 64, 32, 32), intFromBlockID[blockIDs.grass]));
             blockFromID.Add(blockIDs.torch, new TorchBlock(new Rectangle(0, 96, 32, 32), intFromBlockID[blockIDs.torch]));
             blockFromID.Add(blockIDs.chest, new ChestBlock(new Rectangle(0, 128, 32, 32), (int)blockIDs.chest));
+            blockFromID.Add(blockIDs.water, new FluidBlock(new Rectangle(0, 160, 32, 32), intFromBlockID[blockIDs.water]));
+            blockFromID.Add(blockIDs.ironOre, new OreBlock(new Rectangle(0, 224, 32, 32), (int)blockIDs.ironOre, (int)oreIDs.iron));
+
         }
 
         public Block getBlockFromID(blockIDs ID)
@@ -1546,13 +1653,33 @@ namespace PixelMidpointDisplacement
                 if (x > cummulativeLength && x < cummulativeLength + surfaceWorldBiomeList[i].biomeDimensions.width) {
                     return surfaceWorldBiomeList[i];
                 }
+                cummulativeLength += surfaceWorldBiomeList[i].biomeDimensions.width;
             }
 
             return null;
         }
         public void setPlayer(Player player) {
             this.player = player;
-            engineController.evolutionController.setTree(player.evolutionTree);
+        }
+
+        public bool damageBlock(double damageStrength, double durabilityLoss, int x, int y) {
+            bool canDamageBlock = false;
+
+            if (worldArray[x, y].ID != 0)
+            {
+                if (damageStrength >= worldArray[x, y].hardness)
+                {
+                    worldArray[x, y].durability -= durabilityLoss;
+                
+                    return true;
+                }
+                else {
+                    return false;
+                }
+            }
+            else {
+                return false;
+            }
         }
         public bool deleteBlock(int x, int y)
         {
@@ -1599,7 +1726,9 @@ namespace PixelMidpointDisplacement
 
 
         double[,] perlinNoiseArray;
-        BlockGenerationVariables[,] brownianMotionArray;
+        public BlockGenerationVariables[,] brownianMotionArray;
+        public List<BlockGenerationVariables> ores = new List<BlockGenerationVariables>();
+        int maxAttempts = 16;
 
         public List<Biome> biomeList = new List<Biome>();
         public List<SubterraneanBiome> subterraneanBiomeList = new List<SubterraneanBiome>();
@@ -1687,8 +1816,6 @@ namespace PixelMidpointDisplacement
 
             generateBiomes(worldDimensions);
 
-            generateSubterraneanBiomes(worldDimensions);
-
             calculateSurfaceBlocks();
 
             convertDirtToGrass();
@@ -1697,6 +1824,39 @@ namespace PixelMidpointDisplacement
         }
 
         public void generateBiomes((int width, int height) worldDimensions) {
+            generateSurfaceBiomes(worldDimensions);
+            generateSubterraneanBiomes(worldDimensions);
+            
+            //Generate the worlds ores now:
+            SeededBrownianMotion sbm = new SeededBrownianMotion();
+            brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, maxAttempts);
+
+            //Go back through the biomes and generate caves, structures and the likes:
+            for (int i = 0; i < biomeList.Count; i++) {
+                combineAlgorithms(biomeList[i].biomeOffset, i);
+                biomeList[i].generateBackground();
+                biomeList[i].generateStructures();
+            }
+
+            for (int i = 0; i < subterraneanBiomeList.Count; i++)
+            {
+                combineAlgorithmsSubterranean((subterraneanBiomeList[i].x, subterraneanBiomeList[i].y), i, subterraneanBiomeList[i].externalBiomeIndex);
+                subterraneanBiomeList[i].generateBackground();
+                subterraneanBiomeList[i].generateStructures();
+            }
+
+            for (int i = 0; i < biomeList.Count; i++) {
+                biomeList[i].generateFluids();
+            }
+
+            for (int i = 0; i < subterraneanBiomeList.Count; i++) {
+                subterraneanBiomeList[i].generateFluids();
+            }
+
+            //To generate something on the right. Put it here
+        }
+
+        public void generateSurfaceBiomes((int width, int height) worldDimensions) {
             //In blocks. The biome offset is in blocks, the points just get converted into pixel space
             int currentLeadingWidth = 0;
             //To generate something on the left. Put it here
@@ -1708,9 +1868,6 @@ namespace PixelMidpointDisplacement
 
             ocean.generateOres();
 
-            combineAlgorithms((0, 0), 0);
-            ocean.generateBackground();
-            ocean.generateStructures();
 
             currentLeadingWidth += ocean.biomeDimensions.width;
 
@@ -1723,22 +1880,16 @@ namespace PixelMidpointDisplacement
                 biomeList.Add(biome);
                 biome.generateSurfaceTerrain();
                 biome.generateOres();
-                combineAlgorithms((currentLeadingWidth, 0), biomeList.Count - 1);
-                biome.generateBackground();
-                biome.generateStructures();
+
                 currentLeadingWidth += biome.biomeDimensions.width;
             }
-
-            //To generate something on the right. Put it here
         }
 
         public void generateSubterraneanBiomes((int width, int height) worldDimensions) {
             for (int i = 0; i < subterraneanBiomeStencilList.Count; i++)
             {
-                System.Diagnostics.Debug.WriteLine("Twas a biome ");
                 for (int c = 0; c < subterraneanBiomeStencilList[i].biomesPerWorld; c++)
                 {
-                    System.Diagnostics.Debug.WriteLine(c + ", " + subterraneanBiomeSpawnAttempt);
                     SubterraneanBiome biome = (SubterraneanBiome)subterraneanBiomeStencilList[i].generateBiomeCopy((0, 900), this, (0, 0), (0, 0));
 
                     bool foundASpot = false;
@@ -1747,21 +1898,26 @@ namespace PixelMidpointDisplacement
                     Random r = new Random();
                     int biomeX = r.Next(0, worldDimensions.width);
                     int biomeY = r.Next(biome.minY, biome.maxY);
-                    int externalBiomeIndex = 0;
                     
                     while (!foundASpot && attempts < subterraneanBiomeSpawnAttempt) {
                         biomeX = r.Next(0, worldDimensions.width);
-                        biomeY = r.Next(surfaceHeight[biomeX] + biome.minY, surfaceHeight[biomeX] + biome.maxY);
+                        if (surfaceHeight[biomeX] + biome.maxY < worldArray.GetLength(1))
+                        {
+                            biomeY = r.Next(surfaceHeight[biomeX] + biome.minY, surfaceHeight[biomeX] + biome.maxY);
+                        }
+                        else {
+                            System.Diagnostics.Debug.WriteLine(surfaceHeight[biomeX] + " is the surface height");
+                            //biomeY = r.Next(surfaceHeight[biomeX] + biome.minY, worldArray.GetLength(1));
+                        }
                         //Get the biome the x and y is in                        
                         int cummulativeWidth = 0;
                         for (int b = 0; b < biomeList.Count; b++) {
                             if (biomeX > cummulativeWidth && biomeX < cummulativeWidth + biomeList[b].biomeDimensions.width) {
-                                System.Diagnostics.Debug.WriteLine(biomeList[b].GetType());
+                                System.Diagnostics.Debug.WriteLine(biomeList[b].GetType() + " : " + biomeX + ", " + biomeY);
                                 if (biome.biomesThisCanSpawnIn.Contains(biomeList[b].GetType())) {
                                     foundASpot = true;
-                                    externalBiomeIndex = b;
+                                    biome.externalBiomeIndex = b;
                                     biome.setBiomeLocation(biomeX, biomeY);
-                                    System.Diagnostics.Debug.WriteLine(biomeList[b] + " " + biomeX + ", " + biomeY);
                                 }
                                 break;
                             }
@@ -1771,11 +1927,7 @@ namespace PixelMidpointDisplacement
                     if (foundASpot)
                     {
                         subterraneanBiomeList.Add(biome);
-                        //biome.generateSurfaceTerrain();
                         biome.generateOres();
-                        combineAlgorithmsSubterranean((biome.x, biome.y), subterraneanBiomeList.Count - 1, externalBiomeIndex);
-                        biome.generateBackground();
-                        biome.generateStructures();
                     }
                 }
             }
@@ -1936,17 +2088,10 @@ namespace PixelMidpointDisplacement
                         worldArray[x, y] = 0;
 
                     }
-                    else if (biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y] != null && worldArray[x, y] != 0) //If the brownian motion defined it, and it's solid from the midpoint generation
+                    else if (brownianMotionArray[x, y] != null && worldArray[x, y] != 0) //If the brownian motion defined it, and it's solid from the midpoint generation
                     {
-                        worldArray[x, y] = biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y].block.ID;
-                        if (worldArray[x, y] != 0)
-                        {
-                            if (surfaceHeight[x] == null || surfaceHeight[x] > y)
-                            {
-                                surfaceHeight[x] = y;
-                            }
-
-                        }
+                        worldArray[x, y] = brownianMotionArray[x, y].block.ID;
+                        
                     }
                     else
                     {
@@ -1988,9 +2133,9 @@ namespace PixelMidpointDisplacement
                         worldArray[x, y] = 0;
 
                     }*/
-                    if (biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y] != null && worldArray[x, y] != 0) //If the brownian motion defined it, and it's solid from the midpoint generation
+                    if (brownianMotionArray[x, y] != null && worldArray[x, y] != 0) //If the brownian motion defined it, and it's solid from the midpoint generation
                     {
-                        worldArray[x, y] = biome.brownianMotionArray[x - biomeOffset.x, y - biomeOffset.y].block.ID;
+                        worldArray[x, y] = brownianMotionArray[x, y].block.ID;
                         if (worldArray[x, y] != 0)
                         {
                             if (surfaceHeight[x] == null || surfaceHeight[x] > y)
@@ -2008,6 +2153,102 @@ namespace PixelMidpointDisplacement
             }
         }
 
+
+        public (int x, int y) findLocalMin(int x, int y)
+        {
+            const int maxSearchAttempts = 300;
+            const int maxSidewaysSearchAttempts = 30;
+            int minX = x;
+            int minY = y;
+            Random r = new Random();
+            int resetX = 0;
+            int resetY = 0;
+            int oppositeDirection = 0;
+            if (worldArray[minX, minY] == 0)
+            {
+                //Search downwards first
+                bool foundMin = false;
+                int searchAttempts = 0;
+                int sidewaysSearchAttempts = 0;
+                int sidewaysSearchDirection = 0;
+
+                bool hitAWallLeft = false;
+                bool hitAWallRight = false;
+                while (!foundMin && searchAttempts < maxSearchAttempts && sidewaysSearchAttempts < maxSidewaysSearchAttempts)
+                {
+                    if (minX >= 0 && minX < worldArray.GetLength(0) && minY >= 0 && minY < worldArray.GetLength(1) - 1)
+                    {
+                        if (worldArray[minX, minY + 1] == 0)
+                        {
+                            minY = minY + 1;
+                            sidewaysSearchDirection = 0;
+                            searchAttempts += 1;
+
+                            resetX = 0;
+                            resetY = 0;
+                            oppositeDirection = 0;
+                        }
+                        else
+                        {
+                            searchAttempts = 0;
+                            //Not air below, so pick a direction to search in:
+
+                            if (sidewaysSearchDirection == 0)
+                            {
+                                sidewaysSearchDirection = (2 * r.Next(2)) - 1; //Randomly pick -1 or 1
+                                resetX = minX;
+                                resetY = minY;
+                                oppositeDirection = sidewaysSearchDirection * -1;
+
+                            }
+                            if (minX + sidewaysSearchDirection >= 0 && minX + sidewaysSearchDirection < worldArray.GetLength(0) && minY >= 0 && minY < worldArray.GetLength(1))
+                            {
+                                if (worldArray[minX + sidewaysSearchDirection, minY] == 0)
+                                {
+                                    minX += sidewaysSearchDirection;
+                                }
+                                else
+                                {
+                                    //Hit a wall!
+                                    if (sidewaysSearchDirection == -1)
+                                    {
+                                        hitAWallLeft = true;
+                                    }
+                                    else
+                                    {
+                                        hitAWallRight = true;
+                                    }
+
+
+                                    if (hitAWallLeft && hitAWallRight)
+                                    {
+                                        foundMin = true;
+                                    }
+                                    else
+                                    {
+                                        sidewaysSearchDirection = oppositeDirection;
+                                        minX = resetX;
+                                        minY = resetY;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                return (0, 0);
+                            }
+
+                        }
+                    }
+                    else
+                    {
+                        return (0, 0);
+                    }
+                }
+            }
+
+            return (minX, minY);
+
+        }
     }
 
     #region Biome Classes
@@ -2042,6 +2283,7 @@ namespace PixelMidpointDisplacement
 
         public List<(SpawnableEntity  entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface)> spawnableEntities;
         public List<(Structure structure, double density, int yMax, int yMin)> spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>();
+        public List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)> spawnableFluids = new List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)>();
 
         public WorldGenerator worldGenerator;
 
@@ -2069,10 +2311,237 @@ namespace PixelMidpointDisplacement
             pointsToBlocks(mda.midpointAlgorithm());
 
         }
+        public void generateFluids()
+        {
+            //Go through each item in the spawnable fluids list and attempt to generate a fluid lake from it
+            //If the maxLakeSize is 1, then just spawn it anywhere on an edge of a cave (eg. where an air and a solid block meets)
+            //If the maxLakeSize is greater than that, find a random air pocket (cave) and then search downwards until you reach a bottom
+            //  -> searching sideways finds a book end on both sides. Then fill that volume. Go up, and re-check the sides to see if you find book ends. If the volume that you find is greater than the maxLakeSide, don't fill it, or if there isn't a book end on both sides within the maxLakeVolume
+            Random r = new Random();
+
+            for (int i = 0; i < spawnableFluids.Count; i++)
+            {
+                int numberOfLakes = (int)(biomeDimensions.width * biomeDimensions.height * (spawnableFluids[i].density / 100.0));
+                System.Diagnostics.Debug.WriteLine(numberOfLakes);
+                for (int n = 0; n < numberOfLakes; n++)
+                {
+                    //Add some more logic for fluids of only 1 size: creating water falls
+
+                    if (spawnableFluids[i].maxLakeSize > 1)
+                    {
+                        //Attempt a set number of times to find an air pocket within the biome:
+                        bool foundASpot = false;
+                        int attemptCount = 0;
+
+                        int x = 0;
+                        int y = 0;
+                        while (!foundASpot && attemptCount < maxSpawnAttempts)
+                        {
+                            attemptCount += 1;
+                            //Randomly generate a spot:
+                            x = r.Next(0, biomeDimensions.width);
+                            y = 0;
+                            //If it's a surface biome:
+                            if (biomeOffset.y == 0)
+                            {
+                                y = r.Next(worldGenerator.surfaceHeight[x] + spawnableFluids[i].yMin, worldGenerator.surfaceHeight[x] + spawnableFluids[i].yMax);
+                            }
+                            else
+                            {
+                                //Else if it's not on the surface, base it on the biome dimensions:
+                                if (spawnableFluids[i].yMax < biomeDimensions.height)
+                                {
+                                    y = r.Next(biomeOffset.y + spawnableFluids[i].yMin, biomeOffset.y + spawnableFluids[i].yMax);
+                                }
+                                else
+                                {
+                                    y = r.Next(biomeOffset.y + spawnableFluids[i].yMin, biomeOffset.y + biomeDimensions.height);
+
+                                }
+                            }
+                            if (x >= 0 && x < worldGenerator.worldArray.GetLength(0) && y >= 0 && y < worldGenerator.worldArray.GetLength(1))
+                            {
+                                if (worldGenerator.worldArray[x, y] == 0)
+                                {
+                                    foundASpot = true;
+                                }
+                            }
+                        }
+                        //The spot is air, and thus yay!
+                        //Use the world generator to find a local min
+                        (int minX, int minY) = worldGenerator.findLocalMin(x, y);
+                        int lowestX = minX;
+                        //If the returned point isn't the error value
+                        if (!(minX == 0 && minY == 0))
+                        {
+                            //Fill upwards:
+                            //Search sideways until you hit a wall, then go the other way. Count the number of blocks here, and reduce the lakeSize by that value
+
+                            int searchDirection = 0;
+                            int oppositeDirection = 0;
+                            int resetX = minX;
+                            int resetY = minY;
+
+                            int layerSize = 0;
+
+                            bool hasFaulted = false;
+
+                            int remainingLakeVolume = spawnableFluids[i].maxLakeSize;
+
+                            while (remainingLakeVolume >= 0 && remainingLakeVolume > layerSize && !hasFaulted)
+                            {
+                                bool foundFullLayer = false;
+                                bool hitAWallLeft = false;
+                                bool hitAWallRight = false;
+                                List<(int x, int y)> blocksToSet = new List<(int, int)>();
+                                while (!foundFullLayer && remainingLakeVolume > layerSize && !hasFaulted)
+                                {
+                                    layerSize += 1;
+
+                                    if (searchDirection == 0)
+                                    {
+                                        searchDirection = (2 * r.Next(2)) - 1; //Randomly pick -1 or 1
+                                        resetX = minX;
+                                        resetY = minY;
+                                        oppositeDirection = -1 * searchDirection;
+                                    }
+                                    //Have to include the "search direction" aspect because the reset values are obviously set to the fluid
+                                    if (minX + searchDirection >= 0 && minX + searchDirection < worldGenerator.worldArray.GetLength(0) && minY >= 0 && minY < worldGenerator.worldArray.GetLength(1))
+                                    {
+                                        if (minY < worldGenerator.worldArray.GetLength(1) - 1 ? worldGenerator.worldArray[minX, minY + 1] == 0 : false)
+                                        {
+                                            hasFaulted = true;
+                                        }
+                                        else
+                                        {
+                                            if (worldGenerator.worldArray[minX, minY] == 0)
+                                            {
+                                                blocksToSet.Add((minX, minY));
+                                                minX += searchDirection;
+                                            }
+                                            else
+                                            {
+                                                //Hit a wall!
+                                                if (searchDirection == -1)
+                                                {
+                                                    hitAWallLeft = true;
+                                                }
+                                                else
+                                                {
+                                                    hitAWallRight = true;
+                                                }
+
+
+                                                if (hitAWallLeft && hitAWallRight)
+                                                {
+                                                    foundFullLayer = true;
+                                                    searchDirection = 0;
+                                                }
+                                                else
+                                                {
+                                                    searchDirection = oppositeDirection;
+                                                    minX = resetX + searchDirection;
+                                                    minY = resetY;
+                                                }
+                                            }
+                                        }
+
+
+                                    }
+                                }
+                                if (foundFullLayer)
+                                {
+                                    for (int b = 0; b < blocksToSet.Count; b++)
+                                    {
+                                        worldGenerator.worldArray[blocksToSet[b].x, blocksToSet[b].y] = spawnableFluids[i].fluid.ID;
+                                    }
+                                }
+
+                                minX = lowestX;
+                                minY -= 1;
+                                blocksToSet.Clear();
+                                searchDirection = 0;
+                                remainingLakeVolume -= layerSize;
+
+
+                                layerSize = 0;
+                            }
+
+                        }
+                    }
+                    else {
+                        bool foundASpot = false;
+                        int attemptCount = 0;
+
+                        int x = 0;
+                        int y = 0;
+                        while (!foundASpot && attemptCount < maxSpawnAttempts)
+                        {
+                            attemptCount += 1;
+                            //Randomly generate a spot:
+                            x = r.Next(0, biomeDimensions.width);
+                            y = 0;
+                            //If it's a surface biome:
+                            if (biomeOffset.y == 0)
+                            {
+                                y = r.Next(worldGenerator.surfaceHeight[x] + spawnableFluids[i].yMin, worldGenerator.surfaceHeight[x] + spawnableFluids[i].yMax);
+                            }
+                            else
+                            {
+                                //Else if it's not on the surface, base it on the biome dimensions:
+                                if (spawnableFluids[i].yMax < biomeDimensions.height)
+                                {
+                                    y = r.Next(biomeOffset.y + spawnableFluids[i].yMin, biomeOffset.y + spawnableFluids[i].yMax);
+                                }
+                                else
+                                {
+                                    y = r.Next(biomeOffset.y + spawnableFluids[i].yMin, biomeOffset.y + biomeDimensions.height);
+
+                                }
+                            }
+                            if (x >= 0 && x < worldGenerator.worldArray.GetLength(0) && y >= 0 && y < worldGenerator.worldArray.GetLength(1))
+                            {
+                                if (worldGenerator.worldArray[x, y] == 0)
+                                {
+                                    foundASpot = true;
+                                }
+                            }
+                        }
+                        //Found a spot (presumably):
+                        if (foundASpot) {
+
+                            //Search sideways until hitting a solid block: then, convert that block to the fluid
+                            int searchDirection = (2 * r.Next(2)) - 1; //Randomly pick -1 or 1
+
+                            bool foundAWall = false;
+                            bool faulted = false;
+
+                            while (!foundAWall && !faulted) {
+                                if (x + searchDirection >= 0 && x + searchDirection < worldGenerator.worldArray.GetLength(0) && y >= 0 && y < worldGenerator.worldArray.GetLength(1))
+                                {
+                                    x += searchDirection;
+                                    if (worldGenerator.worldArray[x, y] != 0) {
+                                        //Found a wall:
+                                        worldGenerator.worldArray[x, y] = spawnableFluids[i].fluid.ID;
+                                        foundAWall = true;
+                                    }
+                                }
+                                else {
+                                    faulted = true;
+                                }
+                            }
+                        }
+
+                    }
+                
+                
+                }
+            }
+        }
         public void generateBackground() {
             for (int x = biomeOffset.x; x < biomeOffset.x + biomeDimensions.width; x++) {
                 for (int y = biomeOffset.y; y < biomeOffset.y + biomeDimensions.height; y++) {
-                    if (x >= 0 && x < worldGenerator.surfaceHeight.Length)
+                    if (x >= 0 && x < worldGenerator.surfaceHeight.Length && y >= 0 && y < worldGenerator.backgroundArray.GetLength(1))
                     {
                         if (y >= worldGenerator.surfaceHeight[x])
                         {
@@ -2109,13 +2578,26 @@ namespace PixelMidpointDisplacement
 
         public void generateOres() {
             brownianMotionArray = new BlockGenerationVariables[biomeDimensions.width, biomeDimensions.height];
+            //Only seed the algorithm, implement it into the worlds array and add the ores to a list
             seededBrownianMotion(ores, maxAttempts);
+            
+            for (int x = 0; x < brownianMotionArray.GetLength(0); x++) {
+                for (int y = 0; y < brownianMotionArray.GetLength(1); y++) {
+                    int globalX = x + biomeOffset.x;
+                    int globalY = y + biomeOffset.y;
+
+                    if (globalX > 0 && globalX < worldGenerator.brownianMotionArray.GetLength(0) && globalY > 0 && globalY < worldGenerator.brownianMotionArray.GetLength(1)) {
+                        worldGenerator.brownianMotionArray[globalX, globalY] = brownianMotionArray[x, y];
+                    }
+                }
+            }
+
         }
         private void seededBrownianMotion(BlockGenerationVariables[] oresArray, int attemptCount)
         {
             SeededBrownianMotion sbm = new SeededBrownianMotion();
             brownianMotionArray = sbm.seededBrownianMotion(brownianMotionArray, oresArray);
-            brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, attemptCount);
+            //brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, attemptCount);
         }
 
 
@@ -2158,6 +2640,15 @@ namespace PixelMidpointDisplacement
                 for (int y = gridY; y < worldGenerator.worldArray.GetLength(1); y++)
                 {
                     worldGenerator.worldArray[gridX, y] = 1;
+
+                    if (worldGenerator.worldArray[gridX, y] != 0)
+                    {
+                        if (worldGenerator.surfaceHeight[gridX] > y)
+                        {
+                            worldGenerator.surfaceHeight[gridX] = y;
+                        }
+
+                    }
                 }
             }
 
@@ -2291,6 +2782,8 @@ namespace PixelMidpointDisplacement
 
         public int biomesPerWorld;
 
+        public int externalBiomeIndex;
+
         public List<Type> biomesThisCanSpawnIn = new List<Type>();
 
         public int minY;
@@ -2319,8 +2812,8 @@ namespace PixelMidpointDisplacement
 
         public MeadowBiome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) : base(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions) {
             //Generate the randomised variables
-            initialIterationOffset = 50;
-            decayPower = 1.2;
+            initialIterationOffset = 90;
+            decayPower = 1.1;
             iterations = 10;
             positiveWeight = 30;
 
@@ -2330,7 +2823,7 @@ namespace PixelMidpointDisplacement
 
             ores = new BlockGenerationVariables[]{
             new BlockGenerationVariables(seedDensity : 1, block : new Block(ID : 2), maxSingleSpread : 8, oreVeinSpread : 360), //Dirt
-            new BlockGenerationVariables(0.1, new Block(1), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
+            new BlockGenerationVariables(0.1, new OreBlock((int)blockIDs.ironOre), 1, 4, (0.3, 0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0)),
             new BlockGenerationVariables(0.3, new Block(1), 6, 24)
             };
 
@@ -2352,6 +2845,15 @@ namespace PixelMidpointDisplacement
 
             spawnableEntities = new List<(SpawnableEntity entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface)>() {
                 (new ControlledEntity(wg.worldContext, wg.worldContext.player), 50, 0, 20, 500, 10, false)
+            };
+
+            spawnableFluids = new List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)>()
+            {
+                (new FluidBlock((int)blockIDs.water), 0.01, 600, 1, 1),
+                (new FluidBlock((int)blockIDs.water), 0.01, 600, 1, 20),
+                //x(new FluidBlock((int)blockIDs.water), 0.05, 0, -30, 60)
+
+
             };
 
             //Generate a random biome Width:
@@ -2400,6 +2902,11 @@ namespace PixelMidpointDisplacement
             spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>() {
                 (new Structure("Shrine"), 0.005, biomeDimensions.y, 200)
             };
+
+            spawnableFluids = new List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)>() {
+                (new FluidBlock((int)blockIDs.water), 0.01, 400, 10, 1)
+            };
+
 
             this.biomeDimensions.width = new Random().Next(200, 400);
 
@@ -2840,6 +3347,7 @@ namespace PixelMidpointDisplacement
         public SpriteController spriteController;
         public UIController UIController;
         public EvolutionUIController evolutionController;
+        public CraftingManager craftingManager;
 
         public WorldContext worldContext;
 
@@ -2853,6 +3361,7 @@ namespace PixelMidpointDisplacement
             spriteController = new SpriteController();
             UIController = new UIController();
             evolutionController = new EvolutionUIController(wc);
+            craftingManager = new CraftingManager(wc);
         }
 
 
@@ -3536,6 +4045,105 @@ namespace PixelMidpointDisplacement
             }
         }
     }
+
+    public class CraftItemButton : InteractiveUIElement{
+        Player owner;
+        Item craftedItem;
+        CraftingRecipe recipe;
+
+        public CraftItemBackground background;
+
+        const int drawLayer = 15;
+
+        public int x;
+        public int y;
+
+        public CraftItemButton(CraftingRecipe recipe) {
+            this.recipe = recipe;
+            setItem(recipe.recipeOutput);
+            owner = recipe.manager.worldContext.player;
+
+            recipe.manager.worldContext.engineController.UIController.InteractiveUI.Add(this);
+            recipe.manager.worldContext.engineController.UIController.UIElements.Add((drawLayer, this));
+
+            scene = Scene.Game;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+
+            maxClickCooldown = 0.25f;
+            
+
+            background = new CraftItemBackground();
+            recipe.manager.worldContext.engineController.UIController.UIElements.Add((drawLayer - 1, background));
+
+        }
+        public void setItem(Item item) {
+            if (item != null)
+            {
+                this.craftedItem = item;
+                if (item.currentStackSize <= 1) { buttonText = null; }
+                spriteSheetID = item.spriteSheetID;
+                sourceRectangle = item.sourceRectangle;
+                int offsetWidth = item.drawDimensions.width;
+                int offsetHeight = item.drawDimensions.height;
+
+                //If the sprite is the exact same size, don't offset it by anything
+                //If the sprite is smaller, offset it by half - half the width
+                drawRectangle.Width = item.drawDimensions.width;
+                drawRectangle.Height = item.drawDimensions.height;
+                x = ((64 - offsetWidth)/2 );
+                y = ((64 - offsetHeight)/2);
+                textLocation = new Vector2( offsetWidth + ((64 - offsetWidth) / 2),   offsetWidth + ((64 - offsetHeight) / 2));
+            }
+            else
+            {
+                this.craftedItem = null;
+                sourceRectangle = new Rectangle(0, 0, 0, 0);
+                drawRectangle = new Rectangle(0, 0, 64, 64);
+            }
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            isUIElementActive = recipe.canBeCrafted && recipe.manager.showCraftingSystem;
+            background.drawRectangle.X = drawRectangle.X - x;
+            background.drawRectangle.Y = drawRectangle.Y - y;
+            background.isUIElementActive = isUIElementActive;
+
+            base.updateElement(elapsedTime, game);
+        }
+        public override void onLeftClick(Game1 game)
+        {
+            clickCooldown = maxClickCooldown;
+            
+            if (recipe.canBeCrafted)
+            {
+                Item floatingItem = owner.selectedItem.item;
+                bool couldCombineItems = false;
+                owner.selectedItem.clickedOnAUIElement = true;
+                if (floatingItem != null && craftedItem != null)
+                {
+                    //Add some logic in here for combining items onto a stack when crafting. Shouldn't be super hard to do
+                }
+                else
+                {
+                    owner.selectedItem.setItem(craftedItem.itemCopy(craftedItem.currentStackSize));
+                    recipe.itemWasCrafted();
+                }
+            }
+        }
+    }
+
+    public class CraftItemBackground : UIElement {
+        public CraftItemBackground() {
+            scene = Scene.Game;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            sourceRectangle = new Rectangle(0, 32, 32, 33);
+            drawRectangle = new Rectangle(0,0,64,66);
+        }
+    }
     #endregion
 
     public class EvolutionUIController {
@@ -3604,9 +4212,11 @@ namespace PixelMidpointDisplacement
                 previousLayerButtons = currentLayerButtons;
             }
         }
-
+        //There was A error here...
+        //The evolution tree is null!
         public void updateExperienceCounters() {
             for (int i = 0; i < experienceCounters.Count; i++) {
+                
                 experienceCounters[i].counter.updateString(((int)tree.getExperience(experienceCounters[i].field)).ToString());
                 System.Diagnostics.Debug.WriteLine(experienceCounters[i].field + " : " + experienceCounters[i].counter.stringNumber);
             }
@@ -3990,13 +4600,17 @@ namespace PixelMidpointDisplacement
         public double y { get; set; }
 
         public double kX { get; set; }
+        public double defaultkX { get; set; }
         public double kY { get; set; }
+        public double defaultkY { get; set; }
 
         public double cummulativeCoefficientOfFriction { get; set; }
         public double objectCoefficientOfFriction { get; set; }
 
         public int frictionDirection { get; set; }
         public double bounceCoefficient { get; set; }
+
+        public double buoyancyCoefficient { get; set; }
 
         public double minVelocityX { get; set; }
         public double minVelocityY { get; set; }
@@ -4017,6 +4631,8 @@ namespace PixelMidpointDisplacement
 
         public bool isOnGround { get; set; }
 
+        public bool isInFluid { get; set; }
+
         public PhysicsObject(WorldContext wc)
         {
             impulse = new List<(Vector2 direction, double magnitude, double duration)>();
@@ -4033,6 +4649,7 @@ namespace PixelMidpointDisplacement
             minVelocityX = 0.001;
             minVelocityY = 0.01;
             isOnGround = false;
+            buoyancyCoefficient = 1;
 
             collider = new Rectangle(0, 0, wc.pixelsPerBlock, wc.pixelsPerBlock);
 
@@ -4293,6 +4910,9 @@ namespace PixelMidpointDisplacement
             y = 00.0;
             kX = 0.02;
             kY = 0.02;
+
+            defaultkX = 0.02;
+            defaultkY = 0.02;
             bounceCoefficient = 0.0;
             minVelocityX = 0.5;
             minVelocityY = 0.01;
@@ -4516,6 +5136,8 @@ namespace PixelMidpointDisplacement
 
         public List<IInventory> activeInventories = new List<IInventory>();
 
+        public PlayerCraftingDictionary craftingDictionary;
+
         public UIElement inventoryBackground { get; set; }
         public UIElement equipmentBackground;
 
@@ -4545,6 +5167,8 @@ namespace PixelMidpointDisplacement
 
         public Player(WorldContext wc) : base(wc)
         {
+            wc.setPlayer(this);
+
             loadSettings();
 
             //need to dissociate the collider width and the draw width. 
@@ -4557,7 +5181,7 @@ namespace PixelMidpointDisplacement
             maxMovementVelocityX = 8;
             baseMaxMovementVelocityX = 8;
 
-            objectCoefficientOfFriction = 0;
+            objectCoefficientOfFriction = 1;
 
             owner = this;
 
@@ -4597,7 +5221,7 @@ namespace PixelMidpointDisplacement
 
             inventory[0, 0].setItem(new Pickaxe(worldContext.animationController, this));
 
-            inventory[1, 0].setItem(new BlockItem((int)blockIDs.stone, worldContext.animationController, this));
+            inventory[1, 0].setItem(new BlockItem((int)blockIDs.water, worldContext.animationController, this));
             if (inventory[1, 0].item is BlockItem b3)
             {
                 b3.currentStackSize = 99;
@@ -4617,6 +5241,7 @@ namespace PixelMidpointDisplacement
 
             wc.engineController.entityController.addEntity(this);
 
+            craftingDictionary = new PlayerCraftingDictionary(worldContext.engineController.craftingManager);
 
             initialiseStatGainPerExperience();
 
@@ -4632,8 +5257,8 @@ namespace PixelMidpointDisplacement
             x = initialX;
             y = initialY;
             sr.ReadLine();
-            kX = Convert.ToDouble(sr.ReadLine());
-            kY = Convert.ToDouble(sr.ReadLine());
+            defaultkX = Convert.ToDouble(sr.ReadLine());
+            defaultkY = Convert.ToDouble(sr.ReadLine());
             sr.ReadLine();
             width = Convert.ToDouble(sr.ReadLine());
             height = Convert.ToDouble(sr.ReadLine());
@@ -4671,8 +5296,9 @@ namespace PixelMidpointDisplacement
             evolutionTree.addEvolutionTreeLayer(e2);
 
             worldContext.engineController.evolutionController.setupPlayerEvolutionUI(evolutionTree);
+            worldContext.engineController.evolutionController.setTree(evolutionTree);
 
-           
+
         }
 
         public void initialiseStatGainPerExperience() {
@@ -4759,8 +5385,10 @@ namespace PixelMidpointDisplacement
                     }
                 }
                 equipmentBackground.isUIElementActive = true;
-                
+                worldContext.engineController.craftingManager.inventoryWasOpened();   
             }
+
+            
         }
         public void hideInventory() {
             if (inventory[0, 1].isUIElementActive) {
@@ -4781,6 +5409,9 @@ namespace PixelMidpointDisplacement
                 }
                 equipmentBackground.isUIElementActive = false;
                 selectedItem.dropItem();
+
+                worldContext.engineController.craftingManager.inventoryWasClosed();
+
             }
 
             for (int i = 0; i < activeInventories.Count; i++)
@@ -4788,17 +5419,21 @@ namespace PixelMidpointDisplacement
                 activeInventories[i].hideInventory();
             }
             activeInventories.Clear();
+
         }
-        public bool addItemToInventory(Item item) {
+
+        public bool addItemToInventory(Item item)
+        {
             bool foundASlot = false;
             //Check for any stacks to add the item to
-            for (int y = 0; y < inventory.GetLength(1); y++) {
+            for (int y = 0; y < inventory.GetLength(1); y++)
+            {
                 for (int x = 0; x < inventory.GetLength(0); x++)
                 {
-                    if (!foundASlot && inventory[x, y].item != null)
+                    if (!foundASlot && inventory[x, y].item != null && item.currentStackSize > 0)
                     {
 
-                        if (inventory[x, y].item.GetType() == item.GetType())
+                        if (inventory[x, y].item.isItemIdentical(item))
                         {
                             //Class specific checks:
                             foundASlot = ((IInventory)this).combineItemStacks(item, x, y);
@@ -4825,6 +5460,7 @@ namespace PixelMidpointDisplacement
             }
             return foundASlot;
         }
+
         public override void inputUpdate(double elapsedTime) {
             base.inputUpdate(elapsedTime);
 
@@ -5215,11 +5851,14 @@ namespace PixelMidpointDisplacement
         public Item item;
         public Player owner;
 
+        public bool clickedOnAUIElement = false;
+
         public FloatingUIItem(Player owner) {
             isUIElementActive = false;
             scene = Scene.Game;
             setItem(null);
             this.owner = owner;
+            maxClickCooldown = 0.1f;
         }
         public void setItem(Item item)
         {
@@ -5280,25 +5919,35 @@ namespace PixelMidpointDisplacement
         public override void onLeftClick(Game1 game)
         {
             if (item != null && isUIElementActive) {
-                bool isOutsideAllActiveInventoryBackgrounds = true;
-                for (int i = 0; i < game.worldContext.engineController.UIController.inventoryBackgrounds.Count; i++)
+                clickCooldown = maxClickCooldown;
+                if (!clickedOnAUIElement)
                 {
-                    UIElement inventoryBackground = game.worldContext.engineController.UIController.inventoryBackgrounds[i];
-                    if (inventoryBackground.isUIElementActive)
+                    bool isOutsideAllActiveInventoryBackgrounds = true;
+                    for (int i = 0; i < game.worldContext.engineController.UIController.inventoryBackgrounds.Count; i++)
                     {
-                        if (drawRectangle.X > inventoryBackground.drawRectangle.X && drawRectangle.Y > inventoryBackground.drawRectangle.Y && drawRectangle.X < inventoryBackground.drawRectangle.X + inventoryBackground.drawRectangle.Width && drawRectangle.Y < inventoryBackground.drawRectangle.Y + inventoryBackground.drawRectangle.Height)
+                        UIElement inventoryBackground = game.worldContext.engineController.UIController.inventoryBackgrounds[i];
+                        if (inventoryBackground.isUIElementActive)
                         {
-                            isOutsideAllActiveInventoryBackgrounds = false;
-                            //No need to continue checking, just break
+                            if (drawRectangle.X > inventoryBackground.drawRectangle.X && drawRectangle.Y > inventoryBackground.drawRectangle.Y && drawRectangle.X < inventoryBackground.drawRectangle.X + inventoryBackground.drawRectangle.Width && drawRectangle.Y < inventoryBackground.drawRectangle.Y + inventoryBackground.drawRectangle.Height)
+                            {
+                                isOutsideAllActiveInventoryBackgrounds = false;
+                                //No need to continue checking, just break
 
-                            break;
+                                break;
+                            }
                         }
                     }
+                    if (isOutsideAllActiveInventoryBackgrounds)
+                    {
+                        dropItem();
+                    }
                 }
-                if (isOutsideAllActiveInventoryBackgrounds) {
-                    dropItem();
-                }
+
+
+                clickedOnAUIElement = false;
             }
+
+
         }
     }
     public class UIItem : InteractiveUIElement
@@ -5393,7 +6042,7 @@ namespace PixelMidpointDisplacement
             bool couldCombineItems = false;
             if (floatingItem != null && item != null)
             {
-                if (floatingItem.GetType() == item.GetType())
+                if (floatingItem.isItemIdentical(item))
                 {
 
                     couldCombineItems = inventory.combineItemStacks(floatingItem, inventoryIndex.x, inventoryIndex.y);
@@ -5757,6 +6406,10 @@ namespace PixelMidpointDisplacement
             itemAnimator = null;
         }
 
+        public virtual bool isItemIdentical(Item otherItem) {
+            return otherItem.GetType() == this.GetType();
+        }
+
         public virtual Item itemCopy(int stackSize) {
             Item i = new Item(owner);
             i.currentStackSize = stackSize;
@@ -5982,7 +6635,7 @@ namespace PixelMidpointDisplacement
 
             useCooldown = 0f;
 
-            spriteSheetID = 2;
+            spriteSheetID = (int)spriteSheetIDs.blockItems;
             verticalDirection = 1;
 
             sourceRectangle = new Rectangle(0, (blockID - 1) * 8, 8, 8);
@@ -6033,6 +6686,15 @@ namespace PixelMidpointDisplacement
             }
         }
 
+        public override bool isItemIdentical(Item otherItem) {
+            if (otherItem is BlockItem b)
+            {
+                return b.blockID == blockID;
+            }
+            else {
+                return false;
+            }
+        }
         public override Item itemCopy(int stackSize)
         {
             BlockItem i = new BlockItem(blockID, animationController, owner);
@@ -6042,6 +6704,9 @@ namespace PixelMidpointDisplacement
     }
     public class Pickaxe : Item {
         int digSize = 1;
+
+        public double pickaxeStrength = 15;
+        public double durabilityPerHit = 1;
         public Pickaxe(AnimationController ac, Player owner) : base(owner)
         {
             spriteSheetID = (int)spriteSheetIDs.weapons;
@@ -6089,15 +6754,132 @@ namespace PixelMidpointDisplacement
                         int usedY = y - (int)Math.Floor(digSize / 2.0);
                         if (mouseXGridSpace + usedX > 0 && mouseXGridSpace + usedX < owner.worldContext.worldArray.GetLength(0) && mouseYGridSpace + usedY > 0 && mouseYGridSpace + usedY < owner.worldContext.worldArray.GetLength(1))
                         {
-                            owner.worldContext.deleteBlock(mouseXGridSpace + usedX, mouseYGridSpace + usedY);
+                            owner.worldContext.damageBlock(pickaxeStrength, durabilityPerHit, mouseXGridSpace + usedX, mouseYGridSpace + usedY);
+                            if (owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY].ID != 0 && owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY].durability <= 0) {
+                                onBlockDeleted(owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY], mouseXGridSpace + usedX, mouseYGridSpace + usedY);
+                                owner.worldContext.deleteBlock(mouseXGridSpace + usedY, mouseYGridSpace + usedY);
+                            }
                         }
                     }
                 }
             }
         }
 
+        public virtual void onBlockDeleted(Block b, int x, int y) {
+        }
         public override Item itemCopy(int stackSize) {
             return new Pickaxe(animationController, owner);
+        }
+    }
+    public class OreItem : Item {
+        public int oreID;
+        const int textureHeight = 16;
+        public OreItem(int oreID, AnimationController ac, Player owner) : base(owner) {
+            animationController = ac;
+            spriteSheetID = (int)spriteSheetIDs.oreSpriteSheet;
+            this.oreID = oreID;
+            sourceRectangle = new Rectangle(0, textureHeight * oreID, textureHeight, textureHeight);
+
+            this.owner = owner;
+
+            useCooldown = 0f;
+
+            spriteSheetID = (int)spriteSheetIDs.oreSpriteSheet;
+            verticalDirection = 1;
+
+
+            drawDimensions = (24, 24);
+
+            origin = new Vector2(-2, 18f);
+            constantRotationOffset = 0;
+
+            spriteEffect = SpriteEffects.None;
+
+
+            maxStackSize = 999;
+            currentStackSize = 1;
+        }
+
+        public override void onLeftClick()
+        {
+            offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
+            itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
+
+            animationController.addAnimator(itemAnimator);
+        }
+
+        public override bool isItemIdentical(Item otherItem)
+        {
+            if (otherItem is OreItem ore)
+            {
+                return ore.oreID == oreID;
+            }
+            else {
+                return false;
+            }
+        }
+
+        public override Item itemCopy(int stackSize) {
+            OreItem ore = new OreItem(oreID, animationController, owner);
+            ore.currentStackSize = stackSize;
+            return ore;
+        }
+    }
+    public class IngotItem : Item {
+        public int ingotID;
+        const int textureHeight = 16;
+        public IngotItem(int ingotID, AnimationController ac, Player owner) : base(owner)
+        {
+            animationController = ac;
+            spriteSheetID = (int)spriteSheetIDs.oreSpriteSheet;
+            this.ingotID = ingotID;
+            sourceRectangle = new Rectangle(0, textureHeight * ingotID, textureHeight, textureHeight);
+
+            this.owner = owner;
+
+            useCooldown = 0f;
+
+            spriteSheetID = (int)spriteSheetIDs.ingotSpriteSheet;
+            verticalDirection = 1;
+
+
+            drawDimensions = (24, 24);
+
+            origin = new Vector2(-2, 18f);
+            constantRotationOffset = 0;
+
+            spriteEffect = SpriteEffects.None;
+
+
+            maxStackSize = 999;
+            currentStackSize = 1;
+        }
+
+        public override void onLeftClick()
+        {
+            offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
+            itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
+
+            animationController.addAnimator(itemAnimator);
+        }
+
+        public override bool isItemIdentical(Item otherItem)
+        {
+            if (otherItem is IngotItem ore)
+            {
+                return ore.ingotID == ingotID;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        public override Item itemCopy(int stackSize)
+        {
+            IngotItem ore = new IngotItem(ingotID, animationController, owner);
+            ore.currentStackSize = stackSize;
+            return ore;
         }
     }
     public class EquipableItem : Item {
@@ -6151,7 +6933,6 @@ namespace PixelMidpointDisplacement
             return e;
         }
     }
-
     public class Helmet : Equipment {
         public Helmet(AnimationController ac, Player player) : base(player) {
             equipmentType = ArmorType.Head;
@@ -6511,8 +7292,9 @@ namespace PixelMidpointDisplacement
         public bool isBlockTransparent = false;
         public (int width, int height) dimensions = (1, 1); //Default to 1 by 1 blocks
         public Vector4 faceDirection;
-        
 
+        public double hardness = 15;
+        public double durability = 3;
         public Block(Rectangle textureSourceRectangle, int ID)
         {
             this.sourceRectangle = textureSourceRectangle;
@@ -6665,6 +7447,223 @@ namespace PixelMidpointDisplacement
             return new Block(this);
         }
     }
+
+    public class FluidBlock : Block {
+
+        public bool isSourceBlock = true;
+        public int sourceX;
+        public int sourceY;
+
+        public int distanceFromLastDown = 0;
+        public int maxDistanceFromLastDown = 14;
+
+        public bool deleteNextFrame = false;
+
+        public bool addNextFrame = false;
+        public int gridXToAdd;
+        public int gridYToAdd;
+
+        const int textureSize = 32;
+
+        public double viscosityX = 200;
+        public double viscosityY = 50;
+
+
+        int leftFlowingY;
+        int rightFlowingY;
+
+        public Vector2 flowingDirection = new Vector2(0, 0);
+
+        int gravity = 1;
+
+
+        public double fluidBuoyancy = 20;
+        const double maxBuoyancyVelocity = 5;
+
+
+        public double fluidFlowForce = 25;
+        public double maxFlowVelocity = 4;
+        
+
+        public FluidBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID) {
+            rightFlowingY = textureSourceRectangle.Y;
+            leftFlowingY = rightFlowingY + textureSize;
+            isBlockTransparent = true;
+        }
+
+        public FluidBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID) {
+            isBlockTransparent = true;
+            rightFlowingY = textureSourceRectangle.Y;
+            leftFlowingY = rightFlowingY + textureSize;
+        }
+
+        public FluidBlock(int ID) : base(ID) {
+            isBlockTransparent = true;
+        }
+
+        public FluidBlock(Block b) : base(b) {
+            isBlockTransparent = true;
+            rightFlowingY = b.sourceRectangle.Y;
+            leftFlowingY = rightFlowingY + textureSize;
+        }
+
+        public void setSource(int x, int y)
+        {
+            sourceX = x;
+            sourceY = y;
+        }
+
+        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
+        {
+            //I think all I want, is if it collides with the smaller rectangle, apply a bouyant force:
+            Rectangle entityCollider = new Rectangle((int)entity.x, (int)entity.y, entity.collider.Width, entity.collider.Height);
+
+            int fluidHeight = wc.pixelsPerBlock / (distanceFromLastDown + 1);
+            
+            Rectangle blockRect = new Rectangle(((x + 1) * wc.pixelsPerBlock) - fluidHeight, y * wc.pixelsPerBlock, wc.pixelsPerBlock, fluidHeight);
+
+            Vector2 collisionNormal = physicsEngine.computeCollisionNormal(entityCollider, blockRect);
+
+
+            if (entityCollider.Intersects(blockRect)) {
+
+
+                if (entity.kX < viscosityX * entity.defaultkX) {
+                    entity.kX = viscosityX * entity.defaultkX;
+                }
+                if (entity.kY < viscosityY * entity.defaultkY)
+                {
+                    entity.kY = viscosityY * entity.defaultkY;
+                }
+
+                if (entity.velocityY < maxBuoyancyVelocity && !entity.isInFluid)
+                {
+                    entity.accelerationY += fluidBuoyancy * entity.buoyancyCoefficient;
+                }
+                if (entity.velocityX < maxFlowVelocity)
+                {
+                    entity.accelerationX += flowingDirection.X * fluidFlowForce;
+                    entity.accelerationY += flowingDirection.Y * fluidFlowForce;
+                }
+                entity.isInFluid = true;
+
+            }
+        }
+
+        public void setDistanceFromLastDown(int distance) {
+            distanceFromLastDown = distance;
+
+            sourceRectangle.X = distance * textureSize;
+        }
+
+        public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
+        {
+            base.onBlockPlaced(worldContext, location);
+            setSource(location.x, location.y);
+        }
+
+        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
+        {
+            if (isSourceBlock)
+            {
+                base.onBlockDestroyed(exposedBlocks, wc);
+            }
+        }
+
+        public void tickFluid(WorldContext wc) {
+            if (deleteNextFrame) {
+                wc.deleteBlock(x, y);
+            }
+            else {
+                if (addNextFrame) {
+                    wc.deleteBlock(gridXToAdd, gridYToAdd);
+                    wc.addBlock(gridXToAdd, gridYToAdd, ID);
+                    if (wc.worldArray[gridXToAdd, gridYToAdd] is FluidBlock f) 
+                    {
+                        if (gridXToAdd < x) {
+                            f.sourceRectangle.Y = leftFlowingY;
+                            f.flowingDirection.X = -1;
+                        }
+                        if (gridXToAdd > x)
+                        {
+                            f.flowingDirection.X = 1;
+                        }
+                        f.isSourceBlock = false;
+                        if (gravity > 0 ? gridYToAdd > y : gridYToAdd < y)
+                        {
+                            f.setDistanceFromLastDown(0);
+                            f.flowingDirection.X = 0;
+                        }
+                        else {
+                            f.setDistanceFromLastDown(distanceFromLastDown + 1);
+                        }
+                        f.setSource(x, y);
+                        addNextFrame = false;
+                    }
+                }
+            if (!isSourceBlock)
+            {
+                //Find if any block around them is a fluid: if not, then terminate itself (ID == 0)
+                bool hasAdjacentFluid = false;
+
+                if (wc.worldArray[sourceX, sourceY].ID == ID)
+                {
+                    hasAdjacentFluid = true;
+                }
+
+
+                if (hasAdjacentFluid == false)
+                {
+                    deleteNextFrame = true;
+                }
+            }
+
+                if (y < wc.worldArray.GetLength(1) - gravity && distanceFromLastDown < maxDistanceFromLastDown)
+                {
+                    if ((wc.worldArray[x, y + gravity].ID == (int)blockIDs.air || wc.worldArray[x, y + gravity].isBlockTransparent) && wc.worldArray[x, y + gravity].ID != (int)blockIDs.chest && wc.worldArray[x, y + gravity] is not FluidBlock)
+                    {
+                        //spread downwards
+                        addNextFrame = true;
+                        gridXToAdd = x;
+                        gridYToAdd = y + gravity;
+                    }
+                    else
+                    {
+                        if (wc.worldArray[x, y + gravity].ID != ID)
+                        {
+                            //Check either side
+                            if (x < wc.worldArray.GetLength(0) - 1)
+                            {
+                                if ((wc.worldArray[x + 1, y].ID == (int)blockIDs.air || wc.worldArray[x + 1, y].isBlockTransparent) && wc.worldArray[x + 1, y].ID != (int)blockIDs.chest && wc.worldArray[x + 1, y] is not FluidBlock)
+                                {
+                                    addNextFrame = true;
+                                    gridXToAdd = x + 1;
+                                    gridYToAdd = y;
+                                }
+                            }
+                            if (x > 0)
+                            {
+                                if ((wc.worldArray[x - 1, y].ID == (int)blockIDs.air || wc.worldArray[x - 1, y].isBlockTransparent) && wc.worldArray[x - 1, y].ID != (int)blockIDs.chest && wc.worldArray[x - 1, y] is not FluidBlock)
+                                {
+                                    addNextFrame = true;
+                                    gridXToAdd = x - 1;
+                                    gridYToAdd = y;
+
+                                }
+                            }
+                        }
+
+                    }
+                }
+
+            }
+        }
+
+        public override Block copyBlock()
+        {
+            return new FluidBlock(sourceRectangle, ID);
+        }
+    }
     public class InteractiveBlock : Block {
         public double secondsSinceAction;
         public double maximumCooldown;
@@ -6689,6 +7688,57 @@ namespace PixelMidpointDisplacement
         }
     }
 
+    public class OreBlock : Block {
+        int oreID;
+
+        
+
+        public OreBlock(Rectangle textureSourceRectangle, int ID, int oreID) : base(textureSourceRectangle, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            this.oreID = oreID;
+        }
+        public OreBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID, int oreID) : base(textureSourceRectangle, emmissiveStrength, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            this.emmissiveStrength = emmissiveStrength;
+            this.oreID = oreID;
+        }
+        public OreBlock(int ID) : base(ID)
+        {
+            this.ID = ID;
+        }
+
+        public OreBlock(Block b) : base(b)
+        {
+            sourceRectangle = b.sourceRectangle;
+            emmissiveStrength = b.emmissiveStrength;
+            ID = b.ID;
+            hardness = 15;
+            durability = 5;
+            if (b is OreBlock ob)
+            {
+                oreID = ob.oreID;
+            }
+        }
+
+        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
+        {
+            blockDestroyed(exposedBlocks);
+            Random r = new Random();
+            DroppedItem dropBlock = new DroppedItem(wc, new OreItem(oreID, wc.animationController, wc.player), (x, y), new Vector2((float)r.NextDouble(), (float)r.NextDouble()));
+
+            dropBlock.x = x * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0;
+            dropBlock.y = y * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0;
+            dropBlock.pickupDelay = 0f;
+        }
+
+        public override Block copyBlock()
+        {
+            return new OreBlock(this);
+        }
+    }
+    
     public class GrassBlock : Block
     {
 
@@ -6712,6 +7762,8 @@ namespace PixelMidpointDisplacement
             sourceRectangle = b.sourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
+            hardness = 15;
+            durability = 5;
         }
 
         public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
@@ -7403,6 +8455,255 @@ namespace PixelMidpointDisplacement
     }
     #endregion
 
+    #region Crafting Dictionaries
+    public class CraftingManager {
+        //The manager contains the player's base dictionary, and when opening an inventory it searches all nearby blocks for blocks with crafting dictionaries and adds them to a list if that type is not already present
+
+        //The manager also controls the visibility of the crafting items in a set range of options that scroll.
+        public WorldContext worldContext;
+
+        const int numberOfVisibleRecipes = 4;
+
+        const int pixelsBetweenElements = 5;
+
+        List<CraftItemButton> craftableRecipes = new List<CraftItemButton>();
+
+        public int scrollValueWhenInventoryWasOpened = 0;
+
+        public int x = 10;
+        public int y = 500;
+
+        public bool showCraftingSystem = false;
+
+        List<CraftingDictionary> dictionaries = new List<CraftingDictionary>();
+        public CraftingManager(WorldContext worldContext) {
+            this.worldContext = worldContext;
+        }
+
+        public void inventoryWasOpened() {
+            scrollValueWhenInventoryWasOpened = Mouse.GetState().ScrollWheelValue / 120;
+            showCraftingSystem = true;
+            //Find all of the nearby crafting dictionaries:
+            
+            dictionaries.Add(worldContext.player.craftingDictionary);
+           
+        }
+
+        public void inventoryWasClosed() {
+            showCraftingSystem = false;
+            dictionaries.Clear();
+        }
+        public void managerUpdate() {
+            if (showCraftingSystem)
+            {
+                //Reset and update them all
+                for (int i = 0; i < dictionaries.Count; i++)
+                {
+                    dictionaries[i].resetCraftingRecipes();
+                    dictionaries[i].updateCraftingRecipes(worldContext.player);
+                }
+
+                int indexValue = (Mouse.GetState().ScrollWheelValue / 120) - scrollValueWhenInventoryWasOpened;
+
+                for (int i = 0; i < craftableRecipes.Count; i++)
+                {
+                    craftableRecipes[i].isUIElementActive = false;
+                    craftableRecipes[i].background.isUIElementActive = false;
+                }
+
+                for (int i = indexValue; i < craftableRecipes.Count && i < indexValue + numberOfVisibleRecipes; i++)
+                {
+                    if (i >= 0)
+                    {
+                        craftableRecipes[i].drawRectangle.Y = (int)(((craftableRecipes[i].background.drawRectangle.Height + pixelsBetweenElements) * (i - indexValue)) + y + craftableRecipes[i].y);
+                        craftableRecipes[i].drawRectangle.X = x + craftableRecipes[i].x;
+
+                        craftableRecipes[i].isUIElementActive = true;
+                        craftableRecipes[i].background.isUIElementActive = true;
+                    }
+                }
+
+                craftableRecipes.Clear();
+            }
+        }
+
+        public void addRecipeButton(CraftItemButton button) {
+            if (!craftableRecipes.Contains(button)) {
+                craftableRecipes.Add(button);
+            }
+        }
+
+        public void reduceItemQuantity(Item item, int quantity) {
+            IInventory inventory = worldContext.player;
+
+            
+            Item itemInInventory = null;
+            int indexX;
+            int indexY;
+
+            (itemInInventory, indexX, indexY) = inventory.findItemInInventory(item);
+
+
+            while (quantity > 0 && itemInInventory != null)
+            {
+                (itemInInventory, indexX, indexY) = inventory.findItemInInventory(item);
+
+                if (itemInInventory != null)
+                {
+                    if (quantity <= itemInInventory.currentStackSize)
+                    {
+                        itemInInventory.currentStackSize -= quantity;
+                        quantity = 0;
+                    }
+                    else
+                    {
+                        quantity -= itemInInventory.currentStackSize;
+                        itemInInventory.currentStackSize = 0;
+                    }
+
+                    if (itemInInventory.currentStackSize <= 0) {
+                        inventory.inventory[indexX, indexY].setItem(null);
+                    }
+                }
+            }
+        }
+    }
+    public class CraftingDictionary {
+        /*
+         A dictionary of craftable options that can be parented in different child classes for crafting stations
+
+         The dictionary is a controller of crafting recipes, passing in an inventory, it enables UI elements th
+         at pertain to a crafting recipe
+        
+         Contains a list of:
+         InteractiveUI crafting button,
+         List of (Item, recipe quantity, inventory quantity) recipe materials
+         */
+
+
+        public CraftingManager manager;
+        public List<CraftingRecipe> craftingRecipes = new List<CraftingRecipe>();
+        public CraftingDictionary(CraftingManager manager) {
+            this.manager = manager;
+        }
+        public void updateCraftingRecipes(IInventory inventory) {
+            //For each item within the inventory, loop through the crafting recipe list and add the ingredient quantity to any relevant recipe
+            for (int y = 0; y < inventory.inventory.GetLength(1); y++) {
+                for (int x = 0; x < inventory.inventory.GetLength(0); x++) {
+                    if (inventory.inventory[x, y].item != null) {
+                        for (int r = 0; r < craftingRecipes.Count; r++)
+                        {
+                            for (int i = 0; i < craftingRecipes[r].ingredientList.Count; i++)
+                            {
+                                if (craftingRecipes[r].ingredientList[i].ingredient.isItemIdentical(inventory.inventory[x, y].item))
+                                {
+                                    craftingRecipes[r].ingredientList[i].addInventoryQuantity(inventory.inventory[x, y].item.currentStackSize);
+                                }
+                            }
+
+                        }
+                    }
+                }
+            }
+
+            //Then, check each crafting recipe and see if it is craftable given the items in the inventory
+            for (int i = 0; i < craftingRecipes.Count; i++) {
+                craftingRecipes[i].canRecipeBeCrafted();
+            }
+            //This could almost definitely be more optimized, but for now this seems logical
+        }
+
+        public void resetCraftingRecipes() {
+            for (int i = 0; i < craftingRecipes.Count; i++) {
+                for (int y = 0; y < craftingRecipes[i].ingredientList.Count; y++) {
+                    craftingRecipes[i].ingredientList[y].setInventoryQuantity(0);
+                }
+            }
+        }
+
+    }
+    public class CraftingRecipe {
+        public CraftingManager manager;
+        public Item recipeOutput;
+        public CraftItemButton craftButton;
+        public List<RecipeIngredient> ingredientList;
+
+        public bool canBeCrafted = false;
+
+        public CraftingRecipe(Item recipeResult, int resultQuantity, List<RecipeIngredient> ingredientList, CraftingManager manager){
+            recipeOutput = recipeResult;
+            if (resultQuantity <= recipeOutput.maxStackSize)
+            {
+                recipeOutput.currentStackSize = resultQuantity;
+            } else {
+                recipeOutput.currentStackSize = recipeOutput.maxStackSize;
+            }
+            this.ingredientList = ingredientList;
+            this.manager = manager;
+
+            craftButton = new CraftItemButton(this);
+        }
+
+        public void canRecipeBeCrafted() {
+            canBeCrafted = true;
+
+            for (int i = 0; i < ingredientList.Count; i++) {
+                if (!ingredientList[i].doesRecipeHaveEnough()) {
+                    canBeCrafted = false;
+                }
+            }
+
+            if (canBeCrafted)
+            {
+                manager.addRecipeButton(craftButton);
+            }
+                craftButton.isUIElementActive = false;
+        }
+
+        public void itemWasCrafted() {
+            //Put the logic in here for reducing the ingredients within the users inventory
+            for (int i = 0; i < ingredientList.Count; i++) {
+                manager.reduceItemQuantity(ingredientList[i].ingredient, ingredientList[i].requiredQuantity);
+            }
+        }
+    }
+    public class RecipeIngredient {
+        public Item ingredient;
+        public int requiredQuantity;
+        public int inventoryQuantity;
+
+        public RecipeIngredient(Item ingredient, int requiredQuantity) {
+            this.ingredient = ingredient;
+            this.requiredQuantity = requiredQuantity;
+        }
+
+        public void setInventoryQuantity(int inventoryQuantity) {
+            this.inventoryQuantity = inventoryQuantity;
+        }
+
+        public void addInventoryQuantity(int newQuantity) {
+            inventoryQuantity += newQuantity;
+        }
+
+        public bool doesRecipeHaveEnough() {
+            return inventoryQuantity >= requiredQuantity;
+        }
+        
+    }
+
+    public class PlayerCraftingDictionary : CraftingDictionary {
+        public PlayerCraftingDictionary(CraftingManager manager) : base(manager) {
+          
+
+            CraftingRecipe ironIngot = new CraftingRecipe(new IngotItem((int)oreIDs.iron, manager.worldContext.animationController, manager.worldContext.player), 1, new List<RecipeIngredient>() { new RecipeIngredient(new OreItem((int)oreIDs.iron, manager.worldContext.animationController, manager.worldContext.player), 3)}, manager);
+
+            craftingRecipes.Add(ironIngot);
+
+            CraftingRecipe swordRecipe = new CraftingRecipe(new Weapon(manager.worldContext.animationController, manager.worldContext.player), 1, new List<RecipeIngredient>() { new RecipeIngredient(new IngotItem((int)oreIDs.iron, manager.worldContext.animationController, manager.worldContext.player), 10) }, manager);
+            craftingRecipes.Add(swordRecipe);
+        }
+    }
+    #endregion
     #region Interfaces
     public interface ICollider
     {
@@ -7676,35 +8977,65 @@ namespace PixelMidpointDisplacement
             worldContext.engineController.UIController.UIElements.Remove(InventoryBackgroundElement);
         }
 
+        public bool addItemToInventory(Item item)
+        {
+            bool foundASlot = false;
+            //Check for any stacks to add the item to
+            for (int y = 0; y < inventory.GetLength(1); y++)
+            {
+                for (int x = 0; x < inventory.GetLength(0); x++)
+                {
+                    if (!foundASlot && inventory[x, y].item != null && item.currentStackSize > 0)
+                    {
+
+                        if (inventory[x, y].item.isItemIdentical(item))
+                        {
+                            //Class specific checks:
+                            foundASlot = combineItemStacks(item, x, y);
+                        }
+                    }
+                }
+            }
+            if (!foundASlot)
+            {
+                for (int y = 0; y < inventory.GetLength(1); y++)
+                {
+                    for (int x = 0; x < inventory.GetLength(0); x++)
+                    {
+                        if (!foundASlot)
+                        {
+                            if (inventory[x, y].item == null)
+                            {
+                                inventory[x, y].setItem(item);
+                                foundASlot = true;
+                            }
+                        }
+                    }
+                }
+            }
+            return foundASlot;
+        }
         public bool combineItemStacks(Item item, int x, int y)
         {
             bool foundASlot = false;
-            bool isTheRightItem = true;
-            if (item is BlockItem bItem && inventory[x, y].item is BlockItem inventoryItem)
-            {
-                if (bItem.blockID != inventoryItem.blockID)
-                {
-                    isTheRightItem = false;
-                }
-            }
+            bool isTheRightItem = item.isItemIdentical(inventory[x,y].item);
+            
             if (isTheRightItem)
             {
                 int amountUntilMaxStack = inventory[x, y].item.maxStackSize - inventory[x, y].item.currentStackSize;
-                if (amountUntilMaxStack > 0)
+                if (amountUntilMaxStack > 0 && item.currentStackSize > 0)
                 {
                     int stackSizeToAdd = item.currentStackSize;
                     if (stackSizeToAdd > amountUntilMaxStack) { stackSizeToAdd = amountUntilMaxStack; }
-                    
                     inventory[x, y].item.currentStackSize += stackSizeToAdd;
-                    
+
                     item.currentStackSize -= stackSizeToAdd;
                     if (item.currentStackSize <= 0)
                     {
                         foundASlot = true;
                     }
-
-
                 }
+                
             }
             return foundASlot;
         }
@@ -7724,7 +9055,6 @@ namespace PixelMidpointDisplacement
             }
 
         }
-
         public void hideInventory()
         {
             if (inventory[0, 1].isUIElementActive)
@@ -7740,8 +9070,34 @@ namespace PixelMidpointDisplacement
                 inventoryBackground.isUIElementActive = false;
             }
         }
-    
-        
+
+        public (Item, int, int) findItemInInventory(Item item) {
+            Item foundItem = null;
+            int indexX  = 0;
+            int indexY = 0;
+
+            if (item != null)
+            {
+                for (int y = 0; y < inventory.GetLength(1); y++)
+                {
+                    for (int x = 0; x < inventory.GetLength(0); x++)
+                    {
+                        if (inventory[x, y].item != null)
+                        {
+                            if (inventory[x, y].item.isItemIdentical(item))
+                            {
+                                foundItem = inventory[x, y].item;
+                                indexX = x;
+                                indexY = y;
+                            }
+                        }
+                    }
+                }
+            }
+            
+
+            return (foundItem, indexX, indexY);
+        }
     }
 
     public interface IGroundTraversalAlgorithm {
@@ -7891,12 +9247,18 @@ namespace PixelMidpointDisplacement
         dirt,
         grass,
         torch,
-        chest
+        chest,
+        water,
+        ironOre
     }
     public enum backgroundBlockIDs {
         air,
         stone,
         woodenPlanks
+    }
+
+    public enum oreIDs {
+        iron
     }
     public enum spriteSheetIDs
     {
@@ -7915,7 +9277,9 @@ namespace PixelMidpointDisplacement
         pixelNumbers,
         evolutionBackground,
         evolutionIcons,
-        evolutionCounterCharacters
+        evolutionCounterCharacters,
+        oreSpriteSheet,
+        ingotSpriteSheet
     }
     public enum Scene {
         MainMenu,
@@ -8234,7 +9598,6 @@ namespace PixelMidpointDisplacement
 
             while (attempts < attemptCount) //Runs until no changes have been made in that iteration.
             {
-                Console.WriteLine("Iterated!");
                 bool hasChangedTheArray = false;
                 //Read everything from the worldArray but write to the tempArray then equalise at the end
                 BlockGenerationVariables[,] tempArray = worldArray.Clone() as BlockGenerationVariables[,];

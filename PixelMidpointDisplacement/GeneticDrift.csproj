@@ -21,8 +21,10 @@
     <None Remove="Content\evolutionCounterCharacters.png" />
     <None Remove="Content\evolutionIconsSpriteSheet.png" />
     <None Remove="Content\healthUISpriteSheet.png" />
+    <None Remove="Content\ingotSpriteSheet.png" />
     <None Remove="Content\inventorySpriteSheet.png" />
     <None Remove="Content\MainMenuUISpriteSheet.png" />
+    <None Remove="Content\oreSpriteSheet.png" />
     <None Remove="Content\pixelNumbers.png" />
     <None Remove="Content\Player.png" />
     <None Remove="Content\PlayerSpriteSheet.png" />
@@ -69,10 +71,16 @@
     <Content Include="Content\healthUISpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Content\ingotSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Content\inventorySpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\MainMenuUISpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\oreSpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\pixelNumbers.png">
