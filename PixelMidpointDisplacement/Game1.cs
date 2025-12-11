@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Vector2 = Microsoft.Xna.Framework.Vector2;
 using Vector3 = Microsoft.Xna.Framework.Vector3;
@@ -149,13 +150,25 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
 
 
 
-    Hardness and breaking duration:
+    Hardness and breaking duration:                                                                                                                     - Done
         - Blocks have a "hardness" and "durability" value
             -> The hardness defines the pickaxe strength required to be able to break the block
             -> THe durability is how close a block is to breaking. If it hits zero, then the block is broken
 
         - Pickaxes currently have a 'use duration,' so just add a "pickaxe strength" value and possibly a second "durability per hit" value
     
+    Item UI:
+        - An information box that comes up when hovering over an item. Works through a string conversion system. Has to be variable to allow for modification systems.
+            -> Header tags
+            -> Bolding
+            -> Color tags?
+
+        - Have to create a:
+            -> string to text converter
+            -> Variable size background
+            -> Tag system (like html)
+            
+
  */
 
 /*
@@ -328,6 +341,10 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionCounterCharacters.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\oreSpriteSheet.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ingotSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\stringRenderingSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\tooltipBackgroundSpriteSheet.png"));
+
+
 
 
 
@@ -446,7 +463,7 @@ namespace PixelMidpointDisplacement
             _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
             drawLines();
             drawUI();
-            drawInteractiveUIString();
+            //drawInteractiveUIString();
             _spriteBatch.End();
             GraphicsDevice.SetRenderTarget(null);
             _spriteBatch.Begin();
@@ -522,7 +539,13 @@ namespace PixelMidpointDisplacement
                     if (uiElement.positionType == Position.Relative) { drawRect.X = (int)(drawRect.X * widthScale); drawRect.Y = (int)(drawRect.Y * heightScale); }
                     if (uiElement.isUIElementActive)
                     {
-                        _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[uiElement.spriteSheetID], drawRect, uiElement.sourceRectangle, Color.White);
+                        _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[uiElement.spriteSheetID], drawRect, uiElement.sourceRectangle, uiElement.color);
+
+                        if (uiElement is InteractiveUIElement iue) {
+                            if (iue.buttonText != null) {
+                                _spriteBatch.DrawString(itemCountFont, iue.buttonText, iue.textLocation, Color.White);
+                            }
+                        }
                     }
                 }
             }
@@ -3480,6 +3503,7 @@ namespace PixelMidpointDisplacement
         public UIAlignOffset alignment;
         public Position positionType;
         public Scale scaleType;
+        public Color color = Color.White;
 
         public const int defaultScreenWidth = 1920;
         public const int defaultScreenHeight = 1080;
@@ -3575,11 +3599,18 @@ namespace PixelMidpointDisplacement
             scaleType = Scale.Relative;
             tickCount = 0;
             scene = Scene.MainMenu;
-            this.generateWorldText = generateWorldText;
+            //this.generateWorldText = generateWorldText;
         }
         public override void onLeftClick(Game1 game)
         {
-            generateWorldText.isUIElementActive = true;
+            //generateWorldText.isUIElementActive = true;
+            if (tickCount == 0)
+            {
+                StringRenderer sr = new StringRenderer(game.worldContext, Scene.MainMenu, UIAlignOffset.Centre, 42 ,false);
+                sr.setString("Generating the world");
+                sr.updateLocation(0, 350);
+
+            }
             tickCount += 1;
 
         }
@@ -4144,6 +4175,592 @@ namespace PixelMidpointDisplacement
             drawRectangle = new Rectangle(0,0,64,66);
         }
     }
+
+    public class StringRenderer
+    {
+        public List<StringCharacter> visualisedString = new List<StringCharacter>();
+
+
+        public string stringToRender;
+
+        const int UILayer = 18;
+
+        int textDrawHeight;
+
+        public bool isVisible = true;
+
+        public TooltipBackground background;
+
+        WorldContext wc;
+
+        Scene scene;
+        UIAlignOffset stringOffset;
+
+        bool haveBackground = false;
+
+        int maxLineLength = 0;
+
+        public int x;
+        public int y;
+
+        int borderOffsetX;
+        int borderOffsetY;
+        public StringRenderer(WorldContext worldContext, Scene scene, UIAlignOffset offset, int textHeight, bool haveBackground)
+        {
+            wc = worldContext;
+            this.scene = scene;
+            this.haveBackground = haveBackground;
+            this.textDrawHeight = textHeight;
+
+            stringOffset = offset;
+        }
+
+        public void updateLocation(int x, int y)
+        {
+            if (stringOffset == UIAlignOffset.Centre) {
+                x -= maxLineLength / 2;
+            }
+
+            this.x = x;
+            this.y = y;
+
+
+            for (int i = 0; i < visualisedString.Count; i++)
+            {
+                visualisedString[i].drawRectangle.X = visualisedString[i].x + x;
+                visualisedString[i].drawRectangle.Y = visualisedString[i].y + y;
+            }
+            if (background != null)
+            {
+                background.setLocation(x, y);
+            }
+        }
+
+        public void showString() {
+            for (int i = 0; i < visualisedString.Count; i++)
+            {
+                visualisedString[i].isUIElementActive = true;
+            }
+
+            if (background != null)
+            {
+                background.showBackground();
+            }
+            isVisible = true;
+        }
+
+        public void hideString() {
+            for (int i = 0; i < visualisedString.Count; i++) {
+                visualisedString[i].isUIElementActive = false;
+            }
+
+            if (background != null) {
+                background.hideBackground();
+            }
+            isVisible = false;
+        }
+
+        public void setString(string stringToSet)
+        {
+            stringToRender = stringToSet;
+
+            for (int i = 0; i < visualisedString.Count; i++)
+            {
+                //Clear it from the other lists
+                wc.engineController.UIController.UIElements.Remove((UILayer, visualisedString[i]));
+            }
+            visualisedString.Clear();
+
+            int trailingX = 0;
+            int baseTrailingX = 0;
+            int maxLineHeight = 35;
+            int currentLineY = 0;
+
+            maxLineLength = 0;
+            int textHeight = 0;
+
+            Tag currentTag = Tag.None;
+
+            for (int i = 0; i < stringToRender.Length; i++)
+            {
+                if (stringToRender[i] == '\n')
+                {
+                    currentLineY += maxLineHeight;
+                    trailingX = baseTrailingX;
+                    maxLineHeight = 0;
+                }
+                else if (stringToRender[i] == '<')
+                {
+                    //Find in the string the next '>' tag and take the string between
+                    if (stringToRender[i + 1] != '/')
+                    {
+                        int endTagIndex = stringToRender.IndexOf('>', i);
+                        string tag = stringToRender.Substring(i + 1, endTagIndex - (i + 1)).ToLower();
+
+                        switch (tag)
+                        {
+                            case "purple":
+                                currentTag |= Tag.Purple;
+                                break;
+                            case "green":
+                                currentTag |= Tag.Green;
+                                break;
+                            case "grey":
+                                currentTag |= Tag.Grey;
+                                break;
+                            case "gold":
+                                currentTag |= Tag.Gold;
+                                break;
+                            case "red":
+                                currentTag |= Tag.Red;
+                                break;
+                            case "h1":
+                                currentTag |= Tag.H1;
+                                break;
+                            case "h2":
+                                currentTag |= Tag.H2;
+                                break;
+                            case "h3":
+                                currentTag |= Tag.H3;
+                                break;
+
+                        }
+
+                        i = endTagIndex;
+                    }
+                    else
+                    {
+                        //Is an end tag
+                        int endTagIndex = stringToRender.IndexOf('>', i);
+                        string tag = stringToRender.Substring(i + 2, endTagIndex - (i + 2)).ToLower();
+
+                        switch (tag)
+                        {
+                            case "purple":
+                                currentTag &= ~Tag.Purple;
+                                break;
+                            case "green":
+                                currentTag &= ~Tag.Green;
+                                break;
+                            case "grey":
+                                currentTag &= ~Tag.Grey;
+                                break;
+                            case "gold":
+                                currentTag &= ~Tag.Gold;
+                                break;
+                            case "red":
+                                currentTag &= ~Tag.Red;
+                                break;
+                            case "h1":
+                                currentTag &= ~Tag.H1;
+                                break;
+                            case "h2":
+                                currentTag &= ~Tag.H2;
+                                break;
+                            case "h3":
+                                currentTag &= ~Tag.H3;
+                                break;
+
+                        }
+                        i = endTagIndex;
+                    }
+                }
+                else
+                {
+                    TextStyle currentStyle = TextStyle.None;
+                    if ((currentTag & Tag.H1) == Tag.H1)
+                    {
+                        currentStyle |= TextStyle.h1;
+                    }
+                    else if ((currentTag & Tag.H2) == Tag.H2)
+                    {
+                        currentStyle |= TextStyle.h2;
+                    }
+                    else if ((currentTag & Tag.H3) == Tag.H3)
+                    {
+                        currentStyle |= TextStyle.h3;
+                    }
+
+                    StringCharacter c = new StringCharacter(stringToRender[i], textDrawHeight, trailingX, currentLineY, currentStyle);
+                    
+                    c.scene = scene;
+                    c.alignment = stringOffset;
+                    //I could improve this by allowing for nested color tags
+                    if ((currentTag & Tag.Purple) == Tag.Purple)
+                    {
+                        c.color = Color.Purple;
+                    }
+                    else if ((currentTag & Tag.Green) == Tag.Green)
+                    {
+                        c.color = Color.Green;
+                    }
+                    else if ((currentTag & Tag.Gold) == Tag.Gold)
+                    {
+                        c.color = Color.Gold;
+                    }
+                    else if ((currentTag & Tag.Grey) == Tag.Grey)
+                    {
+                        c.color = Color.Gray;
+                    }
+                    else if ((currentTag & Tag.Red) == Tag.Red)
+                    {
+                        c.color = Color.Red;
+                    }
+                    trailingX += c.drawRectangle.Width;
+                    if (maxLineLength < trailingX)
+                    {
+                        maxLineLength = trailingX;
+                    }
+                    if (c.drawRectangle.Height > maxLineHeight)
+                    {
+                        maxLineHeight = c.drawRectangle.Height;
+                    }
+
+                    visualisedString.Add(c);
+                    wc.engineController.UIController.UIElements.Add((UILayer, c));
+                }
+            }
+            if (background != null) {
+                background.clear();
+            }
+            if (haveBackground)
+            {
+                background = new TooltipBackground(wc, scene, stringOffset, maxLineLength, currentLineY + maxLineHeight, x, y);
+            }
+        }
+
+        public void replaceAllTags(Tag find, Tag replaceWith)
+        {
+            string tagToFind = tagToString(find);
+
+
+
+            string tagToReplace = tagToString(replaceWith);
+            //Replace the start and end tags in two different stages:
+            //Add a "<" at the start, then insert a "><" into all of the spaces, then add a ">"
+            if (tagToFind != "" && tagToReplace != "")
+            {
+                string startTagToFind = tagToFind;
+                startTagToFind = "<" + startTagToFind;
+                while (startTagToFind != startTagToFind.Replace(" ", "><"))
+                {
+                    startTagToFind = startTagToFind.Replace(" ", "><");
+                }
+                string startTagToReplace = tagToReplace;
+                startTagToReplace = "<" + startTagToReplace;
+                while (startTagToReplace != startTagToReplace.Replace(" ", "><"))
+                {
+                    startTagToReplace = startTagToReplace.Replace(" ", "><");
+                }
+
+                while (stringToRender.Replace(startTagToFind, startTagToReplace) != stringToRender)
+                {
+                    stringToRender = stringToRender = stringToRender.Replace(startTagToFind, startTagToReplace);
+                }
+
+
+                //End tags:
+
+                string endTagToFind = tagToFind;
+                endTagToFind = "</" + endTagToFind;
+                while (endTagToFind != endTagToFind.Replace(" ", "></"))
+                {
+                    endTagToFind = endTagToFind.Replace(" ", "></");
+                }
+
+                string endTagToReplace = tagToReplace;
+                endTagToReplace = "</" + endTagToReplace;
+                while (endTagToReplace != endTagToReplace.Replace(" ", "></"))
+                {
+                    endTagToReplace = endTagToReplace.Replace(" ", "></");
+                }
+
+                System.Diagnostics.Debug.WriteLine(endTagToFind);
+
+
+                while (stringToRender.Replace(endTagToFind, endTagToReplace) != stringToRender)
+                {
+                    stringToRender = stringToRender.Replace(endTagToFind, endTagToReplace);
+                }
+
+
+            }
+            setString(stringToRender);
+        }
+
+        public string tagToString(Tag tag)
+        {
+            string stringVersion = "";
+            if ((tag & Tag.Purple) == Tag.Purple)
+            {
+                stringVersion += "purple ";
+            }
+            if ((tag & Tag.Green) == Tag.Green)
+            {
+                stringVersion += "green ";
+            }
+            if ((tag & Tag.Grey) == Tag.Grey)
+            {
+                stringVersion += "grey ";
+            }
+            if ((tag & Tag.Gold) == Tag.Gold)
+            {
+                stringVersion += "gold ";
+            }
+            if ((tag & Tag.Red) == Tag.Red)
+            {
+                stringVersion += "red ";
+            }
+            if ((tag & Tag.H1) == Tag.H1)
+            {
+                stringVersion += "h1 ";
+            }
+            if ((tag & Tag.H2) == Tag.H2)
+            {
+                stringVersion += "h2 ";
+            }
+            if ((tag & Tag.H3) == Tag.H3)
+            {
+                stringVersion += "h3 ";
+            }
+
+            stringVersion = stringVersion.TrimEnd();
+
+            return stringVersion;
+
+        }
+    }
+    public class StringCharacter : UIElement
+    {
+        double drawScale = 3;
+        
+
+        const int characterWidth = 5;
+        const int characterHeight = 7;
+
+        public int x;
+        public int y;
+
+        bool isAlphabet = false;
+
+        public StringCharacter(char character, int drawHeight, int x, int y, TextStyle style)
+        {
+            isUIElementActive = true;
+            spriteSheetID = (int)spriteSheetIDs.stringRendering;
+
+            alignment = UIAlignOffset.TopLeft;
+            scaleType = Scale.Absolute;
+            positionType = Position.Absolute;
+
+            drawScale = drawHeight / (double)characterHeight;
+
+            this.x = x;
+            this.y = y;
+            int relativeValue = -4;
+            if (65 <= character && character <= 90)
+            {
+                //Is a capital letter
+                relativeValue = character - 'A';
+                isAlphabet = true;
+            }
+            else if (97 <= character && character <= 122)
+            {
+                relativeValue = character - 'a';
+                isAlphabet = true;
+            }
+
+            if (style == TextStyle.h1)
+            {
+                drawScale *= 2;
+            }
+            else if (style == TextStyle.h2)
+            {
+                drawScale = drawScale * 1.8;
+            }
+            else if (style == TextStyle.h3)
+            {
+                drawScale = drawScale * 1.6;
+            }
+            else if (style == TextStyle.h4)
+            {
+                drawScale = drawScale * 1.4;
+            }
+            else if (style == TextStyle.h5)
+            {
+                drawScale = drawScale * 1.2;
+            }
+
+            drawRectangle = new Rectangle(x, y, (int)(characterWidth * drawScale), (int)(characterHeight * drawScale));
+
+            if (isAlphabet)
+            {
+                sourceRectangle = new Rectangle(4 * relativeValue, 0, 5, 7);
+
+                if (relativeValue > 12)
+                {
+                    sourceRectangle.X += 2;
+                }
+                else if (relativeValue == 12)
+                {
+                    sourceRectangle.Width += 2;
+                    drawRectangle.Width += (int)(drawScale * 2);
+                }
+                if (relativeValue > 13)
+                {
+                    sourceRectangle.X += 1;
+                }
+                else if (relativeValue == 13)
+                {
+                    sourceRectangle.Width += 1;
+
+                    drawRectangle.Width += (int)drawScale;
+                }
+
+                if (relativeValue > 22)
+                {
+                    sourceRectangle.X += 2;
+                }
+                else if (relativeValue == 22)
+                {
+                    sourceRectangle.Width += 2;
+
+                    drawRectangle.Width += (int)(drawScale * 2);
+                }
+            }
+
+            //If it's not an alphabetical character, then check if it's a number:
+            else if (48 <= character && character <= 57)
+            {
+                relativeValue = character - 48;
+                sourceRectangle = new Rectangle(relativeValue * (characterWidth - 1), 6, characterWidth, characterHeight);
+            }
+            //Special cases
+            //Does use magic numbers, so sorry, however they can be found from the alphabet.png file
+            if (character == ' ')
+            {
+                drawRectangle.Width = (int)(characterWidth * drawScale) / 2;
+            }
+            else if (character == ':')
+            {
+                sourceRectangle = new Rectangle(0, 14, characterWidth, characterHeight);
+            }
+            else if (character == '!')
+            {
+                sourceRectangle = new Rectangle(5, 14, characterWidth, characterHeight);
+            }
+            else if (character == '%')
+            {
+                sourceRectangle = new Rectangle(9, 14, characterWidth, characterHeight);
+            }
+        }
+
+    }
+
+    public class TooltipBackground
+    {
+        public int x;
+        public int y;
+        TooltipBackgroundSegment top = new TooltipBackgroundSegment();
+        TooltipBackgroundSegment body = new TooltipBackgroundSegment();
+        TooltipBackgroundSegment bottom = new TooltipBackgroundSegment();
+
+        const int UILayer = 17;
+
+        WorldContext wc;
+
+
+        const int imageWidth = 64;
+        const int pixelsHighToBorder = 12;
+
+        double drawScale = 1;
+        //3 parts:
+
+        int height;
+        int width;
+
+        const int pixelOffset = 8;
+    
+        public TooltipBackground(WorldContext wc, Scene scene, UIAlignOffset offset, int width, int height, int x, int y)
+        {
+            //Scale the image according to the width, then variably increase the height by cutting it into 3 sections
+            this.x = x;
+            this.y = y;
+            this.wc = wc;
+
+
+            drawScale = (double)width / (imageWidth - 2 * pixelOffset);
+
+            height += (int)(drawScale);
+            width += (int)(2 * pixelOffset * drawScale);
+            this.height = height;
+            this.width = width;
+
+            top.scene = scene;
+            top.alignment = offset;
+            body.scene = scene;
+            body.alignment = offset;
+            bottom.scene = scene;
+            bottom.alignment = offset;
+            top.drawRectangle = new Rectangle(x, y, width, (int)(pixelsHighToBorder * drawScale));
+            body.drawRectangle = new Rectangle(x, y + (int)(pixelsHighToBorder * drawScale), width, height - (int)(pixelsHighToBorder * drawScale));
+            bottom.drawRectangle = new Rectangle(x, y + height, width, (int)(pixelsHighToBorder * drawScale));
+
+            top.sourceRectangle = new Rectangle(0, 0, imageWidth, pixelsHighToBorder);
+            body.sourceRectangle = new Rectangle(0, pixelsHighToBorder, imageWidth, imageWidth - 2 * pixelsHighToBorder);
+            bottom.sourceRectangle = new Rectangle(0, imageWidth - pixelsHighToBorder, imageWidth, pixelsHighToBorder);
+
+            wc.engineController.UIController.UIElements.Add((UILayer, top));
+            wc.engineController.UIController.UIElements.Add((UILayer, body));
+            wc.engineController.UIController.UIElements.Add((UILayer, bottom));
+
+        }
+
+        public void setLocation(int x, int y)
+        {
+            top.drawRectangle.X = x - (int)(pixelOffset * drawScale);
+            top.drawRectangle.Y = y - (int)(pixelOffset * drawScale);
+
+            body.drawRectangle.X = x - (int)(pixelOffset * drawScale);
+            body.drawRectangle.Y = y + (int)(pixelsHighToBorder * drawScale) - (int)(pixelOffset * drawScale);
+
+
+            bottom.drawRectangle.X = x - (int)(pixelOffset * drawScale);
+            bottom.drawRectangle.Y = y + height - (int)(pixelOffset * drawScale);
+
+
+        }
+
+        public void hideBackground() {
+            top.isUIElementActive = false;
+            body.isUIElementActive = false;
+            bottom.isUIElementActive = false;
+        }
+
+        public void showBackground() {
+            top.isUIElementActive = true;
+            body.isUIElementActive = true;
+            bottom.isUIElementActive = true;
+        }
+
+        public void clear() {
+            wc.engineController.UIController.UIElements.Remove((UILayer, top));
+            wc.engineController.UIController.UIElements.Remove((UILayer, body));
+            wc.engineController.UIController.UIElements.Remove((UILayer, bottom));
+
+
+        }
+    }
+
+    public class TooltipBackgroundSegment : UIElement {
+        public TooltipBackgroundSegment() {
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            alignment = UIAlignOffset.TopLeft;
+            spriteSheetID = (int)spriteSheetIDs.tooltipBackground;
+            isUIElementActive = true;
+        }
+    }
+    
     #endregion
 
     public class EvolutionUIController {
@@ -6030,6 +6647,27 @@ namespace PixelMidpointDisplacement
                 {
                     buttonText = item.currentStackSize.ToString();
                 }
+                if (isUIElementActive)
+                {
+                    if (item.tooltipRenderer != null)
+                    {
+                        
+                        if (new Rectangle(Mouse.GetState().X, Mouse.GetState().Y, 5, 5).Intersects(drawRectangle))
+                        {
+                            if (item.tooltipRenderer.isVisible == false)
+                            {
+                                item.tooltipRenderer.showString();
+                            }
+                            else {
+                                item.tooltipRenderer.updateLocation(Mouse.GetState().X + 25, Mouse.GetState().Y + 25);
+                            }
+                        }
+                        else if(item.tooltipRenderer.isVisible == true)
+                        {
+                            item.tooltipRenderer.hideString();
+                        }
+                    }
+                }
             }
             else {
                 buttonText = "";
@@ -6047,6 +6685,13 @@ namespace PixelMidpointDisplacement
 
                     couldCombineItems = inventory.combineItemStacks(floatingItem, inventoryIndex.x, inventoryIndex.y);
                     if (couldCombineItems) {
+                        if (item != null)
+                        {
+                            if (item.tooltipRenderer != null)
+                            {
+                                item.tooltipRenderer.hideString();
+                            }
+                        }
                         owner.selectedItem.setItem(null);
                         inventory.inventory[inventoryIndex.x, inventoryIndex.y].setItem(inventory.inventory[inventoryIndex.x, inventoryIndex.y].item);
                     }
@@ -6054,6 +6699,14 @@ namespace PixelMidpointDisplacement
             }
             if (!couldCombineItems)
             {
+                if (item != null)
+                {
+                    if (item.tooltipRenderer != null)
+                    {
+                        item.tooltipRenderer.hideString();
+                    }
+                }
+
                 owner.selectedItem.setItem(item);
                 setItem(floatingItem);
                 if (inventoryIndex.x == owner.mainHandIndex && owner == inventory)
@@ -6374,6 +7027,9 @@ namespace PixelMidpointDisplacement
 
         public int currentStackSize { get; set; }
 
+        public string tooltip;
+        public StringRenderer tooltipRenderer;
+
 
         public (int width, int height) drawDimensions { get; set; }
         public Animator itemAnimator { get; set; }
@@ -6477,6 +7133,18 @@ namespace PixelMidpointDisplacement
             maxStackSize = 1;
             currentStackSize = 1;
 
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltip =
+                "<h2>Iron Sword</h2>\n\n" +
+                "Damage: <gold>" + weaponDamage + "</gold>\n" +
+                "<grey>A weapon designed in the olde' days \n" +
+                "made for one purpose: Death </grey>";
+
+            tooltipRenderer.setString(tooltip);
+
+            tooltipRenderer.hideString();
+
         }
         //Adjusted to define the rectangular vertices only once, this should be a bit more efficient
         public override void onLeftClick()
@@ -6575,6 +7243,8 @@ namespace PixelMidpointDisplacement
         }
     }
     public class Bow : Item {
+
+        public double bowDamage = 10;
         public Bow(AnimationController ac, Player owner) : base(owner) {
             spriteSheetID = (int)spriteSheetIDs.weapons;
             animationController = ac;
@@ -6592,6 +7262,18 @@ namespace PixelMidpointDisplacement
             currentStackSize = 1;
 
             useCooldown = 0f;
+
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltip =
+                "<h2>Wooden Bow</h2>\n\n" +
+                "Damage: <gold>" +  bowDamage + "</gold>\n" +
+                "Increasing as the velocity changes\n" +
+                "<grey>The greatest rival of any melee, range.</grey>";
+
+            tooltipRenderer.setString(tooltip);
+
+            tooltipRenderer.hideString();
         }
 
         public override void onLeftClick()
@@ -6653,6 +7335,18 @@ namespace PixelMidpointDisplacement
 
             maxStackSize = 999;
             currentStackSize = 1;
+
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltip =
+                "<h2>" + (blockIDs)BlockID + " Block</h2>\n\n" +
+                
+                "<grey>The humble objects you \n" +
+                "dedicate your life to destroying </grey>";
+
+            tooltipRenderer.setString(tooltip);
+
+            tooltipRenderer.hideString();
 
             //When you pick up an item, you check the inventory for an item of the same type. If that item already exists, check the stack size. If the stack size
             //is less than the max, just add to the current stacksize, otherwise add the item to the inventory in the next empty slot
@@ -6728,6 +7422,15 @@ namespace PixelMidpointDisplacement
             currentStackSize = 1;
 
             useCooldown = 0f;
+
+            tooltip = "<gold><h2>Pickaxe</gold></h2> \n \n" +
+                "Pickaxe Strength: <gold>" + pickaxeStrength + "%</gold>\n" +
+                "Used to mine the world \n \n" +
+                "<grey>This pickaxe holds the secrets \n to many deep caverns</grey>";
+
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltipRenderer.setString(tooltip);
         }
 
         public override void onLeftClick()
@@ -6798,6 +7501,18 @@ namespace PixelMidpointDisplacement
 
             maxStackSize = 999;
             currentStackSize = 1;
+
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltip =
+                "<h2>" + (oreIDs)(oreID) + " ore </h2>\n\n" +
+                
+                "<grey>A precious metal found within\n" +
+                "the Earth.</grey>";
+
+            tooltipRenderer.setString(tooltip);
+
+            tooltipRenderer.hideString();
         }
 
         public override void onLeftClick()
@@ -6853,6 +7568,18 @@ namespace PixelMidpointDisplacement
 
             maxStackSize = 999;
             currentStackSize = 1;
+
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltip =
+                "<h2>" + (oreIDs)(ingotID) + " ingot </h2>\n\n" +
+
+                "<grey>A now refined precious metal \n" +
+                "found within the Earth.</grey>";
+
+            tooltipRenderer.setString(tooltip);
+
+            tooltipRenderer.hideString();
         }
 
         public override void onLeftClick()
@@ -6987,6 +7714,19 @@ namespace PixelMidpointDisplacement
             currentStackSize = 1;
 
             useCooldown = 0f;
+
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltip =
+                "<h2>Amulet of fall negation</h2>\n\n" +
+
+                "<grey>A magic amulet that\n" +
+                "prevents the wearer from taking\n" +
+                "fall damage.</grey>";
+
+            tooltipRenderer.setString(tooltip);
+
+            tooltipRenderer.hideString();
         }
 
         public override double onDamageTaken(DamageType damageType, double damage, object source)
@@ -7023,6 +7763,19 @@ namespace PixelMidpointDisplacement
             currentStackSize = 1;
 
             useCooldown = 0f;
+
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltip =
+                "<h2>Cloud In A Jar</h2>\n\n" +
+
+                "<grey>A bottle containing\n" +
+                "a fine mist. Whoever opens\n" +
+                "the jar gets a little upwards boost.</grey>";
+
+            tooltipRenderer.setString(tooltip);
+
+            tooltipRenderer.hideString();
         }
 
         public override void onInput(double elapsedTime)
@@ -9279,7 +10032,9 @@ namespace PixelMidpointDisplacement
         evolutionIcons,
         evolutionCounterCharacters,
         oreSpriteSheet,
-        ingotSpriteSheet
+        ingotSpriteSheet,
+        stringRendering,
+        tooltipBackground
     }
     public enum Scene {
         MainMenu,
@@ -9305,7 +10060,31 @@ namespace PixelMidpointDisplacement
         Damage,
         Maneuverability,
     }
-    
+
+    public enum TextStyle
+    {
+        None = 0b_0000_0000,
+        h1 = 0b_0000_0001,
+        h2 = 0b_0000_0010,
+        h3 = 0b_0000_0100,
+        h4 = 0b_0000_1000,
+        h5 = 0b_0001_0000,
+
+    }
+    public enum Tag
+    {
+        None = 0b_0000_0000,
+        Purple = 0b_0000_0001,
+        Green = 0b_0000_0010,
+        Gold = 0b_0000_0100,
+        Red = 0b_0000_1000,
+        Grey = 0b_0001_0000,
+        H1 = 0b_0010_0000,
+        H2 = 0b_0100_0000,
+        H3 = 0b_1000_0000,
+
+    }
+
     #endregion
     #region World Generation Algorithms
     public class BlockGenerationVariables
