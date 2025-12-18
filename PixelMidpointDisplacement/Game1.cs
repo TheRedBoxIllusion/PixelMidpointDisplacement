@@ -9,8 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
+
 using Vector2 = Microsoft.Xna.Framework.Vector2;
 using Vector3 = Microsoft.Xna.Framework.Vector3;
 using Vector4 = Microsoft.Xna.Framework.Vector4;
@@ -157,7 +156,7 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
 
         - Pickaxes currently have a 'use duration,' so just add a "pickaxe strength" value and possibly a second "durability per hit" value
     
-    Item UI:
+    Item UI:                                                                                                                                            - Done
         - An information box that comes up when hovering over an item. Works through a string conversion system. Has to be variable to allow for modification systems.
             -> Header tags
             -> Bolding
@@ -167,7 +166,65 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
             -> string to text converter
             -> Variable size background
             -> Tag system (like html)
-            
+
+    Decorations: 
+        - A new generation pass to create 'decorations,' things like trees, grass & flowers based on certain spawn conditions
+            -> Decorations will have a .generate(int x, int y) function that can allow for both simple (like a single grass block) and complex generation (Like a tree)
+
+        - Decorations are spawned biome specific when the world is generating. There are two main types:
+            Surface:
+                - Surface generating decorations have a density that accounts only for the width of the biome
+                - For each type of decoration, its spawned in a sequence: For every generation, spawn the decoration then move a set distance horizontally between the max and min distance values
+                    -> Continue looping until enough of the decoration has been spawned. This will allow forests (very short maximum distances) as well as sparse coverage
+                - The y value will just be the block above the current surface
+
+            Non-Surface:
+                - Non-surface decorations will account for both height and width (within their max and min spawn heights) when considering the amount to spawn.
+                - Their spawn range will move the set distance in both x and y axis
+
+    Sun system: Things to fix                                                                                                   - In Progress
+        - Getting the right blocks to be considered 'exposed to air' such as those below a transparent block or fluid           - Done
+
+        - Fixing edges                                                                                                          - Done
+            -> Blocks on the edge of the screen cast large amounts of light because the shadow faces don't extend to the corners of the screen
+
+        - Trees don't cast solar shadows                                                                                        - Done
+            -> Fix: Any block including or above the surface height casts a solar shadow! Fixes this issue
+
+        - Cave mouths                                                                                                           - Done
+            -> Won't get any shadows cast by the blocks themselves if they're underneath an overhang
+
+        - Maybe making the sun actually far away and doing a normal render pass will be better? Just make the x and y proportional to the angles of the sun, and make the sun outside the screen        - Implemented
+            -> Will need to find an a solution regarding going underground & edges of the screen
+                - Fix:
+                    Find the lowest surface height on screen, and draw a square from that height (or if it's higher than the top of the screen, the top of the screen) to the bottom of the screen and across the entire width
+                    Then, cast a shadow from the height at the far right and the far left surface heights, down to the bottom of the screen. This should cover all combinations, issues and heights
+
+
+            - To make the sunlight not jolt away, lets have its luminosity fall off as the player go further underground        - Need to do
+
+            - This should only apply to the sun!                                                                                - Done
+            - For all lights, do a boundary check: Check the edges of the screen, and draw lines between every air block (aka where non-transparent blocks are)
+
+        - Extend the shadow casting of the blocks in the sun to those past the edges of the screen by some amount               - Need to do
+
+
+    Improved leaves
+        - Make the semi leaf blocks detect all nearby leaves and determine their state based on the blocks directly around them:
+        
+        - Make tree generation create a grouping of 'semi-leaves' in all the air pockets around each leaf block
+        
+        - Have to figure out shader shadows and how that looks
+
+    Sky / Biome backgrounds:                                                                                                    - Generalised done, now need to make each biome have their own
+        - Parallax between layers
+        
+        - Each biome has their own unique sky (doesn't have to be unique per se                                                 - Will be implemented later, along with the improved biome detection
+            -> Gets drawn each frame
+        
+
+    Add a moon:
+        - Just a second mode of the sun, make the sunlight fade as the angle gets lower (and higher i guess) before resetting the location to the opposite side of the world
 
  */
 
@@ -258,6 +315,9 @@ namespace PixelMidpointDisplacement
         double fluidTickSpeed;
         double maxFluidTickSpeed = 0.3;
 
+        //+++++++++++++++++++++++
+        int UIElementCountLastFrame = 0;
+
         public Game1()
         {
             _graphics = new GraphicsDeviceManager(this);
@@ -343,6 +403,8 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ingotSpriteSheet.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\stringRenderingSpriteSheet.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\tooltipBackgroundSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\skySpriteSheet.png"));
+
 
 
 
@@ -412,7 +474,7 @@ namespace PixelMidpointDisplacement
 
             if (currentScene == Scene.Game)
             {
-
+                worldContext.sun.updateTime(gameTime.ElapsedGameTime.TotalSeconds);
                 updateChatSystem(gameTime);
                 updatePhysicsObjects(gameTime);
                 calculateScreenspaceOffset();
@@ -421,6 +483,7 @@ namespace PixelMidpointDisplacement
                 updateBiome(gameTime);
                 tickAnimations(gameTime);
                 updateEntities(gameTime);
+                worldContext.sun.sky.updateSky(worldContext);
                 worldContext.engineController.craftingManager.managerUpdate();
 
                 if (fluidTickSpeed <= 0)
@@ -447,6 +510,7 @@ namespace PixelMidpointDisplacement
             {
                 GraphicsDevice.SetRenderTarget(spriteRendering);
                 _spriteBatch.Begin(samplerState: SamplerState.PointClamp, blendState: BlendState.NonPremultiplied);
+                drawSky();
                 drawBlocks();
                 drawCoords(gameTime);
                 drawDebugInfo();
@@ -477,7 +541,11 @@ namespace PixelMidpointDisplacement
 
         #region Main menu update methods
         public void updateUI(GameTime gameTime) {
-            worldContext.engineController.UIController.UIElements = worldContext.engineController.UIController.UIElements.OrderBy(uiElement => uiElement.drawOrder).ToList();
+            if (worldContext.engineController.UIController.wasElementAdded)
+            {
+                worldContext.engineController.UIController.UIElements = worldContext.engineController.UIController.UIElements.OrderBy(uiElement => uiElement.drawOrder).ToList();
+            }
+            worldContext.engineController.UIController.wasElementAdded = false;
             for (int i = 0; i < worldContext.engineController.UIController.UIElements.Count; i++) {
                 if (worldContext.engineController.UIController.UIElements[i].uiElement.scene == currentScene)
                 {
@@ -585,14 +653,12 @@ namespace PixelMidpointDisplacement
                 {
                     writeToChat = false;
                     chatCountdown = 3;
-                    System.Diagnostics.Debug.WriteLine("Write to chat was disabled");
                 }
                 else
                 {
                     writeToChat = true;
                     chatCountdown = 3;
                     chat = "";
-                    System.Diagnostics.Debug.WriteLine("write to chat was enabled");
                 }
             }
             if (writeToChat)
@@ -900,14 +966,17 @@ namespace PixelMidpointDisplacement
                     {
                         if (worldContext.worldArray[x, y].ID == (int)blockIDs.air || worldContext.worldArray[x, y].isBlockTransparent)
                         {
-                            int lightValue = worldContext.lightArray[x, y];
-                            if (lightValue > 255)
+                            if (worldContext.backgroundArray[x, y] != (int)backgroundBlockIDs.air)
                             {
-                                lightValue = 255;
+                                int lightValue = worldContext.lightArray[x, y];
+                                if (lightValue > 255)
+                                {
+                                    lightValue = 255;
+                                }
+                                Color lightLevel = Color.White;
+                                if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
+                                _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.blockBackground], new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), new Rectangle(0, worldContext.backgroundArray[x, y] * 32, 32, 32), lightLevel);
                             }
-                            Color lightLevel = Color.White;
-                            if (!useShaders) { lightLevel = new Color(lightValue, lightValue, lightValue); }
-                            _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[(int)spriteSheetIDs.blockBackground], new Rectangle(x * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x, y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y, (int)worldContext.pixelsPerBlock, (int)worldContext.pixelsPerBlock), new Rectangle(0, worldContext.backgroundArray[x, y] * 32, 32, 32), lightLevel);
                         }
                         if (worldContext.worldArray[x, y].ID != (int)blockIDs.air)
                         {
@@ -934,6 +1003,12 @@ namespace PixelMidpointDisplacement
             }
         }
 
+        public void drawSky() {
+            for (int i = 0; i < worldContext.sun.sky.skyLayers.Count; i++) {
+                SkyLayer layer = worldContext.sun.sky.skyLayers[i];
+                _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[worldContext.sun.sky.spriteSheet], layer.drawRectangle, layer.sourceRectangle, Color.White);
+            }
+        }
         public void drawDebugInfo()
         {
             if (Mouse.GetState().MiddleButton == ButtonState.Pressed)
@@ -982,7 +1057,8 @@ namespace PixelMidpointDisplacement
             _spriteBatch.DrawString(ariel, playerAcceleration, new Vector2(10, _graphics.PreferredBackBufferHeight - 150 + 70), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, (int)(1 / gameTime.ElapsedGameTime.TotalSeconds) + " fps", new Vector2(200, _graphics.PreferredBackBufferHeight - 150 + 10), Color.BlueViolet);
             _spriteBatch.DrawString(ariel, worldContext.engineController.lightingSystem.lights.Count + " lights", new Vector2(450, _graphics.PreferredBackBufferHeight - 150 + 10), Color.BlueViolet);
-            _spriteBatch.DrawString(ariel, player.collisionCount.ToString(), new Vector2(200, _graphics.PreferredBackBufferHeight - 180), Color.BlueViolet);
+            _spriteBatch.DrawString(ariel, Math.Sin(worldContext.sun.angle) + " sun angle", new Vector2(450, _graphics.PreferredBackBufferHeight - 150), Color.BlueViolet);
+
 
         }
 
@@ -1058,6 +1134,9 @@ namespace PixelMidpointDisplacement
                 GraphicsDevice.SetRenderTarget(lightMap);
                 GraphicsDevice.Clear(new Color(0.1f, 0.1f, 0.1f));
 
+                //Sun pass:
+                calculateSun();
+
                 for (int i = 0; i < worldContext.engineController.lightingSystem.lights.Count; i++)
                 {
 
@@ -1094,23 +1173,16 @@ namespace PixelMidpointDisplacement
             }
         }
         #region shader calculation methods
-        public void calculateLightmap(IEmissive lightObject, Vector2 lightPosition)
-        {
-            calculateLight.Parameters["lightIntensity"].SetValue(lightObject.luminosity);
-            calculateLight.Parameters["lightColor"].SetValue(lightObject.lightColor);
-            calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
-            calculateLight.Parameters["lightPosition"].SetValue(lightPosition);
-            //calculateLight.Parameters["Mask"].SetValue(finalShadowMap);
 
-
-            GraphicsDevice.SetRenderTarget(lightObject.lightMap);
-
-
-            _spriteBatch.Begin(effect: calculateLight);
-            _spriteBatch.Draw(lightObject.shadowMap, Vector2.Zero, Color.White);
-            _spriteBatch.End();
-
+        public void calculateSun() {
+            Vector2 lightPosition = new Vector2(0.5f + (float)(worldContext.sun.distance * Math.Cos((float)(worldContext.sun.angle))), 0.5f + (float)(worldContext.sun.distance * Math.Sin((float)(worldContext.sun.angle))));
+            calculateSolarShadowMap(worldContext.sun, lightPosition); //A noticable performance drop at 10 dynamic lights. At 30 lights, it drops to 9-20fps
+            calculateLightmap(worldContext.sun, lightPosition); //Minor impact on performance
+            addLightmapToGlobalLights(worldContext.sun);
         }
+
+
+
         public void calculateLightmap(IEmissiveBlock lightObject, Vector2 lightPosition)
         {
             calculateLight.Parameters["lightIntensity"].SetValue(lightObject.luminosity);
@@ -1128,6 +1200,125 @@ namespace PixelMidpointDisplacement
 
         }
 
+        public void calculateLightmap(IEmissive lightObject, Vector2 lightPosition)
+        {
+            calculateLight.Parameters["lightIntensity"].SetValue(lightObject.luminosity);
+            calculateLight.Parameters["lightColor"].SetValue(lightObject.lightColor);
+            calculateLight.Parameters["renderDimensions"].SetValue(new Vector2(lightMap.Width, lightMap.Height));
+            calculateLight.Parameters["lightPosition"].SetValue(lightPosition);
+            //calculateLight.Parameters["Mask"].SetValue(finalShadowMap);
+
+
+            GraphicsDevice.SetRenderTarget(lightObject.lightMap);
+
+
+            _spriteBatch.Begin(effect: calculateLight);
+            _spriteBatch.Draw(lightObject.shadowMap, Vector2.Zero, Color.White);
+            _spriteBatch.End();
+
+        }
+
+        public void calculateSolarShadowMap(IEmissive lightObject, Vector2 lightPosition) {
+            //Cast a global box only for the sun:
+
+            GraphicsDevice.SetRenderTarget(lightObject.shadowMap);
+            GraphicsDevice.Clear(Color.White);
+            RasterizerState rasterizerState1 = new RasterizerState();
+            rasterizerState1.CullMode = CullMode.None;
+            GraphicsDevice.RasterizerState = rasterizerState1;
+
+            int leftX = (int)Math.Floor(-worldContext.screenSpaceOffset.x / (double)worldContext.pixelsPerBlock);
+            int rightX = leftX + (int)Math.Ceiling(worldContext.applicationWidth / (double)worldContext.pixelsPerBlock);
+            int topY = (int)Math.Floor(-worldContext.screenSpaceOffset.y / (double)worldContext.pixelsPerBlock);
+            int bottomY = topY + (int)Math.Ceiling(worldContext.applicationHeight / (double)worldContext.pixelsPerBlock);
+
+            int lowestY = worldContext.findLowestSurfaceHeightOnScreen();
+            if (lowestY * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y < 0)
+            {
+                //Then draw a whole box around the screen
+                Vector3[] boxArray = new Vector3[5];
+                boxArray[0] = new Vector3(0, 0, 0);
+                boxArray[1] = new Vector3(1, 0, 0);
+                boxArray[2] = new Vector3(1, 1, 0);
+                boxArray[3] = new Vector3(0, 1, 0);
+                boxArray[4] = new Vector3(0, 0, 0);
+
+                drawShadow(boxArray, lightPosition);
+
+            }
+            else{
+                //If the owest y is not below the screen, then render the appropriate box:
+                if (!(lowestY * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y > worldContext.applicationHeight)) {
+                    Vector3[] boxArray = new Vector3[5];
+                    boxArray[0] = new Vector3(0, (lowestY * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y)/(float)_graphics.PreferredBackBufferHeight, 0);
+                    boxArray[1] = new Vector3(1, (lowestY * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / (float)_graphics.PreferredBackBufferHeight, 0);
+                    boxArray[2] = new Vector3(1, 1, 0);
+                    boxArray[3] = new Vector3(0, 1, 0);
+                    boxArray[4] = new Vector3(0, (lowestY * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / (float)_graphics.PreferredBackBufferHeight, 0);
+
+                    drawShadow(boxArray, lightPosition);
+                }
+
+
+
+                if (leftX >= 0 && leftX < worldContext.surfaceHeight.Count())
+                {
+                    if (lowestY > worldContext.surfaceHeight[leftX])
+                    {
+                        Vector3[] boxArray = new Vector3[2];
+                        boxArray[0] = new Vector3(0, (worldContext.surfaceHeight[leftX] * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / (float)_graphics.PreferredBackBufferHeight, 0);
+                        boxArray[1] = new Vector3(0, 1, 0);
+
+
+                        drawShadow(boxArray, lightPosition);
+                    }
+                }
+
+                if (rightX > 0 && rightX < worldContext.surfaceHeight.Count())
+                {
+                    if (lowestY > worldContext.surfaceHeight[rightX])
+                    {
+                        Vector3[] boxArray = new Vector3[2];
+                        boxArray[0] = new Vector3(1, (worldContext.surfaceHeight[rightX] * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / (float)_graphics.PreferredBackBufferHeight, 0);
+                        boxArray[1] = new Vector3(1, 1, 0);
+
+
+                        drawShadow(boxArray, lightPosition);
+                    }
+                }
+                
+            }
+
+            //Top of the screen pass:
+            edgeShadowPass(leftX, topY - 1, rightX, topY - 1, lightPosition);
+            //Right side:
+            edgeShadowPass(rightX + 1, topY, rightX + 1, bottomY, lightPosition);
+            //Bottom
+            edgeShadowPass(leftX, bottomY + 1, rightX, bottomY + 1, lightPosition);
+            //Left side:
+            edgeShadowPass(leftX - 1, topY, leftX - 1, bottomY, lightPosition);
+
+
+
+            foreach ((int, int) coord in currentlyRenderedExposedBlocks)
+            {
+                int x = coord.Item1;
+                int y = coord.Item2;
+
+                if (worldContext.worldArray[x, y].faceVertices != null)
+                {
+                    Vector3[] vertexArray = new Vector3[worldContext.worldArray[x, y].faceVertices.Count];
+
+
+                    for (int g = 0; g < vertexArray.Length; g++)
+                    {
+                        vertexArray[g] = new Vector3((worldContext.worldArray[x, y].faceVertices[g].X * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x) / _graphics.PreferredBackBufferWidth, (worldContext.worldArray[x, y].faceVertices[g].Y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight, 0);
+                    }
+
+                    drawShadow(vertexArray, lightPosition);
+                }
+            }
+        }
         public void calculateShadowMap(IEmissive lightObject, Vector2 lightPosition)
         {
             int faceCount = 0;
@@ -1141,90 +1332,47 @@ namespace PixelMidpointDisplacement
             //List<VertexPositionColorTexture> vertexList = new List<VertexPositionColorTexture>();
             //List<short> indList = new List<short>();
 
+            
+
+            //Calculate a pass across the sides of the screen:
+
+            int leftX = (int)Math.Floor(-worldContext.screenSpaceOffset.x / (double)worldContext.pixelsPerBlock);
+            int rightX = leftX + (int)Math.Ceiling(worldContext.applicationWidth / (double)worldContext.pixelsPerBlock);
+            int topY = (int)Math.Floor(-worldContext.screenSpaceOffset.y / (double)worldContext.pixelsPerBlock);
+            int bottomY = topY + (int)Math.Ceiling(worldContext.applicationHeight / (double)worldContext.pixelsPerBlock);
+
+
+            //Top of the screen pass:
+            edgeShadowPass(leftX, topY - 1, rightX, topY - 1, lightPosition);
+            //Right side:
+            edgeShadowPass(rightX + 1, topY, rightX + 1, bottomY, lightPosition);
+            //Bottom
+            edgeShadowPass(leftX, bottomY + 1, rightX, bottomY + 1, lightPosition);
+            //Left side:
+            edgeShadowPass(leftX - 1, topY, leftX - 1, bottomY, lightPosition);
+
+
+
             foreach ((int, int) coord in currentlyRenderedExposedBlocks)
             {
                 int x = coord.Item1;
                 int y = coord.Item2;
 
-                Vector3[] vertexArray = new Vector3[worldContext.worldArray[x, y].faceVertices.Count];
-                for (int g = 0; g < vertexArray.Length; g++)
+                if (worldContext.worldArray[x, y].faceVertices != null)
                 {
-                    vertexArray[g] = new Vector3((worldContext.worldArray[x, y].faceVertices[g].X * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x) / _graphics.PreferredBackBufferWidth, (worldContext.worldArray[x, y].faceVertices[g].Y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight, 0);
-                }
-                for (int i = 0; i < vertexArray.Length - 1; i++)
-                {
+                    Vector3[] vertexArray = new Vector3[worldContext.worldArray[x, y].faceVertices.Count];
 
-                    if (vertexArray[i].X != vertexArray[i + 1].X && vertexArray[i].Y != vertexArray[i + 1].Y) { continue; }
 
-                    faceCount += 1;
-                    float xDif1 = (vertexArray[i].X - lightPosition.X);
-                    float xDif2 = (vertexArray[i + 1].X - lightPosition.X);
-                    float yDif1 = (vertexArray[i].Y - lightPosition.Y);
-                    float yDif2 = (vertexArray[i + 1].Y - lightPosition.Y);
-
-                    float setX1 = 1;
-                    float setX2 = 1;
-                    if (xDif1 == 0)
+                    for (int g = 0; g < vertexArray.Length; g++)
                     {
-                        setX1 = -1;
+                        vertexArray[g] = new Vector3((worldContext.worldArray[x, y].faceVertices[g].X * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x) / _graphics.PreferredBackBufferWidth, (worldContext.worldArray[x, y].faceVertices[g].Y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight, 0);
                     }
-                    if (xDif2 == 0)
-                    {
-                        setX2 = -1;
-                    }
-                    float gradient1 = yDif1 / xDif1;
-                    float gradient2 = yDif2 / xDif2;
 
-                    if (yDif2 > 0 && setX2 * gradient2 + vertexArray[i + 1].Y < 1)
-                    {
-                        setX2 = 1 / (gradient2);
-                    }
-                    else if (yDif2 < 0 && setX2 * gradient2 + vertexArray[i + 1].Y > 0)
-                    {
-                        setX2 = -1 / (gradient2);
-                    }
-                    if (yDif1 > 0 && setX1 * gradient1 + vertexArray[i].Y < 1)
-                    {
-                        setX1 = 1 / (gradient1);
-                    }
-                    else if (yDif1 < 0 && setX1 * gradient1 + vertexArray[i].Y > 0)
-                    {
-                        setX1 = -1 / (gradient1);
-                    }
-                    float setY1 = setX1 * gradient1;
-                    float setY2 = setX2 * gradient2;
-
-                    if (xDif1 == 0) { setX1 = 0; setY1 = Math.Sign(yDif1); }
-                    if (xDif2 == 0) { setX2 = 0; setY2 = Math.Sign(yDif2); }
-                    if (yDif1 == 0) { setX1 = Math.Sign(xDif1); setY1 = 0; }
-                    if (yDif2 == 0) { setX2 = Math.Sign(xDif2); setY2 = 0; }
-
-                    triangleVertices[0].Position = vertexArray[i];
-                    triangleVertices[1].Position = vertexArray[i + 1];
-                    triangleVertices[2].Position = new Vector3(setX2, setY2, 0) + vertexArray[i + 1];
-                    triangleVertices[3].Position = new Vector3(setX1, setY1, 0) + vertexArray[i];
-
-
-                    if (faceCount > 0)
-                    {
-                        foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
-                        {
-                            pass.Apply();
-
-                            GraphicsDevice.DrawUserIndexedPrimitives(
-                                PrimitiveType.TriangleStrip,
-                                triangleVertices,
-                                0,
-                                triangleVertices.Length,
-                                ind,
-                                0,
-                                (ind.Length / 3) + 1
-                                );
-                        }
-                    }
+                    drawShadow(vertexArray, lightPosition);
                 }
             }
         }
+
         public void calculateShadowMap(IEmissiveBlock lightObject, Vector2 lightPosition)
         {
             int faceCount = 0;
@@ -1263,82 +1411,123 @@ namespace PixelMidpointDisplacement
                     {
                         vertexArray[g] = new Vector3((worldContext.worldArray[x, y].faceVertices[g].X * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.x) / _graphics.PreferredBackBufferWidth, (worldContext.worldArray[x, y].faceVertices[g].Y * worldContext.pixelsPerBlock + worldContext.screenSpaceOffset.y) / _graphics.PreferredBackBufferHeight, 0);
                     }
-                    for (int i = 0; i < vertexArray.Length - 1; i++)
-                    {
-
-                        if (vertexArray[i].X != vertexArray[i + 1].X && vertexArray[i].Y != vertexArray[i + 1].Y) { continue; }
-
-                        faceCount += 1;
-                        float xDif1 = (vertexArray[i].X - lightPosition.X);
-                        float xDif2 = (vertexArray[i + 1].X - lightPosition.X);
-                        float yDif1 = (vertexArray[i].Y - lightPosition.Y);
-                        float yDif2 = (vertexArray[i + 1].Y - lightPosition.Y);
-
-                        float setX1 = 1;
-                        float setX2 = 1;
-                        if (xDif1 == 0)
-                        {
-                            setX1 = -1;
-                        }
-                        if (xDif2 == 0)
-                        {
-                            setX2 = -1;
-                        }
-                        float gradient1 = yDif1 / xDif1;
-                        float gradient2 = yDif2 / xDif2;
-
-                        if (yDif2 > 0 && setX2 * gradient2 + vertexArray[i + 1].Y < 1)
-                        {
-                            setX2 = 1 / (gradient2);
-                        }
-                        else if (yDif2 < 0 && setX2 * gradient2 + vertexArray[i + 1].Y > 0)
-                        {
-                            setX2 = -1 / (gradient2);
-                        }
-                        if (yDif1 > 0 && setX1 * gradient1 + vertexArray[i].Y < 1)
-                        {
-                            setX1 = 1 / (gradient1);
-                        }
-                        else if (yDif1 < 0 && setX1 * gradient1 + vertexArray[i].Y > 0)
-                        {
-                            setX1 = -1 / (gradient1);
-                        }
-                        float setY1 = setX1 * gradient1;
-                        float setY2 = setX2 * gradient2;
-
-                        if (xDif1 == 0) { setX1 = 0; setY1 = Math.Sign(yDif1); }
-                        if (xDif2 == 0) { setX2 = 0; setY2 = Math.Sign(yDif2); }
-                        if (yDif1 == 0) { setX1 = Math.Sign(xDif1); setY1 = 0; }
-                        if (yDif2 == 0) { setX2 = Math.Sign(xDif2); setY2 = 0; }
-
-                        triangleVertices[0].Position = vertexArray[i];
-                        triangleVertices[1].Position = vertexArray[i + 1];
-                        triangleVertices[2].Position = new Vector3(setX2, setY2, 0) + vertexArray[i + 1];
-                        triangleVertices[3].Position = new Vector3(setX1, setY1, 0) + vertexArray[i];
-
-
-                        if (faceCount > 0)
-                        {
-                            foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
-                            {
-                                pass.Apply();
-
-                                GraphicsDevice.DrawUserIndexedPrimitives(
-                                    PrimitiveType.TriangleStrip,
-                                    triangleVertices,
-                                    0,
-                                    triangleVertices.Length,
-                                    ind,
-                                    0,
-                                    (ind.Length / 3) + 1
-                                    );
-                            }
-                        }
-                    }
+                    drawShadow(vertexArray, lightPosition);
                 }
             }
         }
 
+        public void edgeShadowPass(int startX, int startY, int finalX, int finalY, Vector2 lightPosition)
+        {
+            //This will have a singular block that is ignored on the boundaries of caves
+            bool startedALine = false;
+            Vector3[] edgeArray = new Vector3[2];
+            for (int x = startX; x <= finalX; x++)
+            {
+                for (int y = startY; y <= finalY; y++)
+                {
+                    if (x >= 0 && y >= 0 && x < worldContext.worldArray.GetLength(0) && y < worldContext.worldArray.GetLength(1))
+                    {
+                        if ((!worldContext.worldArray[x, y].isBlockTransparent && worldContext.worldArray[x, y].ID != (int)blockIDs.air) || (x == finalX && y == finalY))
+                        {
+                            if (!startedALine && !(x == finalX && y == finalY))
+                            {
+                                edgeArray[0] = new Vector3((float)worldContext.locationToShaderSpace(x, new Vector2(1, 0)), (float)worldContext.locationToShaderSpace(y, new Vector2(0, 1)), 0);
+                                startedALine = true;
+
+                            }
+                            else
+                            {
+                                edgeArray[1] = new Vector3((float)worldContext.locationToShaderSpace(x, new Vector2(1, 0)), (float)worldContext.locationToShaderSpace(y, new Vector2(0, 1)), 0);
+                            }
+                        }
+                        else
+                        {
+
+                            drawShadow(edgeArray, lightPosition);
+                            startedALine = false;
+                        }
+                    }
+                }
+            }
+
+            if (startedALine)
+            {
+                drawShadow(edgeArray, lightPosition);
+
+            }
+        }
+        public void drawShadow(Vector3[] vertexArray, Vector2 lightPosition) {
+            for (int i = 0; i < vertexArray.Length - 1; i++)
+            {
+
+                if (vertexArray[i].X != vertexArray[i + 1].X && vertexArray[i].Y != vertexArray[i + 1].Y) { continue; }
+
+                float xDif1 = (vertexArray[i].X - lightPosition.X);
+                float xDif2 = (vertexArray[i + 1].X - lightPosition.X);
+                float yDif1 = (vertexArray[i].Y - lightPosition.Y);
+                float yDif2 = (vertexArray[i + 1].Y - lightPosition.Y);
+
+                float setX1 = 1;
+                float setX2 = 1;
+                if (xDif1 == 0)
+                {
+                    setX1 = -1;
+                }
+                if (xDif2 == 0)
+                {
+                    setX2 = -1;
+                }
+                float gradient1 = yDif1 / xDif1;
+                float gradient2 = yDif2 / xDif2;
+
+                if (yDif2 > 0 && setX2 * gradient2 + vertexArray[i + 1].Y < 1)
+                {
+                    setX2 = 1 / (gradient2);
+                }
+                else if (yDif2 < 0 && setX2 * gradient2 + vertexArray[i + 1].Y > 0)
+                {
+                    setX2 = -1 / (gradient2);
+                }
+                if (yDif1 > 0 && setX1 * gradient1 + vertexArray[i].Y < 1)
+                {
+                    setX1 = 1 / (gradient1);
+                }
+                else if (yDif1 < 0 && setX1 * gradient1 + vertexArray[i].Y > 0)
+                {
+                    setX1 = -1 / (gradient1);
+                }
+                float setY1 = setX1 * gradient1;
+                float setY2 = setX2 * gradient2;
+
+                if (xDif1 == 0) { setX1 = 0; setY1 = Math.Sign(yDif1); }
+                if (xDif2 == 0) { setX2 = 0; setY2 = Math.Sign(yDif2); }
+                if (yDif1 == 0) { setX1 = Math.Sign(xDif1); setY1 = 0; }
+                if (yDif2 == 0) { setX2 = Math.Sign(xDif2); setY2 = 0; }
+
+                triangleVertices[0].Position = vertexArray[i];
+                triangleVertices[1].Position = vertexArray[i + 1];
+                triangleVertices[2].Position = new Vector3(setX2, setY2, 0) + vertexArray[i + 1];
+                triangleVertices[3].Position = new Vector3(setX1, setY1, 0) + vertexArray[i];
+
+
+               
+                    foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
+                    {
+                        pass.Apply();
+
+                        GraphicsDevice.DrawUserIndexedPrimitives(
+                            PrimitiveType.TriangleStrip,
+                            triangleVertices,
+                            0,
+                            triangleVertices.Length,
+                            ind,
+                            0,
+                            (ind.Length / 3) + 1
+                            );
+                    }
+                
+            }
+        }
         public void addLightmapToGlobalLights(IEmissive lightObject)
         {
             addLightmaps.Parameters["Lightmap"].SetValue(lightMap);
@@ -1450,6 +1639,7 @@ namespace PixelMidpointDisplacement
         public int applicationWidth;
         public int applicationHeight;
 
+        public Sun sun;
 
         Dictionary<blockIDs, int> intFromBlockID = Enum.GetValues(typeof(blockIDs)).Cast<blockIDs>().ToDictionary(e => e, e => (int)e);
         Dictionary<int, blockIDs> blockIDFromInt = Enum.GetValues(typeof(blockIDs)).Cast<blockIDs>().ToDictionary(e => (int)e, e => e);
@@ -1477,6 +1667,7 @@ namespace PixelMidpointDisplacement
             //Load settings from file
             loadSettings();
             generateBlockReferences();
+
         }
 
         private void loadSettings()
@@ -1524,19 +1715,37 @@ namespace PixelMidpointDisplacement
                 for (int y = 0; y < worldArray.GetLength(1); y++)
                 {
                     generateInstanceFromID(intWorldArray, blockIDFromInt[intWorldArray[x, y]], x, y);
-                    addBlockToDictionaryIfExposedToAir(intWorldArray, x, y);
-
                 }
             }
 
+            for (int x = 0; x < worldArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < worldArray.GetLength(1); y++)
+                {
+                    addBlockToDictionaryIfExposedToAir(worldArray, x, y);
+                }
+            }
 
-            updatePixelsPerBlock(pixelsPerBlockAfterGeneration);
+                    updatePixelsPerBlock(pixelsPerBlockAfterGeneration);
+
+            sun = new Sun(this);
+
+            updateSurfaceHeight();
 
             player.setSpawn((int)player.x, pixelsPerBlock * (surfaceHeight[(int)Math.Floor(player.x / pixelsPerBlock)] - 3));
             player.respawn();
 
         }
 
+        public void updateSurfaceHeight() {
+            for (int x = 0; x < worldArray.GetLength(0); x++) {
+                int y = surfaceHeight[x];
+                while (worldArray[x, y].isBlockTransparent || worldArray[x, y].ID == (int)blockIDs.air) {
+                    y += 1;
+                }
+                surfaceHeight[x] = y;
+            }
+        }
         public void setApplicationDimensions(int width, int height) {
             applicationHeight = height;
             applicationWidth = width;
@@ -1564,11 +1773,65 @@ namespace PixelMidpointDisplacement
             {
                 worldArray[x, y] = new FluidBlock(blockFromID[ID]);
             }
-            else if (ID == blockIDs.ironOre) {
+            else if (ID == blockIDs.ironOre)
+            {
                 worldArray[x, y] = new OreBlock(blockFromID[ID]);
             }
+            else if (ID == blockIDs.treeTrunk)
+            {
+                worldArray[x, y] = new TreeBlock(blockFromID[ID]);
+            }
+            else if (ID == blockIDs.leaves)
+            {
+                worldArray[x, y] = new LeafBlock(blockFromID[ID]);
+            }
+            else if (ID == blockIDs.semiLeaves)
+            {
+                worldArray[x, y] = new SemiLeafBlock(blockFromID[ID]);
+            }
+            else if (ID == blockIDs.bush) {
+                worldArray[x, y] = new BushBlock(blockFromID[ID]);
+            }
+            else if (ID == blockIDs.bigBush)
+            {
+                worldArray[x, y] = new BigBushBlock(blockFromID[ID]);
+            }
 
-                worldArray[x, y].setupInitialData(this, intArray, (x, y));
+            worldArray[x, y].setupInitialData(this, intArray, (x, y));
+        }
+
+        public double locationToShaderSpace(int value, Vector2 axis) {
+            if (axis.X > 0)
+            {
+                return ((double)value * pixelsPerBlock + screenSpaceOffset.x) / (double)applicationWidth;
+
+            }
+            else {
+                return ((double)value * pixelsPerBlock + screenSpaceOffset.y) / (double)applicationHeight;
+            }
+        }
+        public int findLowestSurfaceHeightOnScreen() {
+            int y = 0;
+            for (int x = -screenSpaceOffset.x / pixelsPerBlock; x < (-screenSpaceOffset.x + applicationWidth)/pixelsPerBlock; x++) {
+                if (surfaceHeight[x] > y) { y = surfaceHeight[x]; }
+            }
+            return y;
+        }
+
+        public int findFirstSurfaceHeightVisibleFromRight() {
+            for (int x = -screenSpaceOffset.x / pixelsPerBlock; x < (-screenSpaceOffset.x + applicationWidth) / pixelsPerBlock; x++)
+            {
+                if (surfaceHeight[x] * pixelsPerBlock + screenSpaceOffset.y >= 0 && surfaceHeight[x] * pixelsPerBlock + screenSpaceOffset.y < applicationHeight) { return x; }
+            }
+            return -1;
+        }
+
+        public int findFirstSurfaceHeightVisibleFromLeft() {
+            for (int x = (-screenSpaceOffset.x + applicationWidth) / pixelsPerBlock; x < (-screenSpaceOffset.x) / pixelsPerBlock; x--)
+            {
+                if (surfaceHeight[x] * pixelsPerBlock + screenSpaceOffset.y >= 0 && surfaceHeight[x] * pixelsPerBlock + screenSpaceOffset.y < applicationHeight) { return x; }
+            }
+            return -1;
         }
 
         public void addBlockToDictionaryIfExposedToAir(int[,] blockArray, int x, int y)
@@ -1623,7 +1886,7 @@ namespace PixelMidpointDisplacement
 
         public Vector4 calculateExposedFaces(Block[,] blockArray, int x, int y)
         {
-            return new Vector4(Convert.ToInt32((blockArray[x, y - 1].ID == (int)blockIDs.air)), Convert.ToInt32(blockArray[x + 1, y].ID == (int)blockIDs.air), Convert.ToInt32(blockArray[x, y + 1].ID == (int)blockIDs.air), Convert.ToInt32(blockArray[x - 1, y].ID == (int)blockIDs.air));
+            return new Vector4(Convert.ToInt32((blockArray[x, y - 1].ID == (int)blockIDs.air) || blockArray[x, y - 1].isBlockTransparent), Convert.ToInt32(blockArray[x + 1, y].ID == (int)blockIDs.air || blockArray[x + 1, y].isBlockTransparent), Convert.ToInt32(blockArray[x, y + 1].ID == (int)blockIDs.air || blockArray[x, y + 1].isBlockTransparent), Convert.ToInt32(blockArray[x - 1, y].ID == (int)blockIDs.air || blockArray[x - 1, y].isBlockTransparent));
         }
         public void generateBlockReferences()
         {
@@ -1635,7 +1898,11 @@ namespace PixelMidpointDisplacement
             blockFromID.Add(blockIDs.chest, new ChestBlock(new Rectangle(0, 128, 32, 32), (int)blockIDs.chest));
             blockFromID.Add(blockIDs.water, new FluidBlock(new Rectangle(0, 160, 32, 32), intFromBlockID[blockIDs.water]));
             blockFromID.Add(blockIDs.ironOre, new OreBlock(new Rectangle(0, 224, 32, 32), (int)blockIDs.ironOre, (int)oreIDs.iron));
-
+            blockFromID.Add(blockIDs.treeTrunk, new TreeBlock(new Rectangle(0, 256, 32, 32), (int)blockIDs.treeTrunk));
+            blockFromID.Add(blockIDs.leaves, new LeafBlock(new Rectangle(0, 288, 32, 32), (int)blockIDs.leaves));
+            blockFromID.Add(blockIDs.semiLeaves, new SemiLeafBlock(new Rectangle(0, 288, 32, 32), (int)blockIDs.semiLeaves));
+            blockFromID.Add(blockIDs.bush, new BushBlock(new Rectangle(0, 320, 32, 32), (int)blockIDs.bush));
+            blockFromID.Add(blockIDs.bigBush, new BigBushBlock(new Rectangle(96, 320, 32, 32), (int)blockIDs.bigBush));
         }
 
         public Block getBlockFromID(blockIDs ID)
@@ -1715,6 +1982,7 @@ namespace PixelMidpointDisplacement
                     for (int checkY = y - 1; checkY <= y + 1; checkY++) {
                         if (worldArray[checkX, checkY].ID != (int)blockIDs.air) {
                             addBlockToDictionaryIfExposedToAir(worldArray, checkX, checkY);
+                            worldArray[checkX, checkY].updateBlock(this);
                         }
                     }
                 }
@@ -1736,9 +2004,103 @@ namespace PixelMidpointDisplacement
 
             return false;
         }
+
+        public bool setBackground(int x, int y, int ID) {
+            if (x >= 0 && y >= 0 && x < backgroundArray.GetLength(0) && y < backgroundArray.GetLength(1)) {
+                if (backgroundArray[x, y] != ID) {
+                    backgroundArray[x, y] = ID;
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
+    public class Sun : IEmissive {
+        public Vector3 lightColor { get; set; }
+        public float luminosity { get; set; }
+        public float range { get; set; }
+        public RenderTarget2D shadowMap { get; set; }
+        public RenderTarget2D lightMap { get; set; }
 
+        public double x { get; set; }
+
+        public double y { get; set; }
+
+        public double time = 0;
+
+        public double dayDuration = 1 * 60;
+
+        public const double horizonAngle = 3 * Math.PI / 4;
+
+        public double angle { get; set; }
+        public double distance { get; set; }
+
+        public Sky sky = new Sky();
+
+        public Sun(WorldContext worldContext) {
+            lightColor = new Vector3(155, 155, 145);
+            luminosity = 14000;
+            range = 150;
+            x = 50;
+            y = 50;
+            shadowMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
+            lightMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
+
+            angle = -3 * Math.PI/4;
+            distance = 3;
+        }
+
+        public void updateTime(double elapsedTime) {
+            time += elapsedTime;
+
+            double dayTime = time % dayDuration;
+            
+            angle = ((dayTime / dayDuration) * 0.75 * horizonAngle) - horizonAngle;
+
+            lightColor = new Vector3(lightColor.X, 55 + 100f * (float)Math.Sin(Math.PI * dayTime / dayDuration), 145f * (float)Math.Sin(Math.PI * dayTime/dayDuration));
+
+        }
+    }
+
+    public class Sky {
+        public int spriteSheet = (int)spriteSheetIDs.skyLayers;
+        public List<SkyLayer> skyLayers = new List<SkyLayer>();
+
+        public Sky() {
+            skyLayers.Add(new SkyLayer(0, new Rectangle(0, 1080, 480, 270), new Rectangle(0, 0, 1920, 1080)));
+            skyLayers.Add(new SkyLayer(.04, new Rectangle(0, 810, 480, 270), new Rectangle(0, 0, 1920, 1080)));
+            skyLayers.Add(new SkyLayer(.6, new Rectangle(0, 540, 480, 270), new Rectangle(0, 0, 1920, 1080)));
+            skyLayers.Add(new SkyLayer(.8, new Rectangle(0, 270, 480, 270), new Rectangle(0, 0, 1920, 1080)));
+
+            skyLayers.Add(new SkyLayer(1, new Rectangle(0, 0, 480, 270), new Rectangle(0,0,1920,1080)));
+
+
+        }
+        public void updateSky(WorldContext wc) {
+            for (int i = 0; i < skyLayers.Count; i++) {
+                skyLayers[i].updateLocation(wc.screenSpaceOffset.x/(double)wc.pixelsPerBlock, wc.screenSpaceOffset.y/(double)wc.pixelsPerBlock);
+            }
+        }
+    }
+
+    public class SkyLayer {
+        public double movement;
+        public Rectangle sourceRectangle;
+        public Rectangle drawRectangle;
+
+        public SkyLayer(double motion, Rectangle sourceRect, Rectangle drawRect) {
+            movement = motion;
+            sourceRectangle = sourceRect;
+            drawRectangle = drawRect;
+        }
+
+        //I'll have to update this to be the source rectangle, so that it can include the parts extended off screen. Maybe the y is draw, and the x is source. Or not have any y variation
+        public void updateLocation(double x, double y) {
+            drawRectangle.X = (int)(x * movement);
+            drawRectangle.Y = (int)(y * movement);
+        }
+    }
     public class WorldGenerator {
         public WorldContext worldContext;
 
@@ -1757,7 +2119,6 @@ namespace PixelMidpointDisplacement
         public List<SubterraneanBiome> subterraneanBiomeList = new List<SubterraneanBiome>();
         List<Biome> biomeStencilList = new List<Biome>() {
             new MeadowBiome(),
-            new MountainBiome(),
             new MountainBiome()
         };
         List<SubterraneanBiome> subterraneanBiomeStencilList = new List<SubterraneanBiome>() {
@@ -1852,7 +2213,7 @@ namespace PixelMidpointDisplacement
             
             //Generate the worlds ores now:
             SeededBrownianMotion sbm = new SeededBrownianMotion();
-            brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, maxAttempts);
+            brownianMotionArray = sbm.brownianAlgorithm(brownianMotionArray, maxAttempts, fillOutput : true);
 
             //Go back through the biomes and generate caves, structures and the likes:
             for (int i = 0; i < biomeList.Count; i++) {
@@ -1870,10 +2231,22 @@ namespace PixelMidpointDisplacement
 
             for (int i = 0; i < biomeList.Count; i++) {
                 biomeList[i].generateFluids();
+
             }
 
             for (int i = 0; i < subterraneanBiomeList.Count; i++) {
                 subterraneanBiomeList[i].generateFluids();
+            }
+
+            for (int i = 0; i < biomeList.Count; i++)
+            {
+                biomeList[i].generateDecorations();
+
+            }
+
+            for (int i = 0; i < subterraneanBiomeList.Count; i++)
+            {
+                subterraneanBiomeList[i].generateDecorations();
             }
 
             //To generate something on the right. Put it here
@@ -1929,14 +2302,12 @@ namespace PixelMidpointDisplacement
                             biomeY = r.Next(surfaceHeight[biomeX] + biome.minY, surfaceHeight[biomeX] + biome.maxY);
                         }
                         else {
-                            System.Diagnostics.Debug.WriteLine(surfaceHeight[biomeX] + " is the surface height");
                             //biomeY = r.Next(surfaceHeight[biomeX] + biome.minY, worldArray.GetLength(1));
                         }
                         //Get the biome the x and y is in                        
                         int cummulativeWidth = 0;
                         for (int b = 0; b < biomeList.Count; b++) {
                             if (biomeX > cummulativeWidth && biomeX < cummulativeWidth + biomeList[b].biomeDimensions.width) {
-                                System.Diagnostics.Debug.WriteLine(biomeList[b].GetType() + " : " + biomeX + ", " + biomeY);
                                 if (biome.biomesThisCanSpawnIn.Contains(biomeList[b].GetType())) {
                                     foundASpot = true;
                                     biome.externalBiomeIndex = b;
@@ -2304,9 +2675,11 @@ namespace PixelMidpointDisplacement
 
         public int maxSpawnAttempts = 30;
 
+        //Should probably convert all these tupples to "____SpawnVariables" classes
         public List<(SpawnableEntity  entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface)> spawnableEntities;
         public List<(Structure structure, double density, int yMax, int yMin)> spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>();
         public List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)> spawnableFluids = new List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)>();
+        public List<BiomeSpawnableDecorationVariables> spawnableDecorations = new List<BiomeSpawnableDecorationVariables>();
 
         public WorldGenerator worldGenerator;
 
@@ -2345,7 +2718,6 @@ namespace PixelMidpointDisplacement
             for (int i = 0; i < spawnableFluids.Count; i++)
             {
                 int numberOfLakes = (int)(biomeDimensions.width * biomeDimensions.height * (spawnableFluids[i].density / 100.0));
-                System.Diagnostics.Debug.WriteLine(numberOfLakes);
                 for (int n = 0; n < numberOfLakes; n++)
                 {
                     //Add some more logic for fluids of only 1 size: creating water falls
@@ -2616,6 +2988,108 @@ namespace PixelMidpointDisplacement
             }
 
         }
+
+        public void generateDecorations() {
+            //Two ways that it can be random directions:
+            //Each movement is in a random direction
+            //  -> Pros: Can go in many directions and is more interesting. Cons: Can make them be closer than the 'minimum' distance
+
+            //When generating, each decoration moves in a set direction - Current technique
+            if (spawnableDecorations.Count > 0)
+            {
+                foreach (BiomeSpawnableDecorationVariables decorationVar in spawnableDecorations)
+                {
+                    Random r = new Random();
+                    //Calculate the number of decorations:
+                    int numberOfDecorations = 0;
+                    if (decorationVar.spawnOnSurface)
+                    {
+                        double averageCount = (decorationVar.density / 100.0) * biomeDimensions.width;
+                        numberOfDecorations = r.Next((int)(averageCount * 0.9), (int)(averageCount * 1.1));
+                    }
+                    else
+                    {
+                        double averageCount = (decorationVar.density / 100.0) * biomeDimensions.width * biomeDimensions.height;
+                        numberOfDecorations = r.Next((int)(averageCount * 0.9), (int)(averageCount * 1.1));
+                    }
+
+                    int sign = r.Next(2) * 2 - 1;
+
+
+                    if (decorationVar.spawnOnSurface)
+                    {
+                        int x = r.Next(0, biomeDimensions.width) + biomeOffset.x;
+                        int y = 0;
+                        if (x >= 0 && x < worldGenerator.worldArray.GetLength(0))
+                        {
+                            y = worldGenerator.surfaceHeight[x];
+                        }
+                        int lastX = x;
+                        int lastY = y;
+                        for (int i = 0; i < numberOfDecorations; i++)
+                        {
+
+                            int maxAttemptCount = 15;
+                            int attemptCount = 0;
+                            bool generatedDecoration = false;
+                            while (!generatedDecoration && attemptCount < maxAttemptCount)
+                            {
+                                attemptCount += 1;
+
+                                //Currently only moves right, so make it either positive or negative randomly
+                                x =  sign * r.Next(decorationVar.minToNextDecoration, decorationVar.maxToNextDecoration) + lastX;
+                                if (x >= 0 && x < worldGenerator.worldArray.GetLength(0))
+                                {
+                                    y = worldGenerator.surfaceHeight[x];
+                                }
+
+                                if (decorationVar.yMin < y && y < decorationVar.yMax)
+                                {
+                                    if (x > 0 && x < worldGenerator.worldArray.GetLength(0) -1&& y > 0 && y < worldGenerator.worldArray.GetLength(1) - 1)
+                                    {
+                                        generatedDecoration = decorationVar.decoration.generate(x, y, worldGenerator);
+                                    }
+                                }
+                            }
+
+                            lastX = x;
+                            lastY = y;
+                        }
+                    }
+                    else
+                    {
+                        int x = r.Next(0, biomeDimensions.width) + biomeOffset.x;
+                        int y = r.Next(0, biomeDimensions.height) + biomeOffset.y;
+
+                        int lastX = x;
+                        int lastY = y;
+                        for (int i = 0; i < numberOfDecorations; i++)
+                        {
+                            int maxAttemptCount = 15;
+                            int attemptCount = 0;
+                            bool generatedDecoration = false;
+                            while (!generatedDecoration && attemptCount < maxAttemptCount)
+                            {
+                                attemptCount += 1;
+                                x = (r.Next() * 2 - 1) * r.Next(decorationVar.minToNextDecoration, decorationVar.maxToNextDecoration) + lastX;
+                                y = (r.Next() * 2 - 1) * r.Next(decorationVar.minToNextDecoration, decorationVar.maxToNextDecoration) + lastY;
+
+                                if (decorationVar.yMin < y && y < decorationVar.yMax)
+                                {
+                                    if (x >= 0 && x < worldGenerator.worldArray.GetLength(0) && y >= 0 && y < worldGenerator.worldArray.GetLength(1))
+                                    {
+                                        generatedDecoration = decorationVar.decoration.generate(x, y, worldGenerator);
+                                    }
+                                }
+                            }
+
+                            lastX = x;
+                            lastY = y;
+                        }
+                    }
+                }
+            }
+        }
         private void seededBrownianMotion(BlockGenerationVariables[] oresArray, int attemptCount)
         {
             SeededBrownianMotion sbm = new SeededBrownianMotion();
@@ -2874,8 +3348,14 @@ namespace PixelMidpointDisplacement
             {
                 (new FluidBlock((int)blockIDs.water), 0.01, 600, 1, 1),
                 (new FluidBlock((int)blockIDs.water), 0.01, 600, 1, 20),
-                //x(new FluidBlock((int)blockIDs.water), 0.05, 0, -30, 60)
+                (new FluidBlock((int)blockIDs.water), 0.05, 0, -30, 60)
+            };
 
+            spawnableDecorations = new List<BiomeSpawnableDecorationVariables>() {
+                new BiomeSpawnableDecorationVariables(new TreeGeneration(), 3, 4, 15, 400, 0, true),
+                new BiomeSpawnableDecorationVariables(new TreeGeneration(), 3, 4, 15, 400, 0, true),
+                new BiomeSpawnableDecorationVariables(new BushGeneration(), 10, 3, 25, 400, 0, true),
+                new BiomeSpawnableDecorationVariables(new BigBushGeneration(), 10, 3, 25, 400, 0, true)
 
             };
 
@@ -2946,7 +3426,6 @@ namespace PixelMidpointDisplacement
         }
 
     }
-
     public class CaveBiome : SubterraneanBiome {
         
         public CaveBiome((double x, double y) rightMostTerrainPoint, WorldGenerator wg, (int x, int y) biomeOffset, (int x, int y) biomeDimensions) : base(rightMostTerrainPoint, wg, biomeOffset, biomeDimensions) {
@@ -2988,6 +3467,34 @@ namespace PixelMidpointDisplacement
         }
     }
     #endregion
+    #region Biome Generation Variables
+    public class BiomeSpawnableEntityVariables { }
+
+    public class BiomeSpawnableStructureVariables { }
+
+    public class BiomeSpawnableFluidVariables { }
+
+    public class BiomeSpawnableDecorationVariables {
+        public Decoration decoration;
+        public double density;
+        public int minToNextDecoration;
+        public int maxToNextDecoration;
+        public int yMax;
+        public int yMin;
+        public bool spawnOnSurface;
+
+        public BiomeSpawnableDecorationVariables(Decoration decoration, double density, int minToNextDecoration, int maxToNextDecoration, int yMax, int yMin, bool spawnOnSurface) {
+            this.decoration = decoration;
+            this.density = density;
+            this.minToNextDecoration = minToNextDecoration;
+            this.maxToNextDecoration = maxToNextDecoration;
+            this.yMax = yMax;
+            this.yMin = yMin;
+            this.spawnOnSurface = spawnOnSurface;
+        }
+    }
+    #endregion
+
     #region Structure Classes
     public class Structure {
         public string structureName;
@@ -3079,6 +3586,504 @@ namespace PixelMidpointDisplacement
 
     }
     #endregion
+
+    #region Decoration Classes
+
+    public class Decoration {
+        public virtual bool generate(int x, int y, WorldContext wc) {
+            return true;
+        }
+
+        public virtual bool generate(int x, int y, WorldGenerator wg) {
+            return true;
+        }
+    }
+    public class TreeGeneration : Decoration
+    {
+
+        List<BranchVariables> branches = new List<BranchVariables>();
+
+
+        List<BranchEndVariables> branchEnds = new List<BranchEndVariables>();
+        public int branchLength = 8;
+
+        public double branchAngle = Math.PI / 5;
+        public double branchProbability = 0.25;
+
+        int currentSign = 1;
+
+        public double angleIncreasePerBlockAdded = 0;
+
+        public int blocksTilBranch = 3;
+        int currentBlocksFromBranch = 3;
+
+        public bool splitBranch = false;
+
+        public double branchLengthDecay = 0.9;
+
+        double currentX;
+        double currentY;
+
+        public int baseX;
+        public int baseY;
+
+        public double probabilityToGenerateLeavesOverWood = 0.1;
+
+
+        WorldContext wc;
+        WorldGenerator wg;
+
+        public blockIDs treeTrunkBlock = blockIDs.treeTrunk;
+        public blockIDs leafBlock = blockIDs.leaves;
+        public override bool generate(int x, int y, WorldContext wc)
+        {
+            baseX = x;
+            baseY = y;
+            currentX = x;
+            currentY = y;
+            this.wc = wc;
+
+            branchEnds.Clear();
+
+            branches.Add(new BranchVariables(3 * Math.PI / 2, x, y, 0, branchLength, 0));
+
+            while (generateBranch()) ;
+
+            //Generate leaves from branch ends:
+            generateLeaves();
+
+            return true;
+        }
+
+        public override bool generate(int x, int y, WorldGenerator wg)
+        {
+            if (wg.worldArray[x, y - 1] == (int)blockIDs.air && (wg.worldArray[x, y + 1] == (int)blockIDs.dirt || wg.worldArray[x, y + 1] == (int)blockIDs.grass))
+            {
+                baseX = x;
+                baseY = y;
+                currentX = x;
+                currentY = y;
+                this.wg = wg;
+
+                branchEnds.Clear();
+
+                branches.Add(new BranchVariables(3 * Math.PI / 2, x, y, 0, branchLength, 0));
+
+                while (generateBranchIntegerOutput()) ;
+
+                //Generate leaves from branch ends:
+                generateLeavesIntegerOutput();
+
+                return true;
+            }
+            else {
+                return false;
+            }
+        }
+
+        public bool generateBranch()
+        {
+            bool addedABlock = false;
+            int i = branches.Count - 1;
+            if (i >= 0)
+            {
+                //For each branch, set the current x and current y to the branches x and y
+                //while (branches[i].currentLength < branchLength && currentX >= 0 && currentY >= 0 && currentX < wc.worldArray.GetLength(0) && currentY < wc.worldArray.GetLength(1))
+                //{
+                currentX = (currentX + Math.Cos(branches[i].angle));
+                currentY = (currentY + Math.Sin(branches[i].angle));
+
+                if (currentX >= 0 && currentY >= 0 && currentX < wc.worldArray.GetLength(0) && currentY < wc.worldArray.GetLength(1))
+                {
+
+                    branches[i].currentLength += 1;
+
+                    if (branches[i].angle % MathHelper.TwoPi > 3 * Math.PI / 2 || branches[i].angle % MathHelper.TwoPi < MathHelper.PiOver2)
+                    {
+                        branches[i].angle += angleIncreasePerBlockAdded;
+                    }
+                    else if (branches[i].angle % MathHelper.TwoPi < 3 * Math.PI / 2 && branches[i].angle % MathHelper.TwoPi > MathHelper.PiOver2)
+                    {
+                        branches[i].angle -= angleIncreasePerBlockAdded;
+                    }
+
+
+                    wc.addBlock((int)currentX, (int)currentY, (int)treeTrunkBlock);
+                    currentBlocksFromBranch += 1;
+                    addedABlock = true;
+                }
+                else
+                {
+                    branchEnds.Add(new BranchEndVariables((int)currentX, (int)currentY, branches[i].branchLayerDepth));
+
+
+                    currentX = branches[i].x;
+                    currentY = branches[i].y;
+                    currentBlocksFromBranch = 0;
+                    branches.RemoveAt(i);
+                    i = branches.Count - 1;
+                    if (i >= 0) { addedABlock = true; }
+
+
+                    return addedABlock;
+                }
+
+                Random r = new Random();
+
+                if (i >= 0)
+                {
+                    if (branches[i].currentLength >= branches[i].maxBranchLength)
+                    {
+                        branchEnds.Add(new BranchEndVariables((int)currentX, (int)currentY, branches[i].branchLayerDepth));
+
+
+                        currentX = branches[i].x;
+                        currentY = branches[i].y;
+                        currentBlocksFromBranch = 0;
+
+                        //Add to the list of branch ends
+
+
+                        branches.RemoveAt(i);
+                        i = branches.Count - 1;
+                        if (i >= 0) { addedABlock = true; }
+
+                        return addedABlock;
+                    }
+                    else if (r.NextDouble() < branchProbability && blocksTilBranch <= currentBlocksFromBranch)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Tried to branch");
+                        branches[i].x = currentX;
+                        branches[i].y = currentY;
+                        //int angleDifferentSign = (r.Next(0, 2) * 2) - 1;
+                        currentSign *= -1;
+                        //A 10% angle variance
+                        branches.Add(new BranchVariables(branches[i].angle + currentSign * branchAngle * (r.NextDouble() * 0.2 + 0.9), currentX, currentY, branches[i].currentLength, branches[i].maxBranchLength * branchLengthDecay, branches[i].branchLayerDepth + 1));
+                        currentBlocksFromBranch = 0;
+                        branches[i].angle -= Convert.ToInt32(splitBranch) * (currentSign * branchAngle);
+                        //break;
+                        addedABlock = true;
+                    }
+                }
+
+                i = branches.Count - 1;
+            }
+
+            return addedABlock;
+
+
+        }
+
+        public void generateLeaves()
+        {
+            //Seed a brownian array:
+            BlockGenerationVariables[,] leafArray = new BlockGenerationVariables[branchLength * 2, branchLength * 2];
+
+            SeededBrownianMotion sbm = new SeededBrownianMotion();
+
+            //Seed the array
+
+            //The baseX and baseY are at the bottom centre of the array:
+            for (int i = 0; i < branchEnds.Count; i++)
+            {
+                int relativeX = (branchEnds[i].x - baseX) + leafArray.GetLength(0) / 2;
+                int relativeY = (branchEnds[i].y - baseY) + leafArray.GetLength(1);
+                if (relativeX >= 0 && relativeY >= 0 && relativeX < leafArray.GetLength(0) && relativeY < leafArray.GetLength(1))
+                {
+                    leafArray[relativeX, relativeY] = new BlockGenerationVariables(0, new Block((int)leafBlock), 8, 10 / (branchEnds[i].branchLayerDepth + 1), (0.3, 0.05, 0.3, 0.05, 0.05, 0.05, 0.3, 0.05));
+                }
+            }
+
+
+            //Spread the seeds
+            leafArray = sbm.brownianAlgorithm(leafArray, 15, fillOutput : false);
+
+            //Convert it to blocks in the world
+            Random r = new Random();
+            for (int x = 0; x < leafArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < leafArray.GetLength(1); y++)
+                {
+                    if (leafArray[x, y] != null)
+                    {
+                        int localToGlobalX = (x - leafArray.GetLength(0) / 2) + baseX;
+                        int localToGlobalY = (y - leafArray.GetLength(1)) + baseY;
+                        if (localToGlobalX >= 0 && localToGlobalY >= 0 && localToGlobalX < wc.worldArray.GetLength(0) && localToGlobalY < wc.worldArray.GetLength(1))
+                        {
+                            if (wc.worldArray[localToGlobalX, localToGlobalY].ID == (int)blockIDs.air || r.NextDouble() < probabilityToGenerateLeavesOverWood)
+                            {
+                                wc.addBlock(x, y, leafArray[x, y].block.ID);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        public bool generateBranchIntegerOutput()
+        {
+            bool addedABlock = false;
+            int i = branches.Count - 1;
+            if (i >= 0)
+            {
+                //For each branch, set the current x and current y to the branches x and y
+                //while (branches[i].currentLength < branchLength && currentX >= 0 && currentY >= 0 && currentX < wc.worldArray.GetLength(0) && currentY < wc.worldArray.GetLength(1))
+                //{
+                currentX = (currentX + Math.Cos(branches[i].angle));
+                currentY = (currentY + Math.Sin(branches[i].angle));
+
+                if (currentX >= 0 && currentY >= 0 && currentX < wg.worldArray.GetLength(0) && currentY < wg.worldArray.GetLength(1))
+                {
+
+                    branches[i].currentLength += 1;
+
+                    if (branches[i].angle % MathHelper.TwoPi > 3 * Math.PI / 2 || branches[i].angle % MathHelper.TwoPi < MathHelper.PiOver2)
+                    {
+                        branches[i].angle += angleIncreasePerBlockAdded;
+                    }
+                    else if (branches[i].angle % MathHelper.TwoPi < 3 * Math.PI / 2 && branches[i].angle % MathHelper.TwoPi > MathHelper.PiOver2)
+                    {
+                        branches[i].angle -= angleIncreasePerBlockAdded;
+                    }
+
+
+                    wg.worldArray[(int)currentX, (int)currentY] =  (int)treeTrunkBlock;
+                    currentBlocksFromBranch += 1;
+                    addedABlock = true;
+                }
+                else
+                {
+                    branchEnds.Add(new BranchEndVariables((int)currentX, (int)currentY, branches[i].branchLayerDepth));
+
+
+                    currentX = branches[i].x;
+                    currentY = branches[i].y;
+                    currentBlocksFromBranch = 0;
+                    branches.RemoveAt(i);
+                    i = branches.Count - 1;
+                    if (i >= 0) { addedABlock = true; }
+
+
+                    return addedABlock;
+                }
+
+                Random r = new Random();
+
+                if (i >= 0)
+                {
+                    if (branches[i].currentLength >= branches[i].maxBranchLength)
+                    {
+                        branchEnds.Add(new BranchEndVariables((int)currentX, (int)currentY, branches[i].branchLayerDepth));
+
+
+                        currentX = branches[i].x;
+                        currentY = branches[i].y;
+                        currentBlocksFromBranch = 0;
+
+                        //Add to the list of branch ends
+
+
+                        branches.RemoveAt(i);
+                        i = branches.Count - 1;
+                        if (i >= 0) { addedABlock = true; }
+
+                        return addedABlock;
+                    }
+                    else if (r.NextDouble() < branchProbability && blocksTilBranch <= currentBlocksFromBranch)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Tried to branch");
+                        branches[i].x = currentX;
+                        branches[i].y = currentY;
+                        //int angleDifferentSign = (r.Next(0, 2) * 2) - 1;
+                        currentSign *= -1;
+                        //A 10% angle variance
+                        branches.Add(new BranchVariables(branches[i].angle + currentSign * branchAngle * (r.NextDouble() * 0.2 + 0.9), currentX, currentY, branches[i].currentLength, branches[i].maxBranchLength * branchLengthDecay, branches[i].branchLayerDepth + 1));
+                        currentBlocksFromBranch = 0;
+                        branches[i].angle -= Convert.ToInt32(splitBranch) * (currentSign * branchAngle);
+                        //break;
+                        addedABlock = true;
+                    }
+                }
+
+                i = branches.Count - 1;
+            }
+
+            return addedABlock;
+
+
+        }
+
+        public void generateLeavesIntegerOutput()
+        {
+            //Seed a brownian array:
+            BlockGenerationVariables[,] leafArray = new BlockGenerationVariables[branchLength * 2, branchLength * 2];
+
+            SeededBrownianMotion sbm = new SeededBrownianMotion();
+
+            //Seed the array
+
+            //The baseX and baseY are at the bottom centre of the array:
+            for (int i = 0; i < branchEnds.Count; i++)
+            {
+                int relativeX = (branchEnds[i].x - baseX) + leafArray.GetLength(0) / 2;
+                int relativeY = (branchEnds[i].y - baseY) + leafArray.GetLength(1);
+                if (relativeX >= 0 && relativeY >= 0 && relativeX < leafArray.GetLength(0) && relativeY < leafArray.GetLength(1))
+                {
+                    leafArray[relativeX, relativeY] = new BlockGenerationVariables(0, new Block((int)leafBlock), 8, 10 / (branchEnds[i].branchLayerDepth + 1), (0.3, 0.05, 0.3, 0.05, 0.05, 0.05, 0.3, 0.05));
+                }
+            }
+
+
+            //Spread the seeds
+            leafArray = sbm.brownianAlgorithm(leafArray, 15, fillOutput: false);
+
+            for (int x = 0; x < leafArray.GetLength(0); x++) {
+                for (int y = 0; y < leafArray.GetLength(1); y++) {
+                    if (leafArray[x, y] != null)
+                    {
+                        if (leafArray[x, y].block.ID == (int)blockIDs.leaves)
+                        {
+                            for (int checkX = x - 1; checkX <= x + 1; checkX++)
+                            {
+                                for (int checkY = y - 1; checkY <= y + 1; checkY++)
+                                {
+                                    if (checkX >= 0 && checkX < leafArray.GetLength(0) && checkY >= 0 && checkY < leafArray.GetLength(1))
+                                    {
+                                        if (leafArray[checkX, checkY] == null)
+                                        {
+                                            leafArray[checkX, checkY] = new BlockGenerationVariables(0, new SemiLeafBlock((int)blockIDs.semiLeaves), 0, 0);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            //Convert it to blocks in the world
+            Random r = new Random();
+            for (int x = 0; x < leafArray.GetLength(0); x++)
+            {
+                for (int y = 0; y < leafArray.GetLength(1); y++)
+                {
+                    if (leafArray[x, y] != null)
+                    {
+                        int localToGlobalX = (x - leafArray.GetLength(0) / 2) + baseX;
+                        int localToGlobalY = (y - leafArray.GetLength(1)) + baseY;
+                        if (localToGlobalX >= 0 && localToGlobalY >= 0 && localToGlobalX < wg.worldArray.GetLength(0) && localToGlobalY < wg.worldArray.GetLength(1))
+                        {
+                            if (wg.worldArray[localToGlobalX, localToGlobalY] == (int)blockIDs.air || r.NextDouble() < probabilityToGenerateLeavesOverWood)
+                            {
+                                wg.worldArray[localToGlobalX, localToGlobalY] = leafArray[x, y].block.ID;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+
+    public class BranchVariables
+    {
+        public double angle;
+        public double x;
+        public double y;
+        public int currentLength;
+        public double maxBranchLength;
+        public int branchLayerDepth;
+
+        public BranchVariables(double angle, double x, double y, int currentLength, double maxBranchLength, int branchLayerDepth)
+        {
+            this.angle = angle;
+            this.x = x;
+            this.y = y;
+            this.currentLength = currentLength;
+            this.maxBranchLength = maxBranchLength;
+            this.branchLayerDepth = branchLayerDepth;
+        }
+    }
+
+    public class BranchEndVariables
+    {
+        public int x;
+        public int y;
+        public int branchLayerDepth;
+
+        public BranchEndVariables(int x, int y, int branchLayerDepth)
+        {
+            this.x = x;
+            this.y = y;
+            this.branchLayerDepth = branchLayerDepth;
+        }
+    }
+
+    public class BushGeneration : Decoration {
+
+        public blockIDs bushBlock = blockIDs.bush;
+        public override bool generate(int x, int y, WorldContext wc)
+        {
+            if (wc.worldArray[x, y].ID == (int)blockIDs.air && wc.worldArray[x,y + 1].ID == (int)blockIDs.dirt || wc.worldArray[x, y + 1].ID == (int)blockIDs.grass)
+            {
+                wc.addBlock(x, y, (int)bushBlock);
+                return true;
+
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        public override bool generate(int x, int y, WorldGenerator wg)
+        {
+            if (wg.worldArray[x, y - 1] == (int)blockIDs.air && wg.worldArray[x, y + 1] == (int)blockIDs.dirt || wg.worldArray[x, y + 1] == (int)blockIDs.grass)
+            {
+                wg.worldArray[x, y - 1] = (int)bushBlock;
+                return true;
+
+            }
+            else {
+                return false;
+            }
+
+        }
+    }
+
+    public class BigBushGeneration : Decoration
+    {
+
+        public blockIDs bushBlock = blockIDs.bigBush;
+        public override bool generate(int x, int y, WorldContext wc)
+        {
+            if (wc.worldArray[x, y].ID == (int)blockIDs.air && (wc.worldArray[x, y + 1].ID == (int)blockIDs.dirt || wc.worldArray[x, y + 1].ID == (int)blockIDs.grass))
+            {
+                wc.addBlock(x, y, (int)bushBlock);
+                return true;
+
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        public override bool generate(int x, int y, WorldGenerator wg)
+        {
+            if (wg.worldArray[x, y - 1] == (int)blockIDs.air && (wg.worldArray[x, y] == (int)blockIDs.dirt || wg.worldArray[x, y] == (int)blockIDs.grass) && wg.worldArray[x + 1, y - 1] == (int)blockIDs.air && (wg.worldArray[x + 1, y] == (int)blockIDs.dirt || wg.worldArray[x + 1, y] == (int)blockIDs.grass))
+            {
+                wg.worldArray[x, y - 1] = (int)bushBlock;
+                return true;
+
+            }
+            else
+            {
+                return false;
+            }
+        }
+    }
+    #endregion
     public class LightingSystem
     {
         public int[,] lightArray { get; set; }
@@ -3166,7 +4171,7 @@ namespace PixelMidpointDisplacement
                         int yCheck = (int)Math.Round(y - lightDirection.Y);
                         if (xCheck >= 0 && xCheck < worldArray.GetLength(0) && yCheck >= 0 && yCheck < worldArray.GetLength(1))
                         {
-                            if (worldArray[xCheck, y] == 0 || worldArray[x, yCheck] == 0)
+                            if (worldArray[xCheck, y] == 0 || worldArray[x, yCheck] == 0 || worldArray[xCheck, y] == (int)blockIDs.bush || worldArray[x, yCheck] == (int)blockIDs.bush || worldArray[xCheck, y] == (int)blockIDs.bigBush || worldArray[x, yCheck] == (int)blockIDs.bigBush)
                             {
                                 lightArray[x, y] = sunBrightness;
                             }
@@ -3462,6 +4467,8 @@ namespace PixelMidpointDisplacement
         public List<UILine> UILines = new List<UILine>();
         public List<UIElement> inventoryBackgrounds = new List<UIElement>();
         public List<UIItem> inventorySlots = new List<UIItem>();
+
+        public bool wasElementAdded = false;
         public UIController() {
             resetMainMenuUI();
         }
@@ -3476,6 +4483,35 @@ namespace PixelMidpointDisplacement
             UIElements.Add((0, start));
             UIElements.Add((0, generationText));
             InteractiveUI.Add(start);
+        }
+
+        public void addUIElement(int drawOrder, UIElement element) {
+            if (!UIElements.Contains((drawOrder, element))) {
+                UIElements.Add((drawOrder, element));
+            }
+            if (element is InteractiveUIElement iue) {
+                if (!InteractiveUI.Contains(iue))
+                {
+                    InteractiveUI.Add(iue);
+                }
+            }
+            wasElementAdded = true;
+        }
+
+        public void removeUIElement(int drawOrder, UIElement element) {
+        
+            if (UIElements.Contains((drawOrder, element)))
+            {
+                UIElements.Remove((drawOrder, element));
+            }
+            if (element is InteractiveUIElement iue)
+            {
+                if (InteractiveUI.Contains(iue))
+                {
+                    InteractiveUI.Remove(iue);
+                }
+            
+            }
         }
     }
     #region UI classes
@@ -3830,7 +4866,7 @@ namespace PixelMidpointDisplacement
             drawRectangle = new Rectangle((int)x + worldContext.screenSpaceOffset.x, (int)(y + worldContext.screenSpaceOffset.y), 10, 14);
 
             if (existingDuration <= 0) {
-                worldContext.engineController.UIController.UIElements.Remove((drawOrder, this));
+                worldContext.engineController.UIController.removeUIElement(drawOrder, this);
             }
         }
     }
@@ -3925,7 +4961,6 @@ namespace PixelMidpointDisplacement
             int evolutionsInLayer = ownerEvolution.tree.evolutionTree[ownerEvolution.treeLayer].evolutionLayer.Count;
             defaultX = (ownerEvolution.indexWithinLayer + 1) * (defaultScreenWidth / (evolutionsInLayer + 1));
             defaultY = defaultScreenHeight - ((ownerEvolution.treeLayer + 1) * heightBetweenLayers + heightOffset);
-            System.Diagnostics.Debug.WriteLine(drawRectangle.X + ", " + drawRectangle.Y);
         }
 
         public override void updateElement(double elapsedTime, Game1 game)
@@ -4060,7 +5095,7 @@ namespace PixelMidpointDisplacement
         }
         public void updateString(string newString) {
             while(stringCharacters.Count > 0) {
-                worldContext.engineController.UIController.UIElements.Remove((stringDrawLayer, stringCharacters[0]));
+                worldContext.engineController.UIController.removeUIElement(stringDrawLayer, stringCharacters[0]);
                 stringCharacters.RemoveAt(0);
             }
 
@@ -4072,7 +5107,7 @@ namespace PixelMidpointDisplacement
                 string character = newString[i].ToString();
                 ExperienceStringCharacter esc = new ExperienceStringCharacter(Convert.ToInt32(character), x + i * characterSizeInPixels, y);
                 stringCharacters.Add(esc);
-                worldContext.engineController.UIController.UIElements.Add((stringDrawLayer, esc));
+                worldContext.engineController.UIController.addUIElement(stringDrawLayer, esc);
             }
         }
     }
@@ -4094,8 +5129,7 @@ namespace PixelMidpointDisplacement
             setItem(recipe.recipeOutput);
             owner = recipe.manager.worldContext.player;
 
-            recipe.manager.worldContext.engineController.UIController.InteractiveUI.Add(this);
-            recipe.manager.worldContext.engineController.UIController.UIElements.Add((drawLayer, this));
+            recipe.manager.worldContext.engineController.UIController.addUIElement(drawLayer, this);
 
             scene = Scene.Game;
             positionType = Position.Absolute;
@@ -4105,7 +5139,7 @@ namespace PixelMidpointDisplacement
             
 
             background = new CraftItemBackground();
-            recipe.manager.worldContext.engineController.UIController.UIElements.Add((drawLayer - 1, background));
+            recipe.manager.worldContext.engineController.UIController.addUIElement(drawLayer - 1, background);
 
         }
         public void setItem(Item item) {
@@ -4237,26 +5271,21 @@ namespace PixelMidpointDisplacement
         }
 
         public void showString() {
-            for (int i = 0; i < visualisedString.Count; i++)
-            {
-                visualisedString[i].isUIElementActive = true;
-            }
+            //Re-generate the string, reduces the size of the UIElements list, and hence performance: a lot.
+            setString(stringToRender);
 
-            if (background != null)
-            {
-                background.showBackground();
-            }
+            
             isVisible = true;
         }
 
         public void hideString() {
             for (int i = 0; i < visualisedString.Count; i++) {
-                visualisedString[i].isUIElementActive = false;
+                wc.engineController.UIController.removeUIElement(UILayer, visualisedString[i]);
             }
 
-            if (background != null) {
-                background.hideBackground();
-            }
+            visualisedString.Clear();
+            background.clear();
+
             isVisible = false;
         }
 
@@ -4267,7 +5296,7 @@ namespace PixelMidpointDisplacement
             for (int i = 0; i < visualisedString.Count; i++)
             {
                 //Clear it from the other lists
-                wc.engineController.UIController.UIElements.Remove((UILayer, visualisedString[i]));
+                wc.engineController.UIController.removeUIElement(UILayer, visualisedString[i]);
             }
             visualisedString.Clear();
 
@@ -4417,7 +5446,7 @@ namespace PixelMidpointDisplacement
                     }
 
                     visualisedString.Add(c);
-                    wc.engineController.UIController.UIElements.Add((UILayer, c));
+                    wc.engineController.UIController.addUIElement(UILayer, c);
                 }
             }
             if (background != null) {
@@ -4474,9 +5503,6 @@ namespace PixelMidpointDisplacement
                 {
                     endTagToReplace = endTagToReplace.Replace(" ", "></");
                 }
-
-                System.Diagnostics.Debug.WriteLine(endTagToFind);
-
 
                 while (stringToRender.Replace(endTagToFind, endTagToReplace) != stringToRender)
                 {
@@ -4709,9 +5735,9 @@ namespace PixelMidpointDisplacement
             body.sourceRectangle = new Rectangle(0, pixelsHighToBorder, imageWidth, imageWidth - 2 * pixelsHighToBorder);
             bottom.sourceRectangle = new Rectangle(0, imageWidth - pixelsHighToBorder, imageWidth, pixelsHighToBorder);
 
-            wc.engineController.UIController.UIElements.Add((UILayer, top));
-            wc.engineController.UIController.UIElements.Add((UILayer, body));
-            wc.engineController.UIController.UIElements.Add((UILayer, bottom));
+            wc.engineController.UIController.addUIElement(UILayer, top);
+            wc.engineController.UIController.addUIElement(UILayer, body);
+            wc.engineController.UIController.addUIElement(UILayer, bottom);
 
         }
 
@@ -4743,9 +5769,9 @@ namespace PixelMidpointDisplacement
         }
 
         public void clear() {
-            wc.engineController.UIController.UIElements.Remove((UILayer, top));
-            wc.engineController.UIController.UIElements.Remove((UILayer, body));
-            wc.engineController.UIController.UIElements.Remove((UILayer, bottom));
+            wc.engineController.UIController.removeUIElement(UILayer, top);
+            wc.engineController.UIController.removeUIElement(UILayer, body);
+            wc.engineController.UIController.removeUIElement(UILayer, bottom);
 
 
         }
@@ -4772,22 +5798,21 @@ namespace PixelMidpointDisplacement
             worldContext = wc;
             EvolutionStarBackground eb1 = new EvolutionStarBackground();
             eb1.mouseMovementCoefficient = 0.01;
-            wc.engineController.UIController.UIElements.Add((1, eb1));
+            wc.engineController.UIController.addUIElement(1, eb1);
 
             EvolutionStarBackground eb2 = new EvolutionStarBackground();
             eb2.mouseMovementCoefficient = 0.005;
             eb2.setSourceLocation(0, 1080);
-            wc.engineController.UIController.UIElements.Add((2, eb2));
+            wc.engineController.UIController.addUIElement(2, eb2);
 
             EndEvolutionButton eeb = new EndEvolutionButton();
-            wc.engineController.UIController.UIElements.Add((18, eeb));
-            wc.engineController.UIController.InteractiveUI.Add(eeb);
+            wc.engineController.UIController.addUIElement(18, eeb);
 
             /*EvolutionStarBackground eb3 = new EvolutionStarBackground();
             eb3.mouseMovementCoefficient = 0;
             eb3.setSourceLocation(1920, 0);
             eb3.zeroStartingOffset();
-            wc.engineController.UIController.UIElements.Add((0, eb3));*/
+            wc.engineController.UIController.addUIElement((0, eb3));*/
 
             //Add a counter for each experienceField
             experienceCounters.Add((ExperienceField.Knowledge, new ExperienceCounter(worldContext, 50, 400)));
@@ -4814,8 +5839,7 @@ namespace PixelMidpointDisplacement
                     EvolutionButton evolutionButton = new EvolutionButton(ev);
                     currentLayerButtons.Add(evolutionButton);
                     evolutionButton.setLocationFromTree();
-                    worldContext.engineController.UIController.UIElements.Add((15, evolutionButton));
-                    worldContext.engineController.UIController.InteractiveUI.Add(evolutionButton);
+                    worldContext.engineController.UIController.addUIElement(15, evolutionButton);
 
                     if (x > 0) {
                         List<int> dependencies = e.evolutionTree[x].evolutionLayer[y].prerequisiteEvolutions;
@@ -4835,7 +5859,6 @@ namespace PixelMidpointDisplacement
             for (int i = 0; i < experienceCounters.Count; i++) {
                 
                 experienceCounters[i].counter.updateString(((int)tree.getExperience(experienceCounters[i].field)).ToString());
-                System.Diagnostics.Debug.WriteLine(experienceCounters[i].field + " : " + experienceCounters[i].counter.stringNumber);
             }
         }
     }
@@ -5390,7 +6413,7 @@ namespace PixelMidpointDisplacement
 
             for (int i = 0; i < integerDamageAsAString.Length; i++) {
                 Damage d = new Damage(worldContext, Convert.ToInt32(integerDamageAsAString[i].ToString()), x + 11 * i, y, 15);
-                worldContext.engineController.UIController.UIElements.Add((15, d));
+                worldContext.engineController.UIController.addUIElement(15, d);
             }
 
             if (currentHealth <= 0) {
@@ -5816,14 +6839,13 @@ namespace PixelMidpointDisplacement
             currentHealth = maxHealth;
 
             HealthBarOutline hbo = new HealthBarOutline();
-            wc.engineController.UIController.UIElements.Add((5, hbo));
-            wc.engineController.UIController.UIElements.Add((5, healthBar));
+            wc.engineController.UIController.addUIElement(5, hbo);
+            wc.engineController.UIController.addUIElement(5, healthBar);
 
             rs = new RespawnScreen();
-            wc.engineController.UIController.UIElements.Add((150, rs));
+            wc.engineController.UIController.addUIElement(150, rs);
             rb = new RespawnButton(this, rs);
-            wc.engineController.UIController.UIElements.Add((150, rb));
-            wc.engineController.UIController.InteractiveUI.Add(rb);
+            wc.engineController.UIController.addUIElement(150, rb);
 
             lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
 
@@ -5942,18 +6964,17 @@ namespace PixelMidpointDisplacement
             equipmentInventory = new UIItem[2, 4];
             inventoryBackground = new InventoryBackground();
             equipmentBackground = new EquipmentBackground();
-            worldContext.engineController.UIController.UIElements.Add((3, inventoryBackground));
+            worldContext.engineController.UIController.addUIElement(3, inventoryBackground);
             worldContext.engineController.UIController.inventoryBackgrounds.Add(inventoryBackground);
             worldContext.engineController.UIController.inventoryBackgrounds.Add(equipmentBackground);
-            worldContext.engineController.UIController.UIElements.Add((3, equipmentBackground));
-            worldContext.engineController.UIController.UIElements.Add((3, hotbar));
+            worldContext.engineController.UIController.addUIElement(3, equipmentBackground);
+            worldContext.engineController.UIController.addUIElement(3, hotbar);
             worldContext.engineController.UIController.inventoryBackgrounds.Add(hotbar);
-            worldContext.engineController.UIController.UIElements.Add((4, hotbarSelected));
+            worldContext.engineController.UIController.addUIElement(4, hotbarSelected);
             for (int x = 0; x < inventory.GetLength(0); x++) {
                 for (int y = 0; y < inventory.GetLength(1); y++) {
                     inventory[x, y] = new UIItem(x, y, hotbar.drawRectangle.X, hotbar.drawRectangle.Y, this);
-                    worldContext.engineController.UIController.UIElements.Add((5, inventory[x, y]));
-                    worldContext.engineController.UIController.InteractiveUI.Add(inventory[x, y]);
+                    worldContext.engineController.UIController.addUIElement(5, inventory[x, y]);
                 }
             }
             equipmentInventory[0, 0] = new AccessoryUIItem(0, 0, equipmentBackground.drawRectangle.X, equipmentBackground.drawRectangle.Y, this);
@@ -5970,14 +6991,12 @@ namespace PixelMidpointDisplacement
             {
                 for (int y = 0; y < equipmentInventory.GetLength(1); y++)
                 {
-                    worldContext.engineController.UIController.UIElements.Add((5, equipmentInventory[x, y]));
-                    worldContext.engineController.UIController.InteractiveUI.Add(equipmentInventory[x, y]);
+                    worldContext.engineController.UIController.addUIElement(5, equipmentInventory[x, y]);
                 }
             }
 
             selectedItem = new FloatingUIItem(this);
-            worldContext.engineController.UIController.UIElements.Add((100, selectedItem));
-            worldContext.engineController.UIController.InteractiveUI.Add(selectedItem);
+            worldContext.engineController.UIController.addUIElement(100, selectedItem);
         }
 
         public void showInventory() {
@@ -6788,7 +7807,6 @@ namespace PixelMidpointDisplacement
             }
         }
     }
-    
     public class Arrow : Entity, IEmissive, IActiveCollider
     {
         public Vector3 lightColor { get; set; }
@@ -7392,6 +8410,110 @@ namespace PixelMidpointDisplacement
         public override Item itemCopy(int stackSize)
         {
             BlockItem i = new BlockItem(blockID, animationController, owner);
+            i.currentStackSize = stackSize;
+            return i;
+        }
+    }
+
+    public class BackgroundBlockItem : Item {
+        public int blockID;
+
+
+        int semiAnimationAdditions = 0;
+        int maxSemiAdditions = 3;
+
+
+        public BackgroundBlockItem(int BlockID, AnimationController animationController, Player owner) : base(owner)
+        {
+            blockID = BlockID;
+            this.animationController = animationController;
+
+            this.owner = owner;
+
+            useCooldown = 0f;
+
+            spriteSheetID = (int)spriteSheetIDs.blockBackground;
+            verticalDirection = 1;
+
+            sourceRectangle = new Rectangle(0, (blockID) * 32, 32, 32);
+
+
+
+            drawDimensions = (16, 16);
+
+            origin = new Vector2(-2, 18f);
+            constantRotationOffset = 0;
+
+            spriteEffect = SpriteEffects.None;
+
+
+
+            maxStackSize = 999;
+            currentStackSize = 1;
+
+            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
+
+            tooltip =
+                "<h2>" + (backgroundBlockIDs)BlockID + " Background</h2>\n\n" +
+
+                "<grey>The humble objects you \n" +
+                "dedicate your life to destroying </grey>";
+
+            tooltipRenderer.setString(tooltip);
+
+            tooltipRenderer.hideString();
+
+            //When you pick up an item, you check the inventory for an item of the same type. If that item already exists, check the stack size. If the stack size
+            //is less than the max, just add to the current stacksize, otherwise add the item to the inventory in the next empty slot
+        }
+
+        public override void onLeftClick()
+        {
+            if (itemAnimator == null)
+            {
+                semiAnimationAdditions = 0;
+                offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
+                itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
+
+                animationController.addAnimator(itemAnimator);
+
+                int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
+                int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
+
+                if (owner.worldContext.setBackground(mouseX, mouseY, blockID)){
+
+                    currentStackSize -= 1;
+                }
+                
+            }
+            if (semiAnimationAdditions < maxSemiAdditions)
+            {
+                int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
+                int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
+
+                if (owner.worldContext.setBackground(mouseX, mouseY, blockID))
+                {
+                    currentStackSize -= 1;
+                    semiAnimationAdditions += 1;
+                }
+                
+            }
+        }
+
+        public override bool isItemIdentical(Item otherItem)
+        {
+            if (otherItem is BackgroundBlockItem b)
+            {
+                return b.blockID == blockID;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        public override Item itemCopy(int stackSize)
+        {
+            BackgroundBlockItem i = new BackgroundBlockItem(blockID, animationController, owner);
             i.currentStackSize = stackSize;
             return i;
         }
@@ -8098,6 +9220,9 @@ namespace PixelMidpointDisplacement
             if (exposedBlocks.ContainsKey((x,y))) { exposedBlocks.Remove((x,y)); }
         }
 
+        public virtual void updateBlock(WorldContext wc) {
+            
+        }
         public virtual void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation) {
             x = blockLocation.x;
             y = blockLocation.y;
@@ -8200,7 +9325,6 @@ namespace PixelMidpointDisplacement
             return new Block(this);
         }
     }
-
     public class FluidBlock : Block {
 
         public bool isSourceBlock = true;
@@ -8876,10 +10000,522 @@ namespace PixelMidpointDisplacement
         }
 
     }
+
+    public class TreeBlock : Block {
+        public TreeBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+        }
+        public TreeBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            this.emmissiveStrength = emmissiveStrength;
+        }
+        public TreeBlock(int ID) : base(ID)
+        {
+            this.ID = ID;
+        }
+
+        public TreeBlock(Block b) : base(b)
+        {
+            sourceRectangle = b.sourceRectangle;
+            emmissiveStrength = b.emmissiveStrength;
+            ID = b.ID;
+            hardness = 15;
+            durability = 4;
+            
+        }
+
+        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
+        {
+
+        }
+
+        public override Block copyBlock()
+        {
+            return new TreeBlock(this);
+        }
+    }
+
+    public class LeafBlock : Block {
+        public LeafBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+        }
+        public LeafBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            this.emmissiveStrength = emmissiveStrength;
+        }
+        public LeafBlock(int ID) : base(ID)
+        {
+            this.ID = ID;
+        }
+
+        public LeafBlock(Block b) : base(b)
+        {
+            sourceRectangle = b.sourceRectangle;
+            emmissiveStrength = b.emmissiveStrength;
+            ID = b.ID;
+            hardness = 1;
+            durability = 1;
+        }
+
+        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
+        {
+            
+        }
+        /*
+        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
+        {
+            blockDestroyed(exposedBlocks);
+        }*/
+
+        public override Block copyBlock()
+        {
+            return new LeafBlock(this);
+        }
+    }
+
+    public class SemiLeafBlock : Block
+    {
+        public SemiLeafBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            isBlockTransparent = true;
+
+        }
+        public SemiLeafBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            this.emmissiveStrength = emmissiveStrength;
+            isBlockTransparent = true;
+
+        }
+        public SemiLeafBlock(int ID) : base(ID)
+        {
+            this.ID = ID;
+            isBlockTransparent = true;
+
+        }
+
+        public SemiLeafBlock(Block b) : base(b)
+        {
+            sourceRectangle = b.sourceRectangle;
+            emmissiveStrength = b.emmissiveStrength;
+            ID = b.ID;
+            hardness = 1;
+            durability = 1;
+            isBlockTransparent = true;
+        }
+
+        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
+        {
+
+        }
+
+        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
+        {
+            //check all the surrounding blocks to see if they're leaves:
+            bool[] directions = new bool[8];
+            int i = 0;
+            for (int y = - 1; y <=  + 1; y++)
+            {
+                for (int x = - 1; x <= + 1; x++) {
+                    if (!(x == 0 && y == 0)) {
+                        if (x + blockLocation.x >= 0 && x + blockLocation.x < worldArray.GetLength(0) && y + blockLocation.y >= 0 && y + blockLocation.y < worldArray.GetLength(1))
+                        {
+                            directions[i] = worldArray[x + blockLocation.x, y + blockLocation.y] == (int)blockIDs.leaves;
+                        }
+                        i += 1;
+                    }
+                }
+            }
+
+
+
+            /*  0 | 1 | 2
+             *  3 |   | 4
+             *  5 | 6 | 7
+             * */
+
+            //Do all the checks for the different possiblilities:
+            
+            if (directions[1] && directions[3] && directions[4] && directions[6])
+            {
+                //Fully surrounded:
+                sourceRectangle.X = 544;
+            }
+            //Threes
+            else if (directions[3] && directions[4] && directions[6])
+            {
+                sourceRectangle.X = 416;
+            }
+            else if (directions[1] && directions[4] && directions[6])
+            {
+                sourceRectangle.X = 512;
+
+            }
+            else if (directions[1] && directions[3] && directions[6])
+            {
+                sourceRectangle.X = 448;
+
+            }
+            else if (directions[1] && directions[3] && directions[4])
+            {
+                sourceRectangle.X = 480;
+            }
+            //Twos
+            else if (directions[4] && directions[6])
+            {
+                sourceRectangle.X = 384;
+
+            }
+            else if (directions[1] && directions[4])
+            {
+                sourceRectangle.X = 352;
+
+            }
+            else if (directions[3] && directions[6])
+            {
+                sourceRectangle.X = 288;
+
+            }
+            else if (directions[1] && directions[3])
+            {
+                sourceRectangle.X = 320;
+            }
+            //Ones
+            
+            else if (directions[1])
+            {
+                sourceRectangle.X = 160;
+
+            }
+            
+            else if (directions[3])
+            {
+                sourceRectangle.X = 96;
+
+            }
+            else if (directions[4])
+            {
+                sourceRectangle.X = 224;
+
+            }
+            
+            else if (directions[6])
+            {
+                sourceRectangle.X = 32;
+            }
+            
+            else if (directions[0])
+            {
+                sourceRectangle.X = 128;
+            }
+            else if (directions[2])
+            {
+                sourceRectangle.X = 192;
+
+            }
+            else if (directions[5])
+            {
+                sourceRectangle.X = 64;
+            }
+            else if (directions[7])
+            {
+                sourceRectangle.X = 256;
+            }
+
+            base.setupInitialData(worldContext, worldArray, blockLocation);
+        }
+
+        public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
+        {
+            //check all the surrounding blocks to see if they're leaves:
+            bool[] directions = new bool[8];
+            int i = 0;
+            for (int y = -1; y <= +1; y++)
+            {
+                for (int x = -1; x <= +1; x++)
+                {
+                    if (!(x == 0 && y == 0))
+                    {
+                        if (x + location.x >= 0 && x + location.x < worldContext.worldArray.GetLength(0) && y + location.y >= 0 && y + location.y < worldContext.worldArray.GetLength(1))
+                        {
+                            System.Diagnostics.Debug.WriteLine(worldContext.worldArray[x + location.x, y + location.y].ID);
+                            directions[i] = worldContext.worldArray[x + location.x, y + location.y].ID == (int)blockIDs.leaves;
+                        }
+                        else {
+                            System.Diagnostics.Debug.WriteLine("was at the edge");
+                        }
+                            i += 1;
+                    }
+                }
+            }
+
+            for (int y = 0; y < directions.Count(); y++) {
+                System.Diagnostics.Debug.WriteLine(y + " : " + directions[y]);
+            }
+
+
+            /*  0 | 1 | 2
+             *  3 |   | 4
+             *  5 | 6 | 7
+             * */
+
+            //Do all the checks for the different possiblilities:
+
+            if (directions[1] && directions[3] && directions[4] && directions[6])
+            {
+                //Fully surrounded:
+                sourceRectangle.X = 544;
+            }
+            //Threes
+            else if (directions[3] && directions[4] && directions[6])
+            {
+                sourceRectangle.X = 416;
+            }
+            else if (directions[1] && directions[4] && directions[6])
+            {
+                sourceRectangle.X = 512;
+
+            }
+            else if (directions[1] && directions[3] && directions[6])
+            {
+                sourceRectangle.X = 448;
+
+            }
+            else if (directions[1] && directions[3] && directions[4])
+            {
+                sourceRectangle.X = 480;
+            }
+            //Twos
+            else if (directions[4] && directions[6])
+            {
+                sourceRectangle.X = 384;
+
+            }
+            else if (directions[1] && directions[4])
+            {
+                sourceRectangle.X = 352;
+
+            }
+            else if (directions[3] && directions[6])
+            {
+                sourceRectangle.X = 288;
+
+            }
+            else if (directions[1] && directions[3])
+            {
+                sourceRectangle.X = 320;
+            }
+            //Ones
+
+            else if (directions[1])
+            {
+                sourceRectangle.X = 160;
+
+            }
+
+            else if (directions[3])
+            {
+                sourceRectangle.X = 96;
+
+            }
+            else if (directions[4])
+            {
+                sourceRectangle.X = 224;
+
+            }
+
+            else if (directions[6])
+            {
+                sourceRectangle.X = 32;
+            }
+
+            else if (directions[0])
+            {
+                sourceRectangle.X = 128;
+            }
+            else if (directions[2])
+            {
+                sourceRectangle.X = 192;
+
+            }
+            else if (directions[5])
+            {
+                sourceRectangle.X = 64;
+            }
+            else if (directions[7])
+            {
+                sourceRectangle.X = 256;
+            }
+            base.onBlockPlaced(worldContext, location);
+        }
+        /*public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
+        {
+            blockDestroyed(exposedBlocks);
+        }*/
+
+        public override Block copyBlock()
+        {
+            return new SemiLeafBlock(this);
+        }
+    }
+
+    public class BushBlock: Block
+    {
+        public BushBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            isBlockTransparent = true;
+        }
+        public BushBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            this.emmissiveStrength = emmissiveStrength;
+            isBlockTransparent = true;
+
+        }
+        public BushBlock(int ID) : base(ID)
+        {
+            this.ID = ID;
+            isBlockTransparent = true;
+
+        }
+
+        public BushBlock(Block b) : base(b)
+        {
+            sourceRectangle = b.sourceRectangle;
+            emmissiveStrength = b.emmissiveStrength;
+            ID = b.ID;
+            hardness = 1;
+            durability = 1;
+            isBlockTransparent = true;
+        }
+
+        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
+        {
+
+        }
+
+        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
+        {
+            blockDestroyed(exposedBlocks);
+        }
+
+        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
+        {
+            Random r = new Random();
+            sourceRectangle.X += 32 * r.Next(3);
+            base.setupInitialData(worldContext, worldArray, blockLocation);
+        }
+        public override Block copyBlock()
+        {       
+            return new BushBlock(this);
+        }
+    }
+
+    public class BigBushBlock : Block {
+
+        public int blockPairX;
+        public int blockPairY;
+
+        bool attemptedToDelete = false;
+        public BigBushBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            isBlockTransparent = true;
+
+        }
+        public BigBushBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
+        {
+            this.sourceRectangle = textureSourceRectangle;
+            this.emmissiveStrength = emmissiveStrength;
+            isBlockTransparent = true;
+
+        }
+        public BigBushBlock(int ID) : base(ID)
+        {
+            this.ID = ID;
+            isBlockTransparent = true;
+
+        }
+
+        public BigBushBlock(Block b) : base(b)
+        {
+            sourceRectangle = b.sourceRectangle;
+            emmissiveStrength = b.emmissiveStrength;
+            ID = b.ID;
+            hardness = 1;
+            durability = 1;
+            isBlockTransparent = true;
+        }
+
+        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
+        {
+
+        }
+
+        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
+        {
+            if (attemptedToDelete == false)
+            {
+                attemptedToDelete = true;
+
+                if (wc.worldArray[blockPairX, blockPairY].ID == ID)
+                {
+                    wc.deleteBlock(blockPairX, blockPairY);
+                }
+
+                blockDestroyed(exposedBlocks);
+            }
+
+        }
+
+
+
+        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
+        {
+            if (worldArray[blockLocation.x - 1, blockLocation.y] != ID)
+            {
+                worldArray[blockLocation.x + 1, blockLocation.y] = ID;
+                if (worldArray[blockLocation.x + 1, blockLocation.y] == ID)
+                {
+                    this.blockPairX = blockLocation.x + 1;
+                    this.blockPairY = blockLocation.y;
+                }
+
+            } else
+            {
+                
+                sourceRectangle.X += 32;
+
+                blockPairX = blockLocation.x - 1;
+                blockPairY = blockLocation.y;
+
+            }
+
+            base.setupInitialData(worldContext, worldArray, blockLocation);
+
+        }
+
+        public override void updateBlock(WorldContext wc)
+        {
+        }
+
+        
+            public override Block copyBlock()
+            {
+                return new BigBushBlock(this);
+            }
+        
+    }
     #endregion
 
     #region Loot Table classes
-    public class LootTable {
+        public class LootTable {
         public List<List<(double percentage, IndividualLootTable)>> lootTable = new List<List<(double percentage, IndividualLootTable)>>();
 
         public void addLootTable(List<(double percentage, IndividualLootTable individualTable)> lootTable) {
@@ -9123,7 +10759,6 @@ namespace PixelMidpointDisplacement
         public override void onAppliedToEntity()
         {
             jumpIncrease = owner.baseJumpAcceleration;
-            System.Diagnostics.Debug.WriteLine("Jump increase was applied with " + jumpIncrease + " amount");
             owner.baseJumpAcceleration += jumpIncrease;
             base.onAppliedToEntity();
         }
@@ -9454,6 +11089,9 @@ namespace PixelMidpointDisplacement
 
             CraftingRecipe swordRecipe = new CraftingRecipe(new Weapon(manager.worldContext.animationController, manager.worldContext.player), 1, new List<RecipeIngredient>() { new RecipeIngredient(new IngotItem((int)oreIDs.iron, manager.worldContext.animationController, manager.worldContext.player), 10) }, manager);
             craftingRecipes.Add(swordRecipe);
+
+            CraftingRecipe woodenBackgroundRecipe = new CraftingRecipe(recipeResult : new BackgroundBlockItem((int)backgroundBlockIDs.woodenPlanks, manager.worldContext.animationController, manager.worldContext.player), 5, new List<RecipeIngredient>() { new RecipeIngredient(new BlockItem((int)blockIDs.treeTrunk, manager.worldContext.animationController, manager.worldContext.player), 1) }, manager);
+            craftingRecipes.Add(woodenBackgroundRecipe);
         }
     }
     #endregion
@@ -9697,15 +11335,14 @@ namespace PixelMidpointDisplacement
         public void initialiseInventory(WorldContext worldContext, int inventoryWidth, int inventoryHeight)
         {
             inventory = new UIItem[inventoryWidth, inventoryHeight];
-            worldContext.engineController.UIController.UIElements.Add((4, inventoryBackground));
+            worldContext.engineController.UIController.addUIElement(4, inventoryBackground);
             worldContext.engineController.UIController.inventoryBackgrounds.Add(inventoryBackground);
             for (int x = 0; x < inventory.GetLength(0); x++)
             {
                 for (int y = 0; y < inventory.GetLength(1); y++)
                 {
                     inventory[x, y] = new UIItem(x, y, inventoryBackground.drawRectangle.X, inventoryBackground.drawRectangle.Y, worldContext, this);
-                    worldContext.engineController.UIController.UIElements.Add((5, inventory[x, y]));
-                    worldContext.engineController.UIController.InteractiveUI.Add(inventory[x, y]);
+                    worldContext.engineController.UIController.addUIElement(5, inventory[x, y]);
                 }
             }
         }
@@ -9714,8 +11351,7 @@ namespace PixelMidpointDisplacement
             for (int x = 0; x < inventory.GetLength(0); x++) {
                 for (int y = 0; y < inventory.GetLength(1); y++) {
                     (int, UIElement) UIListElement = worldContext.engineController.UIController.UIElements.Find(i => i.uiElement == inventory[x,y]);
-                    worldContext.engineController.UIController.UIElements.Remove(UIListElement);
-                    worldContext.engineController.UIController.InteractiveUI.Remove(inventory[x,y]);
+                    worldContext.engineController.UIController.removeUIElement(UIListElement.Item1, UIListElement.Item2);
                     Random r = new Random();
                     if (inventory[x, y].item != null)
                     {
@@ -9727,7 +11363,7 @@ namespace PixelMidpointDisplacement
                 }
             }
             (int, UIElement) InventoryBackgroundElement = worldContext.engineController.UIController.UIElements.Find(i => i.uiElement == inventoryBackground);
-            worldContext.engineController.UIController.UIElements.Remove(InventoryBackgroundElement);
+            worldContext.engineController.UIController.removeUIElement(InventoryBackgroundElement.Item1, InventoryBackgroundElement.Item2);
         }
 
         public bool addItemToInventory(Item item)
@@ -10002,7 +11638,12 @@ namespace PixelMidpointDisplacement
         torch,
         chest,
         water,
-        ironOre
+        ironOre,
+        treeTrunk,
+        leaves,
+        semiLeaves,
+        bush,
+        bigBush
     }
     public enum backgroundBlockIDs {
         air,
@@ -10034,7 +11675,8 @@ namespace PixelMidpointDisplacement
         oreSpriteSheet,
         ingotSpriteSheet,
         stringRendering,
-        tooltipBackground
+        tooltipBackground,
+        skyLayers
     }
     public enum Scene {
         MainMenu,
@@ -10369,7 +12011,7 @@ namespace PixelMidpointDisplacement
             return worldArray;
         }
 
-        public BlockGenerationVariables[,] brownianAlgorithm(BlockGenerationVariables[,] worldArray, int attemptCount)
+        public BlockGenerationVariables[,] brownianAlgorithm(BlockGenerationVariables[,] worldArray, int attemptCount, bool fillOutput)
         {
             //It would probably be more efficient to have a seperate array containing only the non-null blocks but I don't know a
             //readable way of doing it (ironic with the line break)
@@ -10402,7 +12044,10 @@ namespace PixelMidpointDisplacement
                 }
             }
 
-            fill(worldArray);
+            if (fillOutput)
+            {
+                fill(worldArray);
+            }
 
             return worldArray;
         }

@@ -28,6 +28,7 @@
     <None Remove="Content\pixelNumbers.png" />
     <None Remove="Content\Player.png" />
     <None Remove="Content\PlayerSpriteSheet.png" />
+    <None Remove="Content\skySpriteSheet.png" />
     <None Remove="Content\stringRenderingSpriteSheet.png" />
     <None Remove="Content\tooltipBackgroundSpriteSheet.png" />
     <None Remove="Content\weaponSpriteSheet.png" />
@@ -92,6 +93,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\PlayerSpriteSheet.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Content\skySpriteSheet.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\stringRenderingSpriteSheet.png">
