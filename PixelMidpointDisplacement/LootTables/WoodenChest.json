@@ -1,0 +1,40 @@
+{
+  "id": "Wooden Chest",
+  "loot_table": 
+    {
+      "loot_table_count": 1,
+      "0": [
+        {
+          "percentage": 100,
+          "loot": [
+            {
+              "item_chance": 100,
+              "minimum_item_count": 30,
+              "maximum_item_count": 40,
+              "item": "block_item",
+              "item_parameters": {
+                "block_id": "stone"
+              }
+
+            },
+            {
+              "item_chance": 40,
+              "minimum_item_count": 1,
+              "maximum_item_count": 1,
+              "item": "helmet",
+              "item_parameters": {
+                "extra_resistance" :  12
+              }
+            },
+            {
+              "item_chance": 70,
+              "minimum_item_count": 1,
+              "maximum_item_count": 1,
+              "item": "amulet_of_fall_damage",
+              "item_parameters": null
+            }
+          ]
+        }
+      ]
+  }
+}

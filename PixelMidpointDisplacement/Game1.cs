@@ -14,6 +14,9 @@ using Vector2 = Microsoft.Xna.Framework.Vector2;
 using Vector3 = Microsoft.Xna.Framework.Vector3;
 using Vector4 = Microsoft.Xna.Framework.Vector4;
 
+using System.Threading;
+
+
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * Things to do:
@@ -221,11 +224,25 @@ using Vector4 = Microsoft.Xna.Framework.Vector4;
         
         - Each biome has their own unique sky (doesn't have to be unique per se                                                 - Will be implemented later, along with the improved biome detection
             -> Gets drawn each frame
-        
+        - Need to add a draw lerp between the pixels of the source rectangle change, beause the jumps are too big and not very clean.  - Needs to be implemented
 
     Add a moon:
         - Just a second mode of the sun, make the sunlight fade as the angle gets lower (and higher i guess) before resetting the location to the opposite side of the world
 
+    Refactoring:
+        - Move all of the different class goupings into their own file
+
+        - Make the engine controller own the world context, not the other way around
+
+        - Make a centralised 'rendering' class, or improve the sprite renderer controller to include:                                                               - Very important!!
+            - A class dictionary that contains the sprite sheet ID (or just the sprite sheet itself) and the source rectangle of that object (y value primarily)
+                -> Classes can define their own state, and each object has that state considered in the sprite renderer that adjusts the source rectangle X
+
+
+    Refactoring subset:
+        JSON overhaul:
+            - Turn various item constants into a .json data file for that item    
+        
  */
 
 /*
@@ -278,7 +295,7 @@ namespace PixelMidpointDisplacement
 
 
 
-        bool useShaders = false;
+        bool useShaders = true;
         double toggleCooldown = 0;
 
         int exposedBlockCount;
@@ -404,15 +421,6 @@ namespace PixelMidpointDisplacement
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\stringRenderingSpriteSheet.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\tooltipBackgroundSpriteSheet.png"));
             spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\skySpriteSheet.png"));
-
-
-
-
-
-
-
-
-
 
             worldContext.engineController.spriteController.setSpriteSheetList(spriteSheetList);
 
@@ -732,27 +740,27 @@ namespace PixelMidpointDisplacement
                 {
                     if (chat.Contains("SWORD"))
                     {
-                        new DroppedItem(worldContext, new Weapon(worldContext.animationController, player), (player.x, player.y), Vector2.Zero);
+                        new DroppedItem(worldContext, new Weapon(), (player.x, player.y), Vector2.Zero);
                         chat = "";
                     }
                     if (chat.Contains("BOW"))
                     {
-                        new DroppedItem(worldContext, new Bow(worldContext.animationController, player), (player.x, player.y), Vector2.Zero);
+                        new DroppedItem(worldContext, new Bow(), (player.x, player.y), Vector2.Zero);
                         chat = "";
                     }
                     if (chat.Contains("AMULET OF FALL DAMAGE"))
                     {
-                        new DroppedItem(worldContext, new AmuletOfFallDamage(worldContext.animationController, player), (player.x, player.y), Vector2.Zero);
+                        new DroppedItem(worldContext, new AmuletOfFallDamage(), (player.x, player.y), Vector2.Zero);
                         chat = "";
                     }
                     if (chat.Contains("CLOUD IN A JAR"))
                     {
-                        new DroppedItem(worldContext, new CloudInAJar(worldContext.animationController, player), (player.x, player.y), Vector2.Zero);
+                        new DroppedItem(worldContext, new CloudInAJar(), (player.x, player.y), Vector2.Zero);
                         chat = "";
                     }
                     if (chat.Contains("HELMET"))
                     {
-                        new DroppedItem(worldContext, new Helmet(worldContext.animationController, player), (player.x, player.y), Vector2.Zero);
+                        new DroppedItem(worldContext, new Helmet(), (player.x, player.y), Vector2.Zero);
                         chat = "";
                     }
                 }
@@ -2019,12 +2027,11 @@ namespace PixelMidpointDisplacement
     public class Sun : IEmissive {
         public Vector3 lightColor { get; set; }
         public float luminosity { get; set; }
+        public float baseLuminosity;
         public float range { get; set; }
         public RenderTarget2D shadowMap { get; set; }
         public RenderTarget2D lightMap { get; set; }
-
         public double x { get; set; }
-
         public double y { get; set; }
 
         public double time = 0;
@@ -2036,11 +2043,16 @@ namespace PixelMidpointDisplacement
         public double angle { get; set; }
         public double distance { get; set; }
 
+        public double coefficientOfDepthDecay = 0.1;
+
         public Sky sky = new Sky();
+
+        public WorldContext worldContext;
 
         public Sun(WorldContext worldContext) {
             lightColor = new Vector3(155, 155, 145);
             luminosity = 14000;
+            baseLuminosity = luminosity;
             range = 150;
             x = 50;
             y = 50;
@@ -2049,6 +2061,7 @@ namespace PixelMidpointDisplacement
 
             angle = -3 * Math.PI/4;
             distance = 3;
+            this.worldContext = worldContext;
         }
 
         public void updateTime(double elapsedTime) {
@@ -2060,6 +2073,16 @@ namespace PixelMidpointDisplacement
 
             lightColor = new Vector3(lightColor.X, 55 + 100f * (float)Math.Sin(Math.PI * dayTime / dayDuration), 145f * (float)Math.Sin(Math.PI * dayTime/dayDuration));
 
+            //Adjust the luminosity as the player goes deeper:
+            luminosity = baseLuminosity;
+            double playerDistanceDown = worldContext.player.y / (double)worldContext.pixelsPerBlock - worldContext.surfaceHeight[(int)(worldContext.player.x/worldContext.pixelsPerBlock)];
+
+            if (playerDistanceDown > 0) {
+                luminosity = (float)(baseLuminosity / (coefficientOfDepthDecay * (playerDistanceDown + 1)));
+                if (luminosity > baseLuminosity) {
+                    luminosity = baseLuminosity;
+                }
+            }
         }
     }
 
@@ -2068,14 +2091,12 @@ namespace PixelMidpointDisplacement
         public List<SkyLayer> skyLayers = new List<SkyLayer>();
 
         public Sky() {
-            skyLayers.Add(new SkyLayer(0, new Rectangle(0, 1080, 480, 270), new Rectangle(0, 0, 1920, 1080)));
-            skyLayers.Add(new SkyLayer(.04, new Rectangle(0, 810, 480, 270), new Rectangle(0, 0, 1920, 1080)));
-            skyLayers.Add(new SkyLayer(.6, new Rectangle(0, 540, 480, 270), new Rectangle(0, 0, 1920, 1080)));
-            skyLayers.Add(new SkyLayer(.8, new Rectangle(0, 270, 480, 270), new Rectangle(0, 0, 1920, 1080)));
+            skyLayers.Add(new SkyLayer(0, new Rectangle(480, 1080, 480, 270), new Rectangle(0, 0, 1920, 1080)));
+            skyLayers.Add(new SkyLayer(.004, new Rectangle(480, 810, 480, 270), new Rectangle(0, 0, 1920, 1080)));
+            skyLayers.Add(new SkyLayer(.06, new Rectangle(480, 540, 480, 270), new Rectangle(0, 0, 1920, 1080)));
+            skyLayers.Add(new SkyLayer(.08, new Rectangle(480, 270, 480, 270), new Rectangle(0, 0, 1920, 1080)));
 
-            skyLayers.Add(new SkyLayer(1, new Rectangle(0, 0, 480, 270), new Rectangle(0,0,1920,1080)));
-
-
+            skyLayers.Add(new SkyLayer(0.1, new Rectangle(0, 0, 480, 270), new Rectangle(0,0,1920,1080)));
         }
         public void updateSky(WorldContext wc) {
             for (int i = 0; i < skyLayers.Count; i++) {
@@ -2088,17 +2109,18 @@ namespace PixelMidpointDisplacement
         public double movement;
         public Rectangle sourceRectangle;
         public Rectangle drawRectangle;
-
+        public int baseX;
         public SkyLayer(double motion, Rectangle sourceRect, Rectangle drawRect) {
             movement = motion;
             sourceRectangle = sourceRect;
             drawRectangle = drawRect;
+            baseX = sourceRectangle.X;
         }
 
         //I'll have to update this to be the source rectangle, so that it can include the parts extended off screen. Maybe the y is draw, and the x is source. Or not have any y variation
         public void updateLocation(double x, double y) {
-            drawRectangle.X = (int)(x * movement);
-            drawRectangle.Y = (int)(y * movement);
+            sourceRectangle.X = baseX + (int)(x * movement);
+            //drawRectangle.Y = (int)(y * movement);
         }
     }
     public class WorldGenerator {
@@ -2676,9 +2698,9 @@ namespace PixelMidpointDisplacement
         public int maxSpawnAttempts = 30;
 
         //Should probably convert all these tupples to "____SpawnVariables" classes
-        public List<(SpawnableEntity  entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface)> spawnableEntities;
-        public List<(Structure structure, double density, int yMax, int yMin)> spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>();
-        public List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)> spawnableFluids = new List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)>();
+        public List<BiomeSpawnableEntityVariables> spawnableEntities;
+        public List<BiomeSpawnableStructureVariables> spawnableStructures = new List<BiomeSpawnableStructureVariables>();
+        public List<BiomeSpawnableFluidVariables> spawnableFluids = new List<BiomeSpawnableFluidVariables>();
         public List<BiomeSpawnableDecorationVariables> spawnableDecorations = new List<BiomeSpawnableDecorationVariables>();
 
         public WorldGenerator worldGenerator;
@@ -3196,11 +3218,10 @@ namespace PixelMidpointDisplacement
                             if (percentage <= spawnableEntities[i].spawnProbability)
                             {
                                 //Adjust the current specific entity count
-                                (SpawnableEntity entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface) currentEntityValues = spawnableEntities[i];
 
                                 currentBiomeEntityCount += 1;
-                                currentEntityValues.currentSpecificEntityCount += 1;
-                                spawnableEntities[i] = currentEntityValues;
+                                spawnableEntities[i].currentSpecificEntityCount += 1;
+                                
 
                                 //Adjust entity location:
 
@@ -3256,10 +3277,6 @@ namespace PixelMidpointDisplacement
                                         }
                                     }
                                 }
-                                //w.exposedBlocks.ContainsKey();
-
-
-
                             }
                         }
                     }
@@ -3335,20 +3352,20 @@ namespace PixelMidpointDisplacement
             new BlockThresholdValues(0.9, 210, 0.005, 0.9, 0.48, 0, 1)
             };
 
-            spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>()
+            spawnableStructures = new List<BiomeSpawnableStructureVariables>()
             {
-                (new Structure("House"), 0.05, biomeDimensions.y, 0)
+                new BiomeSpawnableStructureVariables(new Structure("House"), 0.05, biomeDimensions.y, 0)
             };
 
-            spawnableEntities = new List<(SpawnableEntity entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface)>() {
-                (new ControlledEntity(wg.worldContext, wg.worldContext.player), 50, 0, 20, 500, 10, false)
+            spawnableEntities = new List<BiomeSpawnableEntityVariables>() {
+                new BiomeSpawnableEntityVariables(new ControlledEntity(wg.worldContext, wg.worldContext.player), 50, 0, 20, 500, 10, false)
             };
 
-            spawnableFluids = new List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)>()
+            spawnableFluids = new List<BiomeSpawnableFluidVariables>()
             {
-                (new FluidBlock((int)blockIDs.water), 0.01, 600, 1, 1),
-                (new FluidBlock((int)blockIDs.water), 0.01, 600, 1, 20),
-                (new FluidBlock((int)blockIDs.water), 0.05, 0, -30, 60)
+                new BiomeSpawnableFluidVariables(new FluidBlock((int)blockIDs.water), 0.01, 600, 1, 1),
+                new BiomeSpawnableFluidVariables(new FluidBlock((int)blockIDs.water), 0.01, 600, 1, 20),
+                new BiomeSpawnableFluidVariables(new FluidBlock((int)blockIDs.water), 0.05, 0, -30, 60)
             };
 
             spawnableDecorations = new List<BiomeSpawnableDecorationVariables>() {
@@ -3402,12 +3419,12 @@ namespace PixelMidpointDisplacement
                 new BlockThresholdValues(blockThreshold : 0.48, maximumY : 400, decreasePerY : 0.001, maximumThreshold : 0.48, minimumThreshold : 0.4, absoluteYHeightWeight : 0, relativeYHeightWeight : 1)
             };
 
-            spawnableStructures = new List<(Structure structure, double density, int yMax, int yMin)>() {
-                (new Structure("Shrine"), 0.005, biomeDimensions.y, 200)
+            spawnableStructures = new List<BiomeSpawnableStructureVariables>() {
+                new BiomeSpawnableStructureVariables(new Structure("Shrine"), 0.005, biomeDimensions.y, 200)
             };
 
-            spawnableFluids = new List<(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize)>() {
-                (new FluidBlock((int)blockIDs.water), 0.01, 400, 10, 1)
+            spawnableFluids = new List<BiomeSpawnableFluidVariables>() {
+                new BiomeSpawnableFluidVariables(new FluidBlock((int)blockIDs.water), 0.01, 400, 10, 1)
             };
 
 
@@ -3468,11 +3485,55 @@ namespace PixelMidpointDisplacement
     }
     #endregion
     #region Biome Generation Variables
-    public class BiomeSpawnableEntityVariables { }
+    public class BiomeSpawnableEntityVariables {
+        public SpawnableEntity entity;
+        public int maxSpecificEntityCount;
+        public int currentSpecificEntityCount;
+        public double spawnProbability;
+        public int yMax;
+        public int yMin;
+        public bool spawnOnSurface;
 
-    public class BiomeSpawnableStructureVariables { }
+        public BiomeSpawnableEntityVariables(SpawnableEntity entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double spawnProbability, int yMax, int yMin, bool spawnOnSurface) {
+            this.entity = entity;
+            this.maxSpecificEntityCount = maxSpecificEntityCount;
+            this.currentSpecificEntityCount = currentSpecificEntityCount;
+            this.spawnProbability = spawnProbability;
+            this.yMax = yMax;
+            this.yMin = yMin;
+            this.spawnOnSurface = spawnOnSurface;
+        }
+    }
 
-    public class BiomeSpawnableFluidVariables { }
+    public class BiomeSpawnableStructureVariables {
+        public Structure structure;
+        public double density;
+        public int yMax;
+        public int yMin;
+
+        public BiomeSpawnableStructureVariables(Structure structure, double density, int yMax, int yMin) {
+            this.structure = structure;
+            this.density = density;
+            this.yMax = yMax;
+            this.yMin = yMin;
+        }
+    }
+
+    public class BiomeSpawnableFluidVariables {
+        public FluidBlock fluid;
+        public double density;
+        public int yMax;
+        public int yMin;
+        public int maxLakeSize;
+
+        public BiomeSpawnableFluidVariables(FluidBlock fluid, double density, int yMax, int yMin, int maxLakeSize) {
+            this.fluid = fluid;
+            this.density = density;
+            this.yMax = yMax;
+            this.yMin = yMin;
+            this.maxLakeSize = maxLakeSize;
+        }
+    }
 
     public class BiomeSpawnableDecorationVariables {
         public Decoration decoration;
@@ -4083,438 +4144,7 @@ namespace PixelMidpointDisplacement
             }
         }
     }
-    #endregion
-    public class LightingSystem
-    {
-        public int[,] lightArray { get; set; }
-        WorldContext wc;
-        Vector2 lightDirection = new Vector2(0.9f, 1);
-        int sunBrightness = 1024;
-        int shadowBrightness = 200;
-        int darkestLight = 0;
-
-        public double shaderPrecision = 0.5;
-        public GraphicsDeviceManager graphics;
-
-        double scalar = 0.8;
-        double emmissiveScalar = 0.5;
-
-        bool accummulateLight = true;
-
-        public List<IEmissive> lights = new List<IEmissive>();
-        public List<IEmissiveBlock> emissiveBlocks = new List<IEmissiveBlock>();
-
-        public LightingSystem(WorldContext worldContext)
-        {
-            wc = worldContext;
-
-            //Load settings from file
-            loadSettings();
-        }
-
-        private void loadSettings() {
-            StreamReader sr = new StreamReader(wc.runtimePath + "Settings\\LightingSystemSettings.txt");
-            sr.ReadLine();
-            double sunlightX = Convert.ToDouble(sr.ReadLine());
-            double sunlightY = Convert.ToDouble(sr.ReadLine());
-            lightDirection = new Vector2((float)sunlightX, (float)sunlightY);
-            sr.ReadLine();
-            sunBrightness = Convert.ToInt32(sr.ReadLine());
-            sr.ReadLine();
-            shadowBrightness = Convert.ToInt32(sr.ReadLine());
-            sr.ReadLine();
-            darkestLight = Convert.ToInt32(sr.ReadLine());
-            sr.ReadLine();
-            scalar = Convert.ToDouble(sr.ReadLine());
-            sr.ReadLine();
-            emmissiveScalar = Convert.ToDouble(sr.ReadLine());
-            sr.ReadLine();
-            accummulateLight = Convert.ToBoolean(sr.ReadLine());
-        }
-
-
-        public void generateSunlight(int[,] worldArray, int[] surfaceLevel)
-        {
-            for (int startingX = 0; startingX < lightArray.GetLength(0); startingX++)
-            {
-                calculateLightRay(startingX, 0, worldArray, surfaceLevel);
-            }
-            if (lightDirection.X > 0)
-            {
-                for (int startingY = 0; startingY < surfaceLevel[0]; startingY++)
-                {
-                    calculateLightRay(0, startingY, worldArray, surfaceLevel);
-                }
-            }
-            else if (lightDirection.X < 0)
-            {
-                for (int startingY = 0; startingY < surfaceLevel[worldArray.GetLength(0) - 1]; startingY++)
-                {
-                    calculateLightRay(worldArray.GetLength(1) - 1, startingY, worldArray, surfaceLevel);
-                }
-            }
-
-        }
-        public void calculateLightRay(int startingX, int startingY, int[,] worldArray, int[] surfaceLevel)
-        {
-            int stepCount = 0;
-            bool hasCollidedWithABlock = false;
-            while (!hasCollidedWithABlock)
-            {
-                int x = startingX + (int)(stepCount * lightDirection.X);
-                int y = startingY + (int)(stepCount * lightDirection.Y);
-                if (x >= 0 && x < worldArray.GetLength(0) && y >= 0 && y < worldArray.GetLength(1))
-                {
-                    if (worldArray[x, y] == 0)
-                    {
-                        int xCheck = (int)Math.Round(x - lightDirection.X);
-                        int yCheck = (int)Math.Round(y - lightDirection.Y);
-                        if (xCheck >= 0 && xCheck < worldArray.GetLength(0) && yCheck >= 0 && yCheck < worldArray.GetLength(1))
-                        {
-                            if (worldArray[xCheck, y] == 0 || worldArray[x, yCheck] == 0 || worldArray[xCheck, y] == (int)blockIDs.bush || worldArray[x, yCheck] == (int)blockIDs.bush || worldArray[xCheck, y] == (int)blockIDs.bigBush || worldArray[x, yCheck] == (int)blockIDs.bigBush)
-                            {
-                                lightArray[x, y] = sunBrightness;
-                            }
-                            else
-                            {
-                                hasCollidedWithABlock = true;
-                            }
-                        }
-                        else
-                        {
-                            lightArray[x, y] = sunBrightness;
-                        }
-
-
-                    }
-                    else
-                    {
-                        hasCollidedWithABlock = true;
-                    }
-                }
-                else { hasCollidedWithABlock = true; }
-                stepCount++;
-            }
-
-        }
-
-        public int[,] initialiseLight((int width, int height) worldDimensions, int[] surfaceLevel) {
-            lightArray = new int[worldDimensions.width, worldDimensions.height];
-            for (int x = 0; x < lightArray.GetLength(0); x++) {
-                for (int y = 0; y < lightArray.GetLength(1); y++) {
-                    lightArray[x, y] = darkestLight;
-                }
-            }
-
-            for (int x = 0; x < lightArray.GetLength(0); x++) {
-                for (int y = 0; y < surfaceLevel[x]; y++) {
-                    lightArray[x, y] = shadowBrightness;
-                }
-            }
-
-            return lightArray;
-        }
-
-        public void calculateSurfaceLight(int[,] worldArray, List<(int x, int y)> surfaceLevel) {
-            //From i = P/4 * Pi * r^2
-            //r = Sqrt(P/0.9 * 4 * PI)
-
-            int maxDepthSunlight = (int)Math.Sqrt(sunBrightness / 25 * 4 * Math.PI);
-
-            for (int i = 0; i < surfaceLevel.Count; i++) {
-                int lastX = (int)Math.Round(surfaceLevel[i].x - lightDirection.X);
-                int lastY = (int)Math.Round(surfaceLevel[i].y - lightDirection.Y);
-
-                if (lastX >= 0 && lastY >= 0 && lastX < lightArray.GetLength(0) && lastY < lightArray.GetLength(1))
-                {
-
-                    int surfaceBrightness = lightArray[lastX, lastY];
-                    for (int j = 0; j < maxDepthSunlight; j++)
-                    {
-                        int lightLevel;
-                        if (j != 0)
-                        {
-                            lightLevel = (int)(surfaceBrightness / (4 * Math.PI * Math.Pow(j, 2)));
-                        }
-                        else {
-                            lightLevel = surfaceBrightness;
-                        }
-                        int changedX = (int)Math.Round(surfaceLevel[i].x + lightDirection.X * j);
-                        int changedY = (int)Math.Round(surfaceLevel[i].y + lightDirection.Y * j);
-                        if (changedX >= 0 && changedY >= 0 && changedX < lightArray.GetLength(0) && changedY < lightArray.GetLength(1))
-                        {
-                            if (worldArray[changedX, changedY] != 0 && lightArray[changedX, changedY] < lightLevel / scalar)
-                            {
-                                lightArray[changedX, changedY] = (int)(lightLevel / scalar);
-                            }
-                        }
-
-                    }
-
-                }
-            }
-
-
-        }
-
-        public int[,] calculateLightMap(int emmissiveness) {
-            int maxImpact = (int)(Math.Sqrt(emmissiveness / 25 * 4 * Math.PI) / emmissiveScalar);
-
-            int[,] lightMap = new int[maxImpact, maxImpact]; //I think I can technically shorten this to being a singular array only the width of the max impact and just 'rotate' it around to account for it's sphereical influence. However this sounds horrid so I won't
-            for (int x = 0; x < maxImpact; x++) {
-                for (int y = 0; y < maxImpact; y++) {
-                    lightMap[x, y] = 0;
-                }
-            }
-            for (int x = 0; x < maxImpact; x++)
-            {
-                for (int y = 0; y < maxImpact; y++)
-                {
-                    int distance = (int)Math.Sqrt(Math.Pow(x - maxImpact / 2, 2) + Math.Pow(y - maxImpact / 2, 2));
-                    if (distance <= maxImpact) {
-                        int intensity = emmissiveness;
-                        if (distance != 0)
-                        {
-                            intensity = (int)((emmissiveness / (4 * Math.PI * Math.Pow(distance * emmissiveScalar, 2))));
-                            if (intensity > emmissiveness) { intensity = emmissiveness; }
-                        }
-
-                        lightMap[x, y] = intensity;
-                    }
-                }
-            }
-            return lightMap;
-        }
-
-        public void movedLight(int lightX, int lightY, int xChange, int yChange, int[,] lightMap, int emmissiveMax)
-        {
-            int[,] newLightMap = new int[lightMap.GetLength(0) + Math.Abs(xChange), lightMap.GetLength(1) + Math.Abs(yChange)];
-
-
-            for (int x = 0; x < newLightMap.GetLength(0); x++)
-            {
-                for (int y = 0; y < newLightMap.GetLength(1); y++)
-                {
-                    newLightMap[x, y] = 0;
-                }
-            }
-
-
-            int addAtX = 0;
-            int addAtY = 0;
-            int subtractAtX = 0;
-            int subtractAtY = 0;
-
-            if (xChange != 0 && xChange > 0)
-            {
-                addAtX = 1;
-                subtractAtX = 0;
-            }
-            else if (xChange != 0 && xChange < 0) {
-                addAtX = 0;
-                subtractAtX = 1;
-            }
-            if (yChange != 0 && yChange > 0)
-            {
-                addAtY = 1;
-                subtractAtY = 0;
-            }
-            else if (yChange != 0 && yChange < 0)
-            {
-                addAtY = 0;
-                subtractAtY = 1;
-            }
-
-            newLightMap = add2DArray(lightMap, newLightMap, addAtX, addAtY, 1);
-            if (!accummulateLight) { newLightMap = add2DArray(lightMap, newLightMap, subtractAtX, subtractAtY, -1); }
-
-
-            //Add the newLightMap to the lightMap array
-            lightArray = add2DArray(newLightMap, lightArray, lightX - (int)Math.Floor(lightMap.GetLength(0) / 2.0) - subtractAtX, lightY - (int)Math.Floor(lightMap.GetLength(1) / 2.0) - subtractAtY, 1, emmissiveMax);
-
-        }
-
-        private int[,] add2DArray(int[,] sourceArray, int[,] arrayToBeAddedTo, int xOffset, int yOffset, int valueMultiplier) {
-            for (int x = 0; x < sourceArray.GetLength(0); x++) {
-                for (int y = 0; y < sourceArray.GetLength(1); y++) {
-                    if (x + xOffset >= 0 && x + xOffset < arrayToBeAddedTo.GetLength(0) && y + yOffset >= 0 && y + yOffset < arrayToBeAddedTo.GetLength(1))
-                        arrayToBeAddedTo[x + xOffset, y + yOffset] += valueMultiplier * sourceArray[x, y];
-                }
-            }
-            return arrayToBeAddedTo;
-        }
-        private int[,] add2DArray(int[,] sourceArray, int[,] arrayToBeAddedTo, int xOffset, int yOffset, int valueMultiplier, int maxLightValue)
-        {
-            for (int x = 0; x < sourceArray.GetLength(0); x++)
-            {
-                for (int y = 0; y < sourceArray.GetLength(1); y++)
-                {
-                    if (x + xOffset >= 0 && x + xOffset < arrayToBeAddedTo.GetLength(0) && y + yOffset >= 0 && y + yOffset < arrayToBeAddedTo.GetLength(1))
-                    {
-                        if (arrayToBeAddedTo[x + xOffset, y + yOffset] + valueMultiplier * sourceArray[x, y] > maxLightValue && accummulateLight)
-                        {
-                            sourceArray[x, y] = (maxLightValue - arrayToBeAddedTo[x + xOffset, y + yOffset]) / valueMultiplier;
-                            if (sourceArray[x, y] < 0) {
-                                sourceArray[x, y] = 0;
-                            }
-                        }
-                        arrayToBeAddedTo[x + xOffset, y + yOffset] += valueMultiplier * sourceArray[x, y];
-
-                    }
-                }
-            }
-            return arrayToBeAddedTo;
-        }
-    }
-
-    public class EngineController {
-        public LightingSystem lightingSystem;
-        public PhysicsEngine physicsEngine;
-        public CollisionController collisionController;
-        public EntityController entityController;
-        public SpriteController spriteController;
-        public UIController UIController;
-        public EvolutionUIController evolutionController;
-        public CraftingManager craftingManager;
-
-        public WorldContext worldContext;
-
-
-        public void initialiseEngines(WorldContext wc) {
-            worldContext = wc;
-            lightingSystem = new LightingSystem(wc);
-            physicsEngine = new PhysicsEngine(wc);
-            collisionController = new CollisionController();
-            entityController = new EntityController();
-            spriteController = new SpriteController();
-            UIController = new UIController();
-            evolutionController = new EvolutionUIController(wc);
-            craftingManager = new CraftingManager(wc);
-        }
-
-
-
-    }
-    public class CollisionController
-    {
-        public List<IActiveCollider> activeColliders;
-        public List<IPassiveCollider> passiveColliders;
-
-        public CollisionController() {
-            activeColliders = new List<IActiveCollider>();
-            passiveColliders = new List<IPassiveCollider>();
-        }
-
-        public void checkCollisions() {
-            if (activeColliders.Count != 0 && passiveColliders.Count != 0) {
-                
-                for (int a = 0; a < activeColliders.Count; a++) {
-                    for (int p = 0; p < passiveColliders.Count; p++) {
-                        if (a < activeColliders.Count && p < passiveColliders.Count)
-                        {
-                            if (activeColliders[a].isActive && passiveColliders[p].isActive)
-                            {
-
-                                if (activeColliders[a] is INonAxisAlignedActiveCollider n)
-                                {
-                                    n.calculateCollision(passiveColliders[p]);
-                                }
-                                else
-                                {
-                                    activeColliders[a].calculateCollision(passiveColliders[p]);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        public void addActiveCollider(IActiveCollider collider)
-        {
-            if (!activeColliders.Contains(collider))
-            {
-                activeColliders.Add(collider);
-            }
-        }
-
-        public void removeActiveCollider(IActiveCollider collider) {
-            if (activeColliders.Contains(collider))
-            {
-                activeColliders.Remove(collider);
-            }
-        }
-
-        public void addPassiveCollider(IPassiveCollider collider)
-        {
-            if (!passiveColliders.Contains(collider))
-            {
-                passiveColliders.Add(collider);
-            }
-        }
-
-        public void removePassiveCollider(IPassiveCollider collider)
-        {
-            if (passiveColliders.Contains(collider))
-            {
-                passiveColliders.Remove(collider);
-            }
-        }
-    }
-    public class UIController {
-        public List<(int drawOrder, UIElement uiElement)> UIElements = new List<(int drawOrder, UIElement uiElement)>();
-        public List<InteractiveUIElement> InteractiveUI = new List<InteractiveUIElement>();
-        public List<UILine> UILines = new List<UILine>();
-        public List<UIElement> inventoryBackgrounds = new List<UIElement>();
-        public List<UIItem> inventorySlots = new List<UIItem>();
-
-        public bool wasElementAdded = false;
-        public UIController() {
-            resetMainMenuUI();
-        }
-        private void resetMainMenuUI() {
-
-            UIElements.Clear();
-            InteractiveUI.Clear();
-            MainMenuTitle title = new MainMenuTitle();
-            MainMenuWorldGenText generationText = new MainMenuWorldGenText();
-            MainMenuStartButton start = new MainMenuStartButton(generationText);
-            UIElements.Add((0, title));
-            UIElements.Add((0, start));
-            UIElements.Add((0, generationText));
-            InteractiveUI.Add(start);
-        }
-
-        public void addUIElement(int drawOrder, UIElement element) {
-            if (!UIElements.Contains((drawOrder, element))) {
-                UIElements.Add((drawOrder, element));
-            }
-            if (element is InteractiveUIElement iue) {
-                if (!InteractiveUI.Contains(iue))
-                {
-                    InteractiveUI.Add(iue);
-                }
-            }
-            wasElementAdded = true;
-        }
-
-        public void removeUIElement(int drawOrder, UIElement element) {
-        
-            if (UIElements.Contains((drawOrder, element)))
-            {
-                UIElements.Remove((drawOrder, element));
-            }
-            if (element is InteractiveUIElement iue)
-            {
-                if (InteractiveUI.Contains(iue))
-                {
-                    InteractiveUI.Remove(iue);
-                }
-            
-            }
-        }
-    }
-    #region UI classes
+    #endregion    #region UI classes
     public enum UIAlignOffset {
         TopLeft,
         Centre
@@ -4642,7 +4272,8 @@ namespace PixelMidpointDisplacement
             //generateWorldText.isUIElementActive = true;
             if (tickCount == 0)
             {
-                StringRenderer sr = new StringRenderer(game.worldContext, Scene.MainMenu, UIAlignOffset.Centre, 42 ,false);
+                StringRenderer sr = new StringRenderer(Scene.MainMenu, UIAlignOffset.Centre, 42 ,false);
+                sr.setWorldContext(game.worldContext);
                 sr.setString("Generating the world");
                 sr.updateLocation(0, 350);
 
@@ -5223,7 +4854,7 @@ namespace PixelMidpointDisplacement
 
         public bool isVisible = true;
 
-        public TooltipBackground background;
+        public StringRendererBackground background;
 
         WorldContext wc;
 
@@ -5239,14 +4870,17 @@ namespace PixelMidpointDisplacement
 
         int borderOffsetX;
         int borderOffsetY;
-        public StringRenderer(WorldContext worldContext, Scene scene, UIAlignOffset offset, int textHeight, bool haveBackground)
+        public StringRenderer(Scene scene, UIAlignOffset offset, int textHeight, bool haveBackground)
         {
-            wc = worldContext;
             this.scene = scene;
             this.haveBackground = haveBackground;
             this.textDrawHeight = textHeight;
 
             stringOffset = offset;
+        }
+
+        public void setWorldContext(WorldContext wc) {
+            this.wc = wc;
         }
 
         public void updateLocation(int x, int y)
@@ -5284,8 +4918,10 @@ namespace PixelMidpointDisplacement
             }
 
             visualisedString.Clear();
-            background.clear();
-
+            if (background != null)
+            {
+                background.clear();
+            }
             isVisible = false;
         }
 
@@ -5454,7 +5090,7 @@ namespace PixelMidpointDisplacement
             }
             if (haveBackground)
             {
-                background = new TooltipBackground(wc, scene, stringOffset, maxLineLength, currentLineY + maxLineHeight, x, y);
+                background = new StringRendererBackground(wc, scene, stringOffset, maxLineLength, currentLineY + maxLineHeight, x, y);
             }
         }
 
@@ -5681,14 +5317,13 @@ namespace PixelMidpointDisplacement
         }
 
     }
-
-    public class TooltipBackground
+    public class StringRendererBackground
     {
         public int x;
         public int y;
-        TooltipBackgroundSegment top = new TooltipBackgroundSegment();
-        TooltipBackgroundSegment body = new TooltipBackgroundSegment();
-        TooltipBackgroundSegment bottom = new TooltipBackgroundSegment();
+        StringRendererBackgroundSegment top = new StringRendererBackgroundSegment();
+        StringRendererBackgroundSegment body = new StringRendererBackgroundSegment();
+        StringRendererBackgroundSegment bottom = new StringRendererBackgroundSegment();
 
         const int UILayer = 17;
 
@@ -5706,7 +5341,7 @@ namespace PixelMidpointDisplacement
 
         const int pixelOffset = 8;
     
-        public TooltipBackground(WorldContext wc, Scene scene, UIAlignOffset offset, int width, int height, int x, int y)
+        public StringRendererBackground(WorldContext wc, Scene scene, UIAlignOffset offset, int width, int height, int x, int y)
         {
             //Scale the image according to the width, then variably increase the height by cutting it into 3 sections
             this.x = x;
@@ -5772,13 +5407,10 @@ namespace PixelMidpointDisplacement
             wc.engineController.UIController.removeUIElement(UILayer, top);
             wc.engineController.UIController.removeUIElement(UILayer, body);
             wc.engineController.UIController.removeUIElement(UILayer, bottom);
-
-
         }
     }
-
-    public class TooltipBackgroundSegment : UIElement {
-        public TooltipBackgroundSegment() {
+    public class StringRendererBackgroundSegment : UIElement {
+        public StringRendererBackgroundSegment() {
             positionType = Position.Absolute;
             scaleType = Scale.Absolute;
             alignment = UIAlignOffset.TopLeft;
@@ -5786,97 +5418,7 @@ namespace PixelMidpointDisplacement
             isUIElementActive = true;
         }
     }
-    
-    #endregion
-
-    public class EvolutionUIController {
-        WorldContext worldContext;
-        EvolutionTree tree;
-
-        List<(ExperienceField field, ExperienceCounter counter)> experienceCounters = new List<(ExperienceField field, ExperienceCounter counter)>();
-        public EvolutionUIController(WorldContext wc) {
-            worldContext = wc;
-            EvolutionStarBackground eb1 = new EvolutionStarBackground();
-            eb1.mouseMovementCoefficient = 0.01;
-            wc.engineController.UIController.addUIElement(1, eb1);
-
-            EvolutionStarBackground eb2 = new EvolutionStarBackground();
-            eb2.mouseMovementCoefficient = 0.005;
-            eb2.setSourceLocation(0, 1080);
-            wc.engineController.UIController.addUIElement(2, eb2);
-
-            EndEvolutionButton eeb = new EndEvolutionButton();
-            wc.engineController.UIController.addUIElement(18, eeb);
-
-            /*EvolutionStarBackground eb3 = new EvolutionStarBackground();
-            eb3.mouseMovementCoefficient = 0;
-            eb3.setSourceLocation(1920, 0);
-            eb3.zeroStartingOffset();
-            wc.engineController.UIController.addUIElement((0, eb3));*/
-
-            //Add a counter for each experienceField
-            experienceCounters.Add((ExperienceField.Knowledge, new ExperienceCounter(worldContext, 50, 400)));
-            experienceCounters.Add((ExperienceField.Durability, new ExperienceCounter(worldContext, 50, 450)));
-            experienceCounters.Add((ExperienceField.Maneuverability, new ExperienceCounter(worldContext, 50, 500)));
-            experienceCounters.Add((ExperienceField.Damage, new ExperienceCounter(worldContext, 50, 550)));
-
-
-        }
-
-        public void setTree(EvolutionTree tree) {
-            this.tree = tree;
-        }
-
-        public void setupPlayerEvolutionUI(EvolutionTree e) {
-            List<EvolutionButton> previousLayerButtons = new List<EvolutionButton>();
-
-            for (int x = 0; x < e.evolutionTree.Count; x++) {
-                List<EvolutionButton> currentLayerButtons = new List<EvolutionButton>();
-
-                for (int y = 0; y < e.evolutionTree[x].evolutionLayer.Count; y++) {
-                    Evolution ev = e.evolutionTree[x].evolutionLayer[y].evolution;
-
-                    EvolutionButton evolutionButton = new EvolutionButton(ev);
-                    currentLayerButtons.Add(evolutionButton);
-                    evolutionButton.setLocationFromTree();
-                    worldContext.engineController.UIController.addUIElement(15, evolutionButton);
-
-                    if (x > 0) {
-                        List<int> dependencies = e.evolutionTree[x].evolutionLayer[y].prerequisiteEvolutions;
-                        for (int i = 0; i < dependencies.Count; i++)
-                        {
-                            EvolutionDependencyLine el = new EvolutionDependencyLine(evolutionButton, previousLayerButtons[dependencies[i]], Vector2.Zero, Vector2.Zero);
-                            worldContext.engineController.UIController.UILines.Add(el);
-                        }
-                    }
-                }
-                previousLayerButtons = currentLayerButtons;
-            }
-        }
-        //There was A error here...
-        //The evolution tree is null!
-        public void updateExperienceCounters() {
-            for (int i = 0; i < experienceCounters.Count; i++) {
-                
-                experienceCounters[i].counter.updateString(((int)tree.getExperience(experienceCounters[i].field)).ToString());
-            }
-        }
-    }
-    public class SpriteController {
-        public Texture2D blockSpriteSheet;
-        public Texture2D weaponSpriteSheet;
-        public Texture2D blockItemSpriteSheet;
-        public Texture2D playerSpriteSheet;
-        public Texture2D arrowSpriteSheet;
-
-        public List<Texture2D> spriteSheetList = new List<Texture2D>();
-        //public List<Texture2D> entitySpriteSheetList = new List<Texture2D>();
-
-        public void setSpriteSheetList(List<Texture2D> spriteSheets) {
-            spriteSheetList = spriteSheets;
-
-        }
-    }
+   
     public class MidpointDisplacementAlgorithm
     {
         //An iterative process. Takes in a list of points, returns the same list. Can then be converted to blocks in the worldGeneration function
@@ -5935,295 +5477,6 @@ namespace PixelMidpointDisplacement
         }
     }
 
-    public class PhysicsEngine
-    {
-        /*
-         * A self contained engine that calculates kinematic physics
-         * 
-         * 
-         * =========================================================
-         * Settings file:
-         * 
-         * - blockSizeInMeters
-         * - Gravity
-         */
-
-
-        bool helpDebug = false;
-        public double blockSizeInMeters { get; set; } //The pixel size in meters can be found by taking this value and dividing it by pixelsPerBlock
-        WorldContext wc;
-
-        int horizontalOverlapMin = 2;
-        int verticalOverlapMin = 2;
-
-        public double gravity;
-
-
-        public PhysicsEngine(WorldContext worldContext)
-        {
-            wc = worldContext;
-
-
-            //Load txt file and read the values to define important variables
-            loadSettings();
-        }
-
-        private void loadSettings() {
-            StreamReader sr = new StreamReader(wc.runtimePath + "Settings\\PhysicsEngineSettings.txt");
-            sr.ReadLine();
-            blockSizeInMeters = Convert.ToDouble(sr.ReadLine());
-            sr.ReadLine();
-            gravity = Convert.ToDouble(sr.ReadLine());
-            sr.Close();
-        }
-
-        public void computeImpulse(PhysicsObject entity, double timeElapsed) {
-            for (int i = 0; i < entity.impulse.Count; i++){
-                entity.accelerationX += entity.impulse[i].direction.X * entity.impulse[i].magnitude;
-                entity.accelerationY += entity.impulse[i].direction.Y * entity.impulse[i].magnitude;
-
-                (Vector2 direction, double magnitude, double duration) impulseValues = entity.impulse[i];
-                impulseValues.duration -= timeElapsed;
-                entity.impulse[i]  = impulseValues;
-                if (entity.impulse[i].duration <= 0) {
-                    entity.impulse.RemoveAt(i);
-
-                    //Account for the loss of a list element
-                    i--;
-                }
-            }
-        }
-
-        public void computeAccelerationWithAirResistance(PhysicsObject entity, double timeElapsed)
-        {
-            int directionalityX;
-            int directionalityY;
-            //If cases to determine the direction of the current velocity. It can be done purely mathematically but it yeilded /0 errors. The directionality is unimportant when velocity = 0
-            if (entity.velocityX > 0)
-            {
-                directionalityX = 1;
-            }
-            else
-            {
-                directionalityX = -1;
-            }
-            if (entity.velocityY > 0)
-            {
-                directionalityY = 1;
-            }
-            else
-            {
-                directionalityY = -1;
-            }
-
-            double frictionMax = 0;
-
-            if (Math.Sign(entity.frictionDirection) != Math.Sign(entity.accelerationX)) {
-                frictionMax = entity.cummulativeCoefficientOfFriction * gravity;
-            }
-
-
-            entity.accelerationX += -(directionalityX * (entity.kX * Math.Pow(entity.velocityX, 2)));
-            entity.accelerationY += -(directionalityY * (entity.kY * Math.Pow(entity.velocityY, 2)));
-
-            //Friction
-            //If the acceleration is lesser than the frictional force if the object is stationary. 
-            //If the entities velocity is between +-0.3, to stop jitter
-            if (entity.velocityX >= -0.3 && entity.velocityX <= 0.3 && Math.Abs(entity.accelerationX) < frictionMax)
-            {
-                entity.accelerationX = 0;
-
-                //If the velocity is close enough to zero, and there's a friction force acting upon it, then stop the velocity;
-                entity.velocityX = 0;
-            }
-            else {
-                entity.accelerationX += frictionMax * entity.frictionDirection;
-            }
-
-
-        }
-        public void computeAccelerationToVelocity(PhysicsObject entity, double timeElapsed)
-        {
-            entity.velocityX += (entity.accelerationX) * timeElapsed;
-            entity.velocityY += (entity.accelerationY) * timeElapsed;
-
-
-            //Sets the velocity to 0 if it is below a threshold. Reduces excessive sliding and causes the drag function to actually reach a halt
-            if ((entity.velocityX > 0 && entity.velocityX < entity.minVelocityX) || (entity.velocityX < 0 && entity.velocityX > -entity.minVelocityX))
-            {
-                entity.velocityX = 0;
-            }
-            if ((entity.velocityY > 0 && entity.velocityY < entity.minVelocityY) || (entity.velocityY < 0 && entity.velocityY > -entity.minVelocityY))
-            {
-                entity.velocityY = 0;
-            }
-
-        }
-
-        public void addGravity(PhysicsObject entity)
-        {
-            entity.accelerationY -= gravity;
-        }
-
-        public void applyVelocityToPosition(PhysicsObject entity, double timeElapsed)
-        {
-            //Adds the velocity * time passed to the x and y variables of the entity. Y is -velocity as the y-axis is flipped from in real life (Up is negative in screen space)
-            //Converts the velocity into pixel space. This allows for realistic m/s calculations in the actual physics function and then converted to pixel space for the location
-
-            entity.updateLocation(entity.velocityX * timeElapsed * (wc.pixelsPerBlock / blockSizeInMeters), -entity.velocityY * timeElapsed * (wc.pixelsPerBlock / blockSizeInMeters));
-        }
-
-
-        public void detectBlockCollisions(PhysicsObject entity)
-        {
-            helpDebug = false;
-            //Gets the blocks within a single block radius around the entity. Detects if they are colliding, then if they are, calls another method
-            int entityLocationInGridX = (int)Math.Floor(entity.x / wc.pixelsPerBlock);
-            int entityLocationInGridY = (int)Math.Floor(entity.y / wc.pixelsPerBlock);
-            int entityGridWidth = (int)Math.Ceiling((double)entity.collider.Width / wc.pixelsPerBlock);
-            int entityGridHeight = (int)Math.Ceiling((double)entity.collider.Height / wc.pixelsPerBlock);
-
-            Rectangle entityCollider = new Rectangle((int)entity.x, (int)entity.y, entity.collider.Width, entity.collider.Height);
-
-            Block[,] worldArray = wc.worldArray; //A temporary storage of an array to reduce external function calls
-
-            for (int x = entityLocationInGridX - 1; x < entityLocationInGridX + entityGridWidth + 1; x++)
-            { //A range of x values on either side of the outer bounds of the entity
-                for (int y = entityLocationInGridY - 1; y < entityLocationInGridY + entityGridHeight + 1; y++)
-                {
-                    if (x >= 0 && y >= 0 && x < worldArray.GetLength(0) && y < worldArray.GetLength(1))
-                    {
-                        if (worldArray[x, y].ID != 0) //In game implementation, air can either be null or have a special 'colliderless' block type 
-                        {
-                            Rectangle blockRect = new Rectangle(x * wc.pixelsPerBlock, y * wc.pixelsPerBlock, wc.pixelsPerBlock, wc.pixelsPerBlock);
-                            if (blockRect.Intersects(entityCollider))
-                            {
-
-                                entity.onBlockCollision(computeCollisionNormal(entityCollider, blockRect), wc, x, y);
-                                worldArray[x, y].onCollisionWithPhysicsObject(entity, this, wc);
-
-                            }
-                        }
-                    }
-                }
-            }
-
-        }
-
-        public Vector2 computeCollisionNormal(Rectangle entityCollider, Rectangle blockRect)
-        {
-            (double x, double y) collisionNormal = (0, 0);
-            (int x, int y) approximateCollisionDirection = (entityCollider.Center.X - blockRect.Center.X, entityCollider.Center.Y - blockRect.Center.Y);
-
-            if (approximateCollisionDirection.x <= 0 && approximateCollisionDirection.y <= 0)
-            { //Bottom Right from the player
-                int verticalOverlap = entityCollider.Bottom - blockRect.Top;
-                int horizontalOverlap = entityCollider.Right - blockRect.Left;
-                if (horizontalOverlap < horizontalOverlapMin)
-                {
-                    horizontalOverlap = 0;
-                }
-                if (verticalOverlap < verticalOverlapMin)
-                {
-                    verticalOverlap = 0;
-                }
-                if (verticalOverlap != 0 || horizontalOverlap != 0)
-                {
-
-                    if (verticalOverlap > horizontalOverlap)
-                    {
-
-                        return new Vector2(-1, 0);
-                    }
-                    else
-                    {
-                        return new Vector2(0, 1);
-                    }
-                }
-            }
-            else if (approximateCollisionDirection.x >= 0 && approximateCollisionDirection.y <= 0)
-            { //Bottom Left from the player
-                int verticalOverlap = entityCollider.Bottom - blockRect.Top;
-                int horizontalOverlap = blockRect.Right - entityCollider.Left;
-                if (horizontalOverlap < horizontalOverlapMin)
-                {
-                    horizontalOverlap = 0;
-                }
-                if (verticalOverlap < verticalOverlapMin)
-                {
-                    verticalOverlap = 0;
-                }
-                if (verticalOverlap != 0 || horizontalOverlap != 0)
-                {
-
-                    if (verticalOverlap > horizontalOverlap)
-                    {
-
-                        return new Vector2(1, 0);
-                    }
-                    else
-                    {
-                        return new Vector2(0, 1);
-                    }
-                }
-            }
-            else if (approximateCollisionDirection.x <= 0 && approximateCollisionDirection.y >= 0)
-            { //Top Right from the player
-                int verticalOverlap = blockRect.Bottom - entityCollider.Top;
-                int horizontalOverlap = entityCollider.Right - blockRect.Left;
-                if (horizontalOverlap < horizontalOverlapMin)
-                {
-                    horizontalOverlap = 0;
-                }
-                if (verticalOverlap < verticalOverlapMin)
-                {
-                    verticalOverlap = 0;
-                }
-                if (verticalOverlap != 0 || horizontalOverlap != 0)
-                {
-
-
-                    if (verticalOverlap > horizontalOverlap)
-                    {
-                        return new Vector2(-1, 0);
-                    }
-                    else
-                    {
-                        return new Vector2(0, -1);
-                    }
-                }
-            }
-            else if (approximateCollisionDirection.x >= 0 && approximateCollisionDirection.y >= 0)
-            { //Top Left from the player
-                int verticalOverlap = blockRect.Bottom - entityCollider.Top;
-                int horizontalOverlap = blockRect.Right - entityCollider.Left;
-                if (horizontalOverlap < horizontalOverlapMin)
-                {
-                    horizontalOverlap = 0;
-                }
-                if (verticalOverlap < verticalOverlapMin)
-                {
-                    verticalOverlap = 0;
-                }
-                if (verticalOverlap != 0 || horizontalOverlap != 0)
-                {
-
-                    if (verticalOverlap > horizontalOverlap)
-                    {
-
-                        return new Vector2(1, 0);
-                    }
-                    else
-                    {
-                        return new Vector2(0, -1);
-                    }
-                }
-            }
-            return Vector2.Zero;
-        }
-
-    }
-
     public class PhysicsObject
     {
         public double accelerationX { get; set; }
@@ -6279,8 +5532,8 @@ namespace PixelMidpointDisplacement
 
             accelerationX = 0.0;
             accelerationY = 0.0;
-            velocityX = 1.0;    
-            velocityY = 1.0;
+            velocityX = 0;    
+            velocityY = 0;
             x = 0.0;
             y = 0.0;
             kX = 0.0;
@@ -6366,7 +5619,6 @@ namespace PixelMidpointDisplacement
 
 
         public Entity(WorldContext wc) : base(wc) {
-            worldContext = wc;
             worldContext.physicsObjects.Add(this);
         }
         public void setSpriteTexture(Texture2D spriteSheet)
@@ -6435,25 +5687,6 @@ namespace PixelMidpointDisplacement
             return new Entity(worldContext);
         }
     }
-    public class EntityController {
-        public List<Entity> entities = new List<Entity>();
-
-        public void entityInputUpdate(double elapsedTime) {
-            for (int i = 0; i < entities.Count; i++)
-            {
-                entities[i].inputUpdate(elapsedTime);
-            }
-        }
-
-        public void addEntity(Entity entity) {
-            if (!entities.Contains(entity)) { entities.Add(entity); }
-        }
-        public void removeEntity(Entity entity) {
-            if (entities.Contains(entity)) { entities.Remove(entity); }
-        }
-
-    }
-
     public class SpawnableEntity : Entity {
 
         public Biome homeBiome { get; set; }
@@ -6472,9 +5705,7 @@ namespace PixelMidpointDisplacement
             if (homeBiome != null)
             {
                 homeBiome.currentBiomeEntityCount -= 1;
-                (SpawnableEntity entity, int maxSpecificEntityCount, int currentSpecificEntityCount, double probability, int yMax, int yMin, bool spawnOnSurface) entitySpawnConditions = homeBiome.spawnableEntities[spawnableEntityListIndex];
-                entitySpawnConditions.currentSpecificEntityCount -= 1;
-                homeBiome.spawnableEntities[spawnableEntityListIndex] = entitySpawnConditions;
+                homeBiome.spawnableEntities[spawnableEntityListIndex].currentSpecificEntityCount -= 1;
                 
             }
 
@@ -6535,7 +5766,6 @@ namespace PixelMidpointDisplacement
             xDifferenceThreshold = 10;
             drawWidth = 1.5f;
             drawHeight = 3;
-
             playerDirection = 1;
 
             maxMovementVelocityX = 7;
@@ -6602,17 +5832,17 @@ namespace PixelMidpointDisplacement
 
             entityDropLoot.addLootTable(
                 new List<(double percentage, IndividualLootTable)>() {
-                    (50, new IndividualLootTable(new List<(double percentage, int min, int max, Item item)>() { (100, 1, 1, new Bow(worldContext.animationController, worldContext.player)) })),
-                    (50, new IndividualLootTable(new List<(double percentage, int min, int max, Item item)>() { (100, 1, 1, new CloudInAJar(worldContext.animationController, worldContext.player)) }))
+                    (50, new IndividualLootTable(new List<Loot>() { new Loot(100, 1, 1, new Bow()) })),
+                    (50, new IndividualLootTable(new List<Loot>() { new Loot(100, 1, 1, new CloudInAJar()) }))
                 }
             );
 
                 //Secondary loot tables
             entityDropLoot.addLootTable(
                 new List<(double percentage, IndividualLootTable)>(){
-                    (100, new IndividualLootTable(new List<(double percentage, int min, int max, Item item)>(){
-                        (40, 10, 30, new BlockItem((int)blockIDs.torch, worldContext.animationController, worldContext.player)),
-                        (25, 5, 20, new BlockItem((int)blockIDs.grass, worldContext.animationController, worldContext.player))
+                    (100, new IndividualLootTable(new List<Loot>(){
+                        new Loot(40, 10, 30, new BlockItem((int)blockIDs.torch)),
+                        new Loot(25, 5, 20, new BlockItem((int)blockIDs.grass))
                     }))
                 }
             );
@@ -6771,8 +6001,7 @@ namespace PixelMidpointDisplacement
         public UIItem[,] inventory { get; set; }
         public UIItem[,] equipmentInventory;
         public FloatingUIItem selectedItem;
-        public Hotbar hotbar = new Hotbar();
-        public HotbarSelected hotbarSelected = new HotbarSelected();
+       
 
         public List<IInventory> activeInventories = new List<IInventory>();
 
@@ -6798,18 +6027,19 @@ namespace PixelMidpointDisplacement
         double openInventoryCooldown;
         double maxOpenInventoryCooldown = 0.2f;
 
-        HealthBar healthBar = new HealthBar();
-
-        RespawnScreen rs;
-        RespawnButton rb;
+        
 
         public EvolutionTree evolutionTree;
+
+        public PlayerUIController playerUI;
 
         public Player(WorldContext wc) : base(wc)
         {
             wc.setPlayer(this);
 
             loadSettings();
+
+            playerUI = new PlayerUIController(this);
 
             //need to dissociate the collider width and the draw width. 
             collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
@@ -6838,15 +6068,6 @@ namespace PixelMidpointDisplacement
             baseHealth = 100;
             currentHealth = maxHealth;
 
-            HealthBarOutline hbo = new HealthBarOutline();
-            wc.engineController.UIController.addUIElement(5, hbo);
-            wc.engineController.UIController.addUIElement(5, healthBar);
-
-            rs = new RespawnScreen();
-            wc.engineController.UIController.addUIElement(150, rs);
-            rb = new RespawnButton(this, rs);
-            wc.engineController.UIController.addUIElement(150, rb);
-
             lightMap = wc.engineController.lightingSystem.calculateLightMap(emmissiveStrength);
 
             initialiseEvolutionTree();
@@ -6858,16 +6079,17 @@ namespace PixelMidpointDisplacement
             initialiseInventory(worldContext, inventoryWidth, inventoryHeight);
             //Setup initial inventory
 
-            inventory[0, 0].setItem(new Pickaxe(worldContext.animationController, this));
+            inventory[0, 0].setItem(new Pickaxe());
+            
 
-            inventory[1, 0].setItem(new BlockItem((int)blockIDs.water, worldContext.animationController, this));
+            inventory[1, 0].setItem(new BlockItem((int)blockIDs.water));
             if (inventory[1, 0].item is BlockItem b3)
             {
                 b3.currentStackSize = 99;
             }
 
-            inventory[2, 0].setItem(new Helmet(worldContext.animationController, this));
-            inventory[3, 0].setItem(new CloudInAJar(worldContext.animationController, this));
+            inventory[2, 0].setItem(new Helmet());
+            inventory[3, 0].setItem(new CloudInAJar());
 
 
             spriteAnimator = new SpriteAnimator(animationController: worldContext.animationController, constantOffset: new Vector2(12f, 8f), frameOffset: new Vector2(32, 65), sourceDimensions: new Vector2((float)32, (float)64), animationlessSourceRect: new Rectangle(160, 0, (int)32, (int)64), owner: this);
@@ -6912,32 +6134,7 @@ namespace PixelMidpointDisplacement
         }
 
         public void initialiseEvolutionTree() {
-            evolutionTree = new EvolutionTree(this);
-            List<EvolutionButton> buttons = new List<EvolutionButton>();
-
-            EvolutionTreeLayer e1 = new EvolutionTreeLayer();
-            JumpEvolution jumpEvolution = new JumpEvolution(evolutionTree, 0,0);
-            
-            
-            e1.evolutionLayer.Add((jumpEvolution, new List<int>() {0}));
-
-            EvolutionTreeLayer e2 = new EvolutionTreeLayer();
-            DoubleJumpEvolution doublejumpEvolution = new DoubleJumpEvolution(evolutionTree, 1, 0);
-            JumpEvolution jumpEvolution2 = new JumpEvolution(evolutionTree, 1, 1);
-
-
-            e2.evolutionLayer.Add((doublejumpEvolution, new List<int>() { 0 }));
-            e2.evolutionLayer.Add((jumpEvolution2, new List<int>() { 0 }));
-
-
-
-            evolutionTree.addEvolutionTreeLayer(e1);
-            evolutionTree.addEvolutionTreeLayer(e2);
-
-            worldContext.engineController.evolutionController.setupPlayerEvolutionUI(evolutionTree);
-            worldContext.engineController.evolutionController.setTree(evolutionTree);
-
-
+            evolutionTree = new PlayerEvolutionTree(this);
         }
 
         public void initialiseStatGainPerExperience() {
@@ -6968,12 +6165,10 @@ namespace PixelMidpointDisplacement
             worldContext.engineController.UIController.inventoryBackgrounds.Add(inventoryBackground);
             worldContext.engineController.UIController.inventoryBackgrounds.Add(equipmentBackground);
             worldContext.engineController.UIController.addUIElement(3, equipmentBackground);
-            worldContext.engineController.UIController.addUIElement(3, hotbar);
-            worldContext.engineController.UIController.inventoryBackgrounds.Add(hotbar);
-            worldContext.engineController.UIController.addUIElement(4, hotbarSelected);
+
             for (int x = 0; x < inventory.GetLength(0); x++) {
                 for (int y = 0; y < inventory.GetLength(1); y++) {
-                    inventory[x, y] = new UIItem(x, y, hotbar.drawRectangle.X, hotbar.drawRectangle.Y, this);
+                    inventory[x, y] = new UIItem(x, y, playerUI.hotbar.drawRectangle.X, playerUI.hotbar.drawRectangle.Y, this);
                     worldContext.engineController.UIController.addUIElement(5, inventory[x, y]);
                 }
             }
@@ -7192,7 +6387,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[0, 0].item;
                         inventory[0, 0].item.onEquip();
                         mainHandIndex = 0;
-                        hotbarSelected.swapItem(0);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
 
                     }
@@ -7202,7 +6397,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[1, 0].item;
 
                         mainHandIndex = 1;
-                        hotbarSelected.swapItem(1);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
                     }
                     else if (Keyboard.GetState().IsKeyDown(Keys.D3))
@@ -7211,7 +6406,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[2, 0].item;
 
                         mainHandIndex = 2;
-                        hotbarSelected.swapItem(2);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
                     }
                     else if (Keyboard.GetState().IsKeyDown(Keys.D4))
@@ -7220,7 +6415,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[3, 0].item;
 
                         mainHandIndex = 3;
-                        hotbarSelected.swapItem(3);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
                     }
                     else if (Keyboard.GetState().IsKeyDown(Keys.D5))
@@ -7229,7 +6424,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[4, 0].item;
 
                         mainHandIndex = 4;
-                        hotbarSelected.swapItem(4);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
                     }
                     else if (Keyboard.GetState().IsKeyDown(Keys.D6))
@@ -7238,7 +6433,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[5, 0].item;
 
                         mainHandIndex = 5;
-                        hotbarSelected.swapItem(5);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
                     }
                     else if (Keyboard.GetState().IsKeyDown(Keys.D7))
@@ -7247,7 +6442,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[6, 0].item;
 
                         mainHandIndex = 6;
-                        hotbarSelected.swapItem(6);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
                     }
                     else if (Keyboard.GetState().IsKeyDown(Keys.D8))
@@ -7256,7 +6451,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[7, 0].item;
 
                         mainHandIndex = 7;
-                        hotbarSelected.swapItem(7);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
                     }
                     else if (Keyboard.GetState().IsKeyDown(Keys.D9))
@@ -7265,7 +6460,7 @@ namespace PixelMidpointDisplacement
                         mainHand = inventory[8, 0].item;
 
                         mainHandIndex = 8;
-                        hotbarSelected.swapItem(8);
+                        playerUI.swapHotbar();
                         if (mainHand != null) { mainHand.onEquip(); }
                     }
 
@@ -7409,7 +6604,7 @@ namespace PixelMidpointDisplacement
             velocityX = 0;
             velocityY = 0;
             currentHealth = maxHealth;
-            healthBar.drawRectangle.Width = (int)((currentHealth / (double)maxHealth) * healthBar.maxHealthDrawWidth);
+            playerUI.damageTaken();
         }
 
         public override void applyDamage(object attacker, DamageType damageType, double damage)
@@ -7429,13 +6624,8 @@ namespace PixelMidpointDisplacement
 
                 base.applyDamage(attacker, damageType, damage);
 
-                if (currentHealth <= 0)
-                {
-                    rb.isUIElementActive = true;
-                    rs.isUIElementActive = true;
-                }
+                playerUI.damageTaken();
             }
-            healthBar.drawRectangle.Width = (int)((currentHealth / (double)maxHealth) * healthBar.maxHealthDrawWidth);
         }
 
         public override void onDeath(object attacker, DamageType damageType, double damageThatKilled)
@@ -7501,7 +6691,7 @@ namespace PixelMidpointDisplacement
             if (item != null)
             {
                 this.item = item;
-
+                item.onPickup(owner);
                 if (item.currentStackSize <= 1) { buttonText = null; }
                 isUIElementActive = true;
                 spriteSheetID = item.spriteSheetID;
@@ -7640,6 +6830,7 @@ namespace PixelMidpointDisplacement
             if (item != null)
             {
                 this.item = item;
+                item.onPickup(owner);
                 if (item.currentStackSize <= 1) { buttonText = null; }
                 spriteSheetID = item.spriteSheetID;
                 sourceRectangle = item.sourceRectangle;
@@ -7735,8 +6926,6 @@ namespace PixelMidpointDisplacement
             }
         }
     }
-
-    //Probably refactor these classes to have an overarching class containing several functions that are common between the two.
     public class EquipmentUIItem : UIItem {
         public ArmorType slotEquipmentType;
         
@@ -7775,7 +6964,6 @@ namespace PixelMidpointDisplacement
             }
         }
     }
-
     public class AccessoryUIItem : UIItem {
 
         public AccessoryUIItem(int x, int y, int inventoryDrawOffsetX, int inventoryDrawOffsetY, Player owner) : base(x, y, inventoryDrawOffsetX, inventoryDrawOffsetY, owner){
@@ -7960,3141 +7148,23 @@ namespace PixelMidpointDisplacement
         }
     }
 
-    #region Item Classes
 
-    public class DroppedItem : Entity {
-        public Item item { get; set; }
-        float pickupAcceleration = 50f;
-
-        public double pickupDelay;
-        double pickupMoveDistance = 96f;
-        double pickupDistance = 48f;
-
-        public DroppedItem(WorldContext wc, Item item, (double x, double y) location, Vector2 initialVelocity) : base(wc) {
-            //Set the texture from the item's spritesheet
-
-
-            spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, Vector2.Zero, new Vector2(item.sourceRectangle.Width, item.sourceRectangle.Height), item.sourceRectangle, this);
-            setSpriteTexture(wc.engineController.spriteController.spriteSheetList[item.spriteSheetID]);
-            drawWidth = item.drawDimensions.width / (double)wc.pixelsPerBlock;
-            drawHeight = item.drawDimensions.height / (double)wc.pixelsPerBlock;
-            width = drawWidth;
-            height = drawHeight;
-
-            this.item = item;
-
-            collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
-
-            kX = 5;
-            kY = 0.01;
-
-            minVelocityX = 0.25;
-            minVelocityY = 0.01;
-
-            velocityX = initialVelocity.X;
-            velocityY = initialVelocity.Y;
-
-            x = location.x;
-            y = location.y;
-
-            wc.engineController.entityController.addEntity(this);
-        }
-
-        public override void onBlockCollision(Vector2 collisionNormal, WorldContext worldContext, int blockX, int blockY)
-        {
-            //Do nothing, don't take fall damage or anything of the sorts
-        }
-
-        public override void inputUpdate(double elapsedTime)
-        {
-            if (pickupDelay > 0)
-            {
-                pickupDelay -= elapsedTime;
-            }
-            else
-            {
-                double distance = Math.Pow(Math.Pow((worldContext.player.y + worldContext.player.height * worldContext.pixelsPerBlock / 2.0) - (y + drawHeight * worldContext.pixelsPerBlock / 2.0f), 2) + Math.Pow((worldContext.player.x + worldContext.player.width * worldContext.pixelsPerBlock / 2.0) - (x + drawWidth * worldContext.pixelsPerBlock / 2.0f), 2), 0.5);
-                if (distance < pickupMoveDistance)
-                {
-
-                    accelerationX = pickupAcceleration * (((worldContext.player.x + worldContext.player.width * worldContext.pixelsPerBlock / 2.0) - (x + drawWidth * worldContext.pixelsPerBlock / 2.0f)) / distance);
-                    accelerationY = -pickupAcceleration * (((worldContext.player.y + worldContext.player.height * worldContext.pixelsPerBlock / 2.0) - (y + drawHeight * worldContext.pixelsPerBlock / 2.0f)) / distance);
-
-                }
-                if (distance < pickupDistance) {
-                    //Pickup action
-                    //Now I just need to make an inventory system and sorting
-
-                    if (worldContext.player.addItemToInventory(item)) {
-                        worldContext.engineController.entityController.removeEntity(this);
-                    }
-                }
-            }
-        }
-    }
-    public class Item
-    {
-        //Two ways of going about dropping and picking items up. One: Make each item a physics object, and activate the physics when they are dropped.Seems needlessly bulky
-        //Two: Have a "dropped item" class which is itself an entity, and make it point to an Item Class. On the "input" update function of entities, if the player is within
-        //A set range, apply a force towards the player. Items float towards the player, and when they get within a smaller range, they add the item to the players inventory
-        //and destroy the "dropped item" class
-        public Rectangle sourceRectangle { get; set; }
-        public int spriteSheetID { get; set; }
-
-        public int maxStackSize { get; set; }
-
-        public int currentStackSize { get; set; }
-
-        public string tooltip;
-        public StringRenderer tooltipRenderer;
-
-
-        public (int width, int height) drawDimensions { get; set; }
-        public Animator itemAnimator { get; set; }
-        public AnimationController animationController { get; set; }
-        public Vector2 origin { get; set; }
-        public int verticalDirection { get; set; }
-        public double constantRotationOffset { get; set; }
-
-        public SpriteEffects spriteEffect;
-
-        public int colliderWidth { get; set; }
-        public int colliderHeight { get; set; }
-
-        public Vector2 offsetFromEntity { get; set; }
-
-        public float useCooldown;
-
-        public Player owner { get; set; }
-
-        public Item(Player owner) {
-            this.owner = owner;
-        }
-
-
-        public virtual void onLeftClick() { }
-        public virtual void onEquip() { }
-        public virtual void onUnequip() { }
-        public virtual void animationFinished()
-        {
-            itemAnimator = null;
-        }
-
-        public virtual bool isItemIdentical(Item otherItem) {
-            return otherItem.GetType() == this.GetType();
-        }
-
-        public virtual Item itemCopy(int stackSize) {
-            Item i = new Item(owner);
-            i.currentStackSize = stackSize;
-            return i;
-        }
-
-    }
-    public class Weapon : Item, INonAxisAlignedActiveCollider
-    {
-        //I need to make the x and y position update constantly when the item is swung, not just on left click
-
-        bool swungDownwardsLastIteration = false;
-
-        public Vector2[] rotatedPoints { get; set; }
-
-        public Vector2[] originalPoints { get; set; }
-
-        public Vector2 rotationOrigin { get; set; }
-
-        //A null field as the collider is non-axis aligned
-        public Rectangle collider { get; set; }
-
-        public double weaponDamage = 20;
-
+    public class DrawnClass {
         public double x { get; set; }
         public double y { get; set; }
 
-        public double invincibilityCooldown { get; set; }
-        public double maxInvincibilityCooldown { get; set; }
-
-        public bool isActive { get; set; }
-
-        public bool hasCollided { get; set; }
-
-        public Weapon(AnimationController ac, Player owner) : base(owner)
-        {
-            spriteSheetID = 1;
-            animationController = ac;
-
-            this.owner = owner;
-
-            x = owner.x;
-            y = owner.y;
-
-            constantRotationOffset = -Math.PI / 4;
-
-
-            origin = new Vector2(-2f, 18f);
-            rotationOrigin = new Vector2(-2, 18f);
-
-            sourceRectangle = new Rectangle(0, 0, 16, 16);
-            drawDimensions = (48, 48);
-
-
-
-            rotatedPoints = new Vector2[4];
-            originalPoints = new Vector2[4];
-
-
-            colliderWidth = 8;
-            colliderHeight = 48;
-
-            useCooldown = 0.2f;
-
-            maxStackSize = 1;
-            currentStackSize = 1;
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltip =
-                "<h2>Iron Sword</h2>\n\n" +
-                "Damage: <gold>" + weaponDamage + "</gold>\n" +
-                "<grey>A weapon designed in the olde' days \n" +
-                "made for one purpose: Death </grey>";
-
-            tooltipRenderer.setString(tooltip);
-
-            tooltipRenderer.hideString();
-
-        }
-        //Adjusted to define the rectangular vertices only once, this should be a bit more efficient
-        public override void onLeftClick()
-        {
-            if (itemAnimator == null)
-            {
-                offsetFromEntity = new Vector2(owner.playerDirection * 8, 48);
-                isActive = true;
-                if (!swungDownwardsLastIteration)
-                {
-                    spriteEffect = SpriteEffects.None;
-                    verticalDirection = 1;
-                    origin = new Vector2(-2f, 18f);
-                    x = (owner.x - origin.X);
-                    y = (owner.y - origin.Y); constantRotationOffset = -Math.PI / 4;
-
-                    float initialRotation = (float)0;
-                    itemAnimator = new Animator(animationController, this, 0.2, (0, 0, initialRotation), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
-                    swungDownwardsLastIteration = true;
-
-                    initialiseColliderVectors(1, initialRotation);
-
-
-                }
-                else
-                {
-
-                    spriteEffect = SpriteEffects.FlipVertically;
-
-                    verticalDirection = -1;
-                    x = (owner.x - origin.X);
-                    y =  (owner.y - origin.Y);
-                    constantRotationOffset = Math.PI / 4;
-
-                    float initialRotation = (float)-Math.PI / 6;
-                    itemAnimator = new Animator(animationController, this, 0.15, (0, 0, initialRotation), (0, 0, -Math.PI / 2), constantRotationOffset, offsetFromEntity);
-                    swungDownwardsLastIteration = false;
-                    initialiseColliderVectors(-1, initialRotation);
-
-                }
-                animationController.addAnimator(itemAnimator);
-            }
-        }
-        public override void onEquip()
-        {
-            owner.worldContext.engineController.collisionController.addActiveCollider((INonAxisAlignedActiveCollider)this);
-        }
-        public override void animationFinished()
-        {
-            isActive = false;
-            itemAnimator = null;
-        }
-
-        private void initialiseColliderVectors(int multiplier, float initialRotation)
-        {
-            originalPoints[0] = new Vector2(-colliderWidth, -colliderHeight) - rotationOrigin; //The rotation origin doesn't adjust with the origin that is used for drawing. This is because the drawing system and the collision system operate under different grid spacesgit
-            originalPoints[1] = new Vector2(0, -colliderHeight) - rotationOrigin;
-            originalPoints[2] = new Vector2(-colliderWidth, 0) - rotationOrigin;
-            originalPoints[3] = new Vector2(0, 0) - rotationOrigin;
-
-            originalPoints[0] *= multiplier;
-            originalPoints[1] *= multiplier;
-            originalPoints[2] *= multiplier;
-            originalPoints[3] *= multiplier;
-
-
-            //Initialise the rotated points a
-            rotatedPoints[0] = new Vector2(originalPoints[0].X, originalPoints[0].Y);
-            rotatedPoints[1] = new Vector2(originalPoints[1].X, originalPoints[1].Y);
-            rotatedPoints[2] = new Vector2(originalPoints[2].X, originalPoints[2].Y);
-            rotatedPoints[3] = new Vector2(originalPoints[3].X, originalPoints[3].Y);
-
-            ((INonAxisAlignedActiveCollider)this).calculateRotation(initialRotation);
-        }
-
-        public void onCollision(ICollider externalCollider) {
-            if (externalCollider is Entity e) {
-                e.velocityX = 7 * owner.playerDirection;
-                e.velocityY += 7;
-                //Have to move the player up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
-                e.y -= 12;
-                e.applyDamage(owner, DamageType.EntityAttack, weaponDamage * owner.entityDamageMultiplier);
-                e.knockbackStunDuration = 0.5f;
-                ((ICollider)e).startInvincibilityFrames();
-            }
-        }
-
-        public override Item itemCopy(int stackSize)
-        {
-            Weapon i = new Weapon(animationController, owner);
-            if (stackSize < maxStackSize)
-            {
-                i.currentStackSize = stackSize;
-            } else { i.currentStackSize = maxStackSize; }
-            return i;
-        }
-    }
-    public class Bow : Item {
-
-        public double bowDamage = 10;
-        public Bow(AnimationController ac, Player owner) : base(owner) {
-            spriteSheetID = (int)spriteSheetIDs.weapons;
-            animationController = ac;
-            origin = new Vector2(-6f, -6f);
-            constantRotationOffset = 0;
-            spriteEffect = SpriteEffects.None;
-
-            verticalDirection = 1;
-
-
-            sourceRectangle = new Rectangle(16, 0, 16, 16);
-            drawDimensions = (48, 48);
-
-            maxStackSize = 1;
-            currentStackSize = 1;
-
-            useCooldown = 0f;
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltip =
-                "<h2>Wooden Bow</h2>\n\n" +
-                "Damage: <gold>" +  bowDamage + "</gold>\n" +
-                "Increasing as the velocity changes\n" +
-                "<grey>The greatest rival of any melee, range.</grey>";
-
-            tooltipRenderer.setString(tooltip);
-
-            tooltipRenderer.hideString();
-        }
-
-        public override void onLeftClick()
-        {
-            if (itemAnimator == null)
-            {
-                itemAnimator = new Animator(animationController, this, 0.3, (0, 0, 0), (0, 0, 0), 0, new Vector2(0, 0));
-                if (Mouse.GetState().X < owner.x + owner.worldContext.screenSpaceOffset.x) { owner.playerDirection = -1; owner.directionalEffect = SpriteEffects.FlipHorizontally; }
-                else if
-                    (Mouse.GetState().X > owner.x + owner.worldContext.screenSpaceOffset.x) { owner.playerDirection = 1; owner.directionalEffect = SpriteEffects.None; }
-                animationController.addAnimator(itemAnimator);
-                //Generate an arrow entity
-                Arrow firedArrow = new Arrow(owner.worldContext, (owner.x, owner.y), 30, owner);
-
-            }
-        }
-        public override Item itemCopy(int stackSize)
-        {
-            Bow i = new Bow(animationController, owner);
-            if (stackSize < maxStackSize)
-            {
-                i.currentStackSize = stackSize;
-            } else { i.currentStackSize = maxStackSize; }
-            return i;
-        }
-
-    }
-    public class BlockItem : Item {
-        public int blockID;
-
-
-        int semiAnimationAdditions = 0;
-        int maxSemiAdditions = 3;
-
-
-        public BlockItem(int BlockID, AnimationController animationController, Player owner) : base(owner) {
-            blockID = BlockID;
-            this.animationController = animationController;
-
-            this.owner = owner;
-
-            useCooldown = 0f;
-
-            spriteSheetID = (int)spriteSheetIDs.blockItems;
-            verticalDirection = 1;
-
-            sourceRectangle = new Rectangle(0, (blockID - 1) * 8, 8, 8);
-
-
-
-            drawDimensions = (16, 16);
-
-            origin = new Vector2(-2, 18f);
-            constantRotationOffset = 0;
-
-            spriteEffect = SpriteEffects.None;
-
-
-
-            maxStackSize = 999;
-            currentStackSize = 1;
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltip =
-                "<h2>" + (blockIDs)BlockID + " Block</h2>\n\n" +
-                
-                "<grey>The humble objects you \n" +
-                "dedicate your life to destroying </grey>";
-
-            tooltipRenderer.setString(tooltip);
-
-            tooltipRenderer.hideString();
-
-            //When you pick up an item, you check the inventory for an item of the same type. If that item already exists, check the stack size. If the stack size
-            //is less than the max, just add to the current stacksize, otherwise add the item to the inventory in the next empty slot
-        }
-
-        public override void onLeftClick()
-        {
-            if (itemAnimator == null) {
-                semiAnimationAdditions = 0;
-                offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
-                itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
-
-                animationController.addAnimator(itemAnimator);
-
-                int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
-                int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
-
-                if (owner.worldContext.addBlock(mouseX, mouseY, blockID)) {
-                    currentStackSize -= 1;
-                }
-            }
-            if (semiAnimationAdditions < maxSemiAdditions) {
-                int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
-                int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
-
-                if (owner.worldContext.addBlock(mouseX, mouseY, blockID))
-                {
-                    semiAnimationAdditions += 1;
-                    currentStackSize -= 1;
-                }
-            }
-        }
-
-        public override bool isItemIdentical(Item otherItem) {
-            if (otherItem is BlockItem b)
-            {
-                return b.blockID == blockID;
-            }
-            else {
-                return false;
-            }
-        }
-        public override Item itemCopy(int stackSize)
-        {
-            BlockItem i = new BlockItem(blockID, animationController, owner);
-            i.currentStackSize = stackSize;
-            return i;
-        }
-    }
-
-    public class BackgroundBlockItem : Item {
-        public int blockID;
-
-
-        int semiAnimationAdditions = 0;
-        int maxSemiAdditions = 3;
-
-
-        public BackgroundBlockItem(int BlockID, AnimationController animationController, Player owner) : base(owner)
-        {
-            blockID = BlockID;
-            this.animationController = animationController;
-
-            this.owner = owner;
-
-            useCooldown = 0f;
-
-            spriteSheetID = (int)spriteSheetIDs.blockBackground;
-            verticalDirection = 1;
-
-            sourceRectangle = new Rectangle(0, (blockID) * 32, 32, 32);
-
-
-
-            drawDimensions = (16, 16);
-
-            origin = new Vector2(-2, 18f);
-            constantRotationOffset = 0;
-
-            spriteEffect = SpriteEffects.None;
-
-
-
-            maxStackSize = 999;
-            currentStackSize = 1;
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltip =
-                "<h2>" + (backgroundBlockIDs)BlockID + " Background</h2>\n\n" +
-
-                "<grey>The humble objects you \n" +
-                "dedicate your life to destroying </grey>";
-
-            tooltipRenderer.setString(tooltip);
-
-            tooltipRenderer.hideString();
-
-            //When you pick up an item, you check the inventory for an item of the same type. If that item already exists, check the stack size. If the stack size
-            //is less than the max, just add to the current stacksize, otherwise add the item to the inventory in the next empty slot
-        }
-
-        public override void onLeftClick()
-        {
-            if (itemAnimator == null)
-            {
-                semiAnimationAdditions = 0;
-                offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
-                itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
-
-                animationController.addAnimator(itemAnimator);
-
-                int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
-                int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
-
-                if (owner.worldContext.setBackground(mouseX, mouseY, blockID)){
-
-                    currentStackSize -= 1;
-                }
-                
-            }
-            if (semiAnimationAdditions < maxSemiAdditions)
-            {
-                int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x) / owner.worldContext.pixelsPerBlock);
-                int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y) / owner.worldContext.pixelsPerBlock);
-
-                if (owner.worldContext.setBackground(mouseX, mouseY, blockID))
-                {
-                    currentStackSize -= 1;
-                    semiAnimationAdditions += 1;
-                }
-                
-            }
-        }
-
-        public override bool isItemIdentical(Item otherItem)
-        {
-            if (otherItem is BackgroundBlockItem b)
-            {
-                return b.blockID == blockID;
-            }
-            else
-            {
-                return false;
-            }
-        }
-        public override Item itemCopy(int stackSize)
-        {
-            BackgroundBlockItem i = new BackgroundBlockItem(blockID, animationController, owner);
-            i.currentStackSize = stackSize;
-            return i;
-        }
-    }
-    public class Pickaxe : Item {
-        int digSize = 1;
-
-        public double pickaxeStrength = 15;
-        public double durabilityPerHit = 1;
-        public Pickaxe(AnimationController ac, Player owner) : base(owner)
-        {
-            spriteSheetID = (int)spriteSheetIDs.weapons;
-            animationController = ac;
-
-            constantRotationOffset = -MathHelper.PiOver4;
-            spriteEffect = SpriteEffects.None;
-
-            verticalDirection = 1;
-
-            origin = new Vector2(-2f, 18f);
-
-
-            sourceRectangle = new Rectangle(32, 0, 16, 16);
-            drawDimensions = (40, 40);
-
-
-            maxStackSize = 1;
-            currentStackSize = 1;
-
-            useCooldown = 0f;
-
-            tooltip = "<gold><h2>Pickaxe</gold></h2> \n \n" +
-                "Pickaxe Strength: <gold>" + pickaxeStrength + "%</gold>\n" +
-                "Used to mine the world \n \n" +
-                "<grey>This pickaxe holds the secrets \n to many deep caverns</grey>";
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltipRenderer.setString(tooltip);
-        }
-
-        public override void onLeftClick()
-        {
-            if (itemAnimator == null) {
-                itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, new Vector2(owner.playerDirection * 8f, 25f));
-                animationController.addAnimator(itemAnimator);
-                if (Mouse.GetState().ScrollWheelValue / 120 != digSize - 1)
-                {
-                    digSize = Mouse.GetState().ScrollWheelValue / 120 + 1;
-                }
-                double mouseXPixelSpace = Mouse.GetState().X - owner.worldContext.screenSpaceOffset.x;
-                double mouseYPixelSpace = Mouse.GetState().Y - owner.worldContext.screenSpaceOffset.y;
-
-                int mouseXGridSpace = (int)Math.Floor(mouseXPixelSpace / owner.worldContext.pixelsPerBlock);
-                int mouseYGridSpace = (int)Math.Floor(mouseYPixelSpace / owner.worldContext.pixelsPerBlock);
-
-                //Delete Block at that location
-                for (int x = 0; x < digSize; x++)
-                {
-                    for (int y = 0; y < digSize; y++)
-                    {
-                        int usedX = x - (int)Math.Floor(digSize / 2.0);
-                        int usedY = y - (int)Math.Floor(digSize / 2.0);
-                        if (mouseXGridSpace + usedX > 0 && mouseXGridSpace + usedX < owner.worldContext.worldArray.GetLength(0) && mouseYGridSpace + usedY > 0 && mouseYGridSpace + usedY < owner.worldContext.worldArray.GetLength(1))
-                        {
-                            owner.worldContext.damageBlock(pickaxeStrength, durabilityPerHit, mouseXGridSpace + usedX, mouseYGridSpace + usedY);
-                            if (owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY].ID != 0 && owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY].durability <= 0) {
-                                onBlockDeleted(owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY], mouseXGridSpace + usedX, mouseYGridSpace + usedY);
-                                owner.worldContext.deleteBlock(mouseXGridSpace + usedY, mouseYGridSpace + usedY);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        public virtual void onBlockDeleted(Block b, int x, int y) {
-        }
-        public override Item itemCopy(int stackSize) {
-            return new Pickaxe(animationController, owner);
-        }
-    }
-    public class OreItem : Item {
-        public int oreID;
-        const int textureHeight = 16;
-        public OreItem(int oreID, AnimationController ac, Player owner) : base(owner) {
-            animationController = ac;
-            spriteSheetID = (int)spriteSheetIDs.oreSpriteSheet;
-            this.oreID = oreID;
-            sourceRectangle = new Rectangle(0, textureHeight * oreID, textureHeight, textureHeight);
-
-            this.owner = owner;
-
-            useCooldown = 0f;
-
-            spriteSheetID = (int)spriteSheetIDs.oreSpriteSheet;
-            verticalDirection = 1;
-
-
-            drawDimensions = (24, 24);
-
-            origin = new Vector2(-2, 18f);
-            constantRotationOffset = 0;
-
-            spriteEffect = SpriteEffects.None;
-
-
-            maxStackSize = 999;
-            currentStackSize = 1;
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltip =
-                "<h2>" + (oreIDs)(oreID) + " ore </h2>\n\n" +
-                
-                "<grey>A precious metal found within\n" +
-                "the Earth.</grey>";
-
-            tooltipRenderer.setString(tooltip);
-
-            tooltipRenderer.hideString();
-        }
-
-        public override void onLeftClick()
-        {
-            offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
-            itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
-
-            animationController.addAnimator(itemAnimator);
-        }
-
-        public override bool isItemIdentical(Item otherItem)
-        {
-            if (otherItem is OreItem ore)
-            {
-                return ore.oreID == oreID;
-            }
-            else {
-                return false;
-            }
-        }
-
-        public override Item itemCopy(int stackSize) {
-            OreItem ore = new OreItem(oreID, animationController, owner);
-            ore.currentStackSize = stackSize;
-            return ore;
-        }
-    }
-    public class IngotItem : Item {
-        public int ingotID;
-        const int textureHeight = 16;
-        public IngotItem(int ingotID, AnimationController ac, Player owner) : base(owner)
-        {
-            animationController = ac;
-            spriteSheetID = (int)spriteSheetIDs.oreSpriteSheet;
-            this.ingotID = ingotID;
-            sourceRectangle = new Rectangle(0, textureHeight * ingotID, textureHeight, textureHeight);
-
-            this.owner = owner;
-
-            useCooldown = 0f;
-
-            spriteSheetID = (int)spriteSheetIDs.ingotSpriteSheet;
-            verticalDirection = 1;
-
-
-            drawDimensions = (24, 24);
-
-            origin = new Vector2(-2, 18f);
-            constantRotationOffset = 0;
-
-            spriteEffect = SpriteEffects.None;
-
-
-            maxStackSize = 999;
-            currentStackSize = 1;
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltip =
-                "<h2>" + (oreIDs)(ingotID) + " ingot </h2>\n\n" +
-
-                "<grey>A now refined precious metal \n" +
-                "found within the Earth.</grey>";
-
-            tooltipRenderer.setString(tooltip);
-
-            tooltipRenderer.hideString();
-        }
-
-        public override void onLeftClick()
-        {
-            offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
-            itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
-
-            animationController.addAnimator(itemAnimator);
-        }
-
-        public override bool isItemIdentical(Item otherItem)
-        {
-            if (otherItem is IngotItem ore)
-            {
-                return ore.ingotID == ingotID;
-            }
-            else
-            {
-                return false;
-            }
-        }
-
-        public override Item itemCopy(int stackSize)
-        {
-            IngotItem ore = new IngotItem(ingotID, animationController, owner);
-            ore.currentStackSize = stackSize;
-            return ore;
-        }
-    }
-    public class EquipableItem : Item {
-        public EquipableItem(Player player) : base(player) {
-            verticalDirection = 1;
-            constantRotationOffset = 0;
-            origin = new Vector2(-2f, 18f);
-
-            maxStackSize = 1;
-            currentStackSize = 1;
-
-            useCooldown = 0f;
-        }
-
-        
-        public virtual void onEquipToSlot() { }
-        public virtual void onUnequipFromSlot() { }
-
-        //Just have a crap ton of functions that get called in different spots
-
-        public virtual void onInput(double elapsedTime) { }
-        
-        public virtual double onDamageTaken(DamageType damageType, double damage, object source) { return damage; }
-    }
-    public class Equipment : EquipableItem {
-
-        //I probably could exchange the armourtype enum for different subclasses...
-        public ArmorType equipmentType;
-        public Equipment(Player player) : base(player) {
-        
-        }
-
-        public override void onLeftClick()
-        {
-            Equipment previouslyEquipped = (Equipment)owner.equipmentInventory[1, (int)equipmentType].item;
-            owner.equipmentInventory[1, (int)equipmentType].setItem(this);
-            owner.inventory[owner.mainHandIndex, 0].setItem(previouslyEquipped);
-            owner.mainHand = previouslyEquipped;
-            if (previouslyEquipped != null)
-            {
-                previouslyEquipped.onUnequipFromSlot();
-            }
-            onEquipToSlot();
-        }
-        
-        
-        public override Item itemCopy(int stackSize)
-        {
-            Equipment e = new Equipment(owner);
-            e.currentStackSize = stackSize;
-            return e;
-        }
-    }
-    public class Helmet : Equipment {
-        public Helmet(AnimationController ac, Player player) : base(player) {
-            equipmentType = ArmorType.Head;
-            animationController = ac;
-
-            spriteSheetID = (int)spriteSheetIDs.armour;
-            sourceRectangle = new Rectangle(0,0,16,16);
-            drawDimensions = (48,48);
-        }
-
-       
-        public override Item itemCopy(int stackSize)
-        {
-            Helmet h = new Helmet(animationController, owner);
-            
-            return h;
-        }
-
-    }
-    public class Accessory : EquipableItem {
-        public Accessory(Player player) : base(player) { }
-
-        public override void onLeftClick()
-        {
-            for (int y = 0; y < owner.equipmentInventory.GetLength(1); y++) {
-                if (owner.equipmentInventory[0, y].item == null)
-                {
-                    owner.equipmentInventory[0, y].setItem(this);
-                    onEquipToSlot();
-                    owner.inventory[owner.mainHandIndex, 0].setItem(null);
-                    owner.mainHand = null;
-                    break;
-                }
-
-            }
-        }
-
-        
-    }
-
-    public class AmuletOfFallDamage : Accessory {
-        public AmuletOfFallDamage(AnimationController ac, Player owner) : base(owner) {
-            spriteSheetID = (int)spriteSheetIDs.accessories;
-            sourceRectangle = new Rectangle(0,0,16,16);
-            drawDimensions = (32, 32);
-            animationController = ac;
-
-            verticalDirection = 1;
-            constantRotationOffset = 0;
-
-            maxStackSize = 1;
-            currentStackSize = 1;
-
-            useCooldown = 0f;
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltip =
-                "<h2>Amulet of fall negation</h2>\n\n" +
-
-                "<grey>A magic amulet that\n" +
-                "prevents the wearer from taking\n" +
-                "fall damage.</grey>";
-
-            tooltipRenderer.setString(tooltip);
-
-            tooltipRenderer.hideString();
-        }
-
-        public override double onDamageTaken(DamageType damageType, double damage, object source)
-        {
-            if (damageType == DamageType.Falldamage) {
-                damage = 0;
-            }
-            return damage;
-        }
-        public override Item itemCopy(int stackSize)
-        {
-            return new AmuletOfFallDamage(animationController, owner);
-        }
-    }
-
-    public class CloudInAJar : Accessory {
-
-        public double jumpWaitTime;
-        public double maxJumpWaitTime = 0.4f;
-        public bool hasSetWaitTimeOnce = false;
-        public bool hasUsedItem = false;
-
-        public double jumpAcceleration = 9;
-        public CloudInAJar(AnimationController ac, Player owner) : base(owner) {
-            spriteSheetID = (int)spriteSheetIDs.accessories;
-            sourceRectangle = new Rectangle(0, 0, 16, 16);
-            drawDimensions = (32, 32);
-            animationController = ac;
-
-            verticalDirection = 1;
-            constantRotationOffset = 0;
-
-            maxStackSize = 1;
-            currentStackSize = 1;
-
-            useCooldown = 0f;
-
-            tooltipRenderer = new StringRenderer(owner.worldContext, Scene.Game, UIAlignOffset.TopLeft, 11, true);
-
-            tooltip =
-                "<h2>Cloud In A Jar</h2>\n\n" +
-
-                "<grey>A bottle containing\n" +
-                "a fine mist. Whoever opens\n" +
-                "the jar gets a little upwards boost.</grey>";
-
-            tooltipRenderer.setString(tooltip);
-
-            tooltipRenderer.hideString();
-        }
-
-        public override void onInput(double elapsedTime)
-        {
-            if (jumpWaitTime > 0) {
-                jumpWaitTime -= elapsedTime;
-            }
-
-            if (!owner.isOnGround)
-            {
-                DoubleJumpEvolution j = (DoubleJumpEvolution)owner.evolutionTree.getEvolution(typeof(DoubleJumpEvolution));
-                bool canJump = false;
-                if (j == null)
-                {
-                    canJump = true;
-                }
-                else {
-                    if (j.isEvolutionActive)
-                    {
-                        if (j.hasDoubleJumped)
-                        {
-                            canJump = true;
-                        }
-                        else
-                        {
-                            canJump = false;
-                        }
-                    }
-                    else {
-                        canJump = true;
-                    }
-                }
-
-
-                        if (hasSetWaitTimeOnce && canJump)
-                {
-                    if (jumpWaitTime <= 0)
-                    {
-                        if ((Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space)) && !hasUsedItem)
-                        {
-                            hasUsedItem = true;
-                            if (owner.velocityY < 0)
-                            {
-                                owner.velocityY = 0;
-                            }
-                            owner.accelerationY += jumpAcceleration / elapsedTime;
-                        }
-                    }
-                }
-                else
-                {
-                    jumpWaitTime = maxJumpWaitTime;
-                    hasSetWaitTimeOnce = true;
-                }
-                    
-                
-            }
-            else if(hasSetWaitTimeOnce || hasUsedItem){
-                hasSetWaitTimeOnce = false;
-                hasUsedItem = false;
-            }
-        }
-
-        public override Item itemCopy(int stackSize)
-        {
-            return new CloudInAJar(animationController, owner);
-        }
-    }
-    #endregion
-
-    #region Animation
-    public class Animator
-    {
-        public double duration;
-        public double elapsedTime;
-        public double maxDuration;
-        public (double xPos, double yPos, double rotation) initialPosition;
-        public (double xPos, double yPos, double rotation) currentPosition;
-        public (double xPos, double yPos, double rotation) finalPosition;
-
-        public Item owner;
-
-        public (double xPos, double yPos, double rotation) currentChange;
-        double constantRotationOffset;
-
-
-
-        public AnimationController animationController;
-
-        public Animator(AnimationController ac, Item owner, double duration, (double xPos, double yPos, double rotation) initialPosition, (double xPos, double yPos, double rotation) finalPosition, double constantRotationOffset, Vector2 constantPositionOffset)
-        {
-            animationController = ac;
-            this.owner = owner;
-
-            this.duration = 0;
-            maxDuration = duration;
-            initialPosition.rotation += constantRotationOffset;
-            finalPosition.rotation += constantRotationOffset;
-
-            initialPosition.xPos += constantPositionOffset.X;
-            finalPosition.xPos += constantPositionOffset.X;
-
-            initialPosition.yPos += constantPositionOffset.Y;
-            finalPosition.yPos += constantPositionOffset.Y;
-
-            this.constantRotationOffset = constantRotationOffset;
-
-
-            this.initialPosition = initialPosition;
-            currentPosition = initialPosition;
-            this.finalPosition = finalPosition;
-
-        }
-
-        public void tick(double elapsedTime)
-        {
-
-            duration += elapsedTime;
-            this.elapsedTime = elapsedTime;
-            if (duration >= maxDuration)
-            {
-                animationController.removeAnimator(this);
-                owner.animationFinished();
-            }
-
-            currentChange.xPos = linearInterpolation(initialPosition.xPos, finalPosition.xPos);
-            currentChange.yPos = linearInterpolation(initialPosition.yPos, finalPosition.yPos);
-            currentChange.rotation = linearInterpolation(initialPosition.rotation, finalPosition.rotation);
-
-            currentPosition = (currentPosition.xPos + currentChange.xPos, currentPosition.yPos + currentChange.yPos, currentPosition.rotation + currentChange.rotation);
-        }
-
-        public double linearInterpolation(double initialValue, double finalValue)
-        {
-            double difference = finalValue - initialValue;
-            double differencePerSecond = difference / maxDuration;
-            double linearlyInterpolatedValue = differencePerSecond * elapsedTime;// + initialValue; //Altered to calculate the change, then do the addition of the initial value when defining the current position. This allows for the change in a frame to be calculated for later efficiency purposes
-
-            return linearlyInterpolatedValue;
-        }
-
-    }
-
-    public class AnimationController
-    {
-        public List<Animator> animators;
-        public List<SpriteAnimator> spriteAnimators;
-
-        public AnimationController()
-        {
-            animators = new List<Animator>();
-            spriteAnimators = new List<SpriteAnimator>();
-        }
-
-        public void addAnimator(Animator animator)
-        {
-            animators.Add(animator);
-        }
-        public void removeAnimator(Animator animator)
-        {
-            animators.Remove(animator);
-        }
-
-        public void addSpriteAnimator(SpriteAnimator animator) {
-            spriteAnimators.Add(animator);
-        }
-        public void removeSpriteAnimator(SpriteAnimator animator)
-        {
-            spriteAnimators.Remove(animator);
-        }
-
-
-        public void tickAnimation(double elapsedTime)
-        {
-            for (int i = 0; i < animators.Count; i++)
-            {
-                animators[i].tick(elapsedTime);
-            }
-            for (int i = 0; i < spriteAnimators.Count; i++) {
-                spriteAnimators[i].tickAnimation(elapsedTime);
-            }
-        }
-        
-    }
-
-    public class SpriteAnimator {
-        public Texture2D spriteSheet; //The sprite sheet to take pictures from
-        public Vector2 sourceOffset; //The initial offset to shift over all the draws
-        double maxDuration; //The entire duration of the animation
-        double duration; //The current duration
-        Vector2 frameOffset; //The offset each frame. The y value will be the offset for different animations (from the yOffset from the dictionary)
-        Vector2 sourceDimensions; //The dimensions of the source
-        int frame;
-        public Rectangle sourceRect; //The rectangle to draw from as the source rect. This takes the sourceDimensions, and the frameOffset * frame to get the location to draw from.
-        public Dictionary<String, (int frameCount, int yOffset)> animationDictionary; //The string indicates the animation, and the int value indicates the y offset (an index value) to get to said animation
-        int currentAnimationFrameCount;
-        int currentAnimationYOffset;
-        double currentDurationPerFrame;
-
-        Rectangle animationlessSourceRectangle; //The source rectangle when no animation is being played.
-        public bool isAnimationActive;
-
-        public AnimationController animationController;
-        public Entity owner; //Substitute with something else later on.
-
-        public SpriteAnimator(AnimationController animationController, Vector2 constantOffset, Vector2 frameOffset, Vector2 sourceDimensions, Rectangle animationlessSourceRect, Entity owner) {
-            this.owner = owner;
-            this.spriteSheet = owner.spriteSheet;
-            this.animationController = animationController;
-            this.sourceOffset = constantOffset;
-            this.frameOffset = frameOffset;
-            
-            this.sourceDimensions = sourceDimensions;
-            animationlessSourceRectangle = animationlessSourceRect;
-            sourceRect = animationlessSourceRectangle;
-        }
-
-        public void startAnimation(double duration, string animation) {
-            isAnimationActive = true;
-            currentAnimationFrameCount = animationDictionary[animation].frameCount;
-            currentAnimationYOffset = animationDictionary[animation].yOffset;
-            currentDurationPerFrame = maxDuration / currentAnimationFrameCount;
-            this.maxDuration = duration;
-            this.duration = 0;
-            frame = 0;
-            animationController.addSpriteAnimator(this);
-        }
-
-        public void tickAnimation(double elapsedTime) {
-            duration += elapsedTime;
-            if (duration >= maxDuration || !isAnimationActive) {
-                isAnimationActive = false;
-                currentAnimationFrameCount = 0;
-                currentAnimationYOffset = 0;
-                currentDurationPerFrame = 0;
-                frame = 0;
-                sourceRect = animationlessSourceRectangle;
-                animationController.removeSpriteAnimator(this);
-                
-                return;
-            }
-
-            frame = (int)Math.Floor(duration / currentDurationPerFrame);
-            
-            sourceRect = new Rectangle((int)(frame * frameOffset.X), (int)(currentAnimationYOffset * frameOffset.Y),(int)sourceDimensions.X, (int)sourceDimensions.Y);
-            
-        }
-
-
-
-        
-
-    }
-    #endregion
-
-    #region Block Classes
-    public class Block
-    {
         public Rectangle sourceRectangle;
-        public int emmissiveStrength;
-        public int ID;
-        public List<Vector2> faceVertices;
+        public Rectangle drawRectangle;
+        public int spriteSheetID { get; set; }
 
-        public double coefficientOfFriction = 4;
-        public int x { get; set; }
-        public int y { get; set; }
-        public bool isBlockTransparent = false;
-        public (int width, int height) dimensions = (1, 1); //Default to 1 by 1 blocks
-        public Vector4 faceDirection;
+        //Some things just if they're later useful
 
-        public double hardness = 15;
-        public double durability = 3;
-        public Block(Rectangle textureSourceRectangle, int ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.ID = ID;
-        }
-        public Block(Rectangle textureSourceRectangle, int emmissiveStrength, int ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-            this.ID = ID;
-        }
-        public Block(int ID) {
-            this.ID = ID;
-        }
-        
-        public Block(Block b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            dimensions = b.dimensions;
-            x = b.x;
-            y = b.y;
-        }
-
-        public void setLocation((int x, int y) location) {
-            x = location.x;
-            y = location.y;
-        }
-
-        //A block specific check if that block can be placed. For example, torches, chests etc.
-        public virtual bool canBlockBePlaced(WorldContext worldContext, (int x, int y) location) {
-            return true;
-        }
-        public virtual void onBlockPlaced( WorldContext worldContext, (int x, int y) location) {
-            setLocation(location);
-        }
-        public virtual void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc){
-            blockDestroyed(exposedBlocks);
-            Random r = new Random();
-
-            DroppedItem dropBlock = new DroppedItem(wc, new BlockItem(ID, wc.animationController, wc.player), (x * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0,y), new Vector2((float)r.NextDouble(), (float)r.NextDouble()));
-            
-            dropBlock.y = y * wc.pixelsPerBlock + wc.pixelsPerBlock/2.0;
-            dropBlock.pickupDelay = 0f;
-        }
-        public void blockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks) {
-            if (exposedBlocks.ContainsKey((x,y))) { exposedBlocks.Remove((x,y)); }
-        }
-
-        public virtual void updateBlock(WorldContext wc) {
-            
-        }
-        public virtual void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation) {
-            x = blockLocation.x;
-            y = blockLocation.y;
-        }
-        
-        public virtual void setupFaceVertices(Vector4 exposedFacesClockwise) {
-            this.faceDirection = exposedFacesClockwise;
-            //2 Vector2s are needed to allow for all 4 directions to be accounted for. However, this isn't the cleanest code and should be later improved
-            faceVertices = new List<Vector2>();
-            if(exposedFacesClockwise.X == 1)
-            {
-                faceVertices.Add(new Vector2(x, y));
-                faceVertices.Add(new Vector2(x + dimensions.width, y));
-            }
-            if (exposedFacesClockwise.Y == 1) 
-            {
-                //Check if the vertex already exists from the previous if statement
-                if (!faceVertices.Contains(new Vector2(x + dimensions.width, y)))
-                {
-
-                    faceVertices.Add(new Vector2(x + dimensions.width, y));
-                }
-
-
-                    faceVertices.Add(new Vector2(x + dimensions.width, y + dimensions.height));
-            }
-            if(exposedFacesClockwise.Z == 1)
-            {
-                if (!faceVertices.Contains(new Vector2(x + dimensions.width, y + dimensions.height)))
-                {
-                    faceVertices.Add(new Vector2(x + dimensions.width, y + dimensions.height));
-                }
-
-                faceVertices.Add(new Vector2(x, y + dimensions.height));
-            }
-            if (exposedFacesClockwise.W == 1)
-            {
-                if (!faceVertices.Contains(new Vector2(x, y + dimensions.height)))
-                {
-                    faceVertices.Add(new Vector2(x, y + dimensions.height));
-                }
-               
-                    faceVertices.Add(new Vector2(x, y));
-            }
-        }
-
-        public virtual void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc) {
-            Rectangle entityCollider = new Rectangle((int)entity.x, (int)entity.y, entity.collider.Width, entity.collider.Height);
-            Rectangle blockRect = new Rectangle(x * wc.pixelsPerBlock, y * wc.pixelsPerBlock, wc.pixelsPerBlock, wc.pixelsPerBlock);
-            Vector2 collisionNormal = physicsEngine.computeCollisionNormal(entityCollider, blockRect);
-            entity.hasCollided();
-
-            //If the signs are unequal on either the velocity or the acceleration then the forces should cancel as the resulting motion would be counteracted by the block
-            if (((Math.Sign(collisionNormal.Y) != Math.Sign(entity.velocityY) && entity.velocityY != 0) || (Math.Sign(collisionNormal.Y) != Math.Sign(entity.accelerationY) && entity.accelerationY != 0)) && collisionNormal.Y != 0)
-            {
-                entity.velocityY -= (1 + entity.bounceCoefficient) * entity.velocityY;
-                entity.accelerationY -= entity.accelerationY;
-
-                if (Math.Sign(collisionNormal.Y) > 0)
-                {
-                    entity.isOnGround = true;
-                    //Set the coefficient of friction if the current block has a greater friction value than the previous maximum
-                    if (entity.cummulativeCoefficientOfFriction < coefficientOfFriction + entity.objectCoefficientOfFriction) {
-                        entity.cummulativeCoefficientOfFriction = coefficientOfFriction + entity.objectCoefficientOfFriction;
-                    }
-
-                }
-
-                if (Math.Sign(collisionNormal.Y) > 0)
-                {
-                    entity.y = blockRect.Y - entityCollider.Height + 1;
-                }
-                else
-                {
-                    entity.y = blockRect.Bottom - 1;
-                }
-            }
-
-            if (((Math.Sign(collisionNormal.X) != Math.Sign(entity.velocityX) && entity.velocityX != 0) || (Math.Sign(collisionNormal.X) != Math.Sign(entity.accelerationX) && entity.accelerationX != 0)) && collisionNormal.X != 0)
-            {
-
-
-                entity.velocityX -= (1 + entity.bounceCoefficient) * entity.velocityX;
-                entity.accelerationX -= entity.accelerationX;
-
-                if (Math.Sign(collisionNormal.X) > 0)
-                {
-                    entity.x = blockRect.Right - 1;
-                }
-                else
-                {
-                    entity.x = blockRect.Left - entityCollider.Width + 1;
-                }
-
-            }
-
-        }
-
-        public virtual Block copyBlock() {
-            return new Block(this);
-        }
-    }
-    public class FluidBlock : Block {
-
-        public bool isSourceBlock = true;
-        public int sourceX;
-        public int sourceY;
-
-        public int distanceFromLastDown = 0;
-        public int maxDistanceFromLastDown = 14;
-
-        public bool deleteNextFrame = false;
-
-        public bool addNextFrame = false;
-        public int gridXToAdd;
-        public int gridYToAdd;
-
-        const int textureSize = 32;
-
-        public double viscosityX = 200;
-        public double viscosityY = 50;
-
-
-        int leftFlowingY;
-        int rightFlowingY;
-
-        public Vector2 flowingDirection = new Vector2(0, 0);
-
-        int gravity = 1;
-
-
-        public double fluidBuoyancy = 20;
-        const double maxBuoyancyVelocity = 5;
-
-
-        public double fluidFlowForce = 25;
-        public double maxFlowVelocity = 4;
-        
-
-        public FluidBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID) {
-            rightFlowingY = textureSourceRectangle.Y;
-            leftFlowingY = rightFlowingY + textureSize;
-            isBlockTransparent = true;
-        }
-
-        public FluidBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID) {
-            isBlockTransparent = true;
-            rightFlowingY = textureSourceRectangle.Y;
-            leftFlowingY = rightFlowingY + textureSize;
-        }
-
-        public FluidBlock(int ID) : base(ID) {
-            isBlockTransparent = true;
-        }
-
-        public FluidBlock(Block b) : base(b) {
-            isBlockTransparent = true;
-            rightFlowingY = b.sourceRectangle.Y;
-            leftFlowingY = rightFlowingY + textureSize;
-        }
-
-        public void setSource(int x, int y)
-        {
-            sourceX = x;
-            sourceY = y;
-        }
-
-        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
-        {
-            //I think all I want, is if it collides with the smaller rectangle, apply a bouyant force:
-            Rectangle entityCollider = new Rectangle((int)entity.x, (int)entity.y, entity.collider.Width, entity.collider.Height);
-
-            int fluidHeight = wc.pixelsPerBlock / (distanceFromLastDown + 1);
-            
-            Rectangle blockRect = new Rectangle(((x + 1) * wc.pixelsPerBlock) - fluidHeight, y * wc.pixelsPerBlock, wc.pixelsPerBlock, fluidHeight);
-
-            Vector2 collisionNormal = physicsEngine.computeCollisionNormal(entityCollider, blockRect);
-
-
-            if (entityCollider.Intersects(blockRect)) {
-
-
-                if (entity.kX < viscosityX * entity.defaultkX) {
-                    entity.kX = viscosityX * entity.defaultkX;
-                }
-                if (entity.kY < viscosityY * entity.defaultkY)
-                {
-                    entity.kY = viscosityY * entity.defaultkY;
-                }
-
-                if (entity.velocityY < maxBuoyancyVelocity && !entity.isInFluid)
-                {
-                    entity.accelerationY += fluidBuoyancy * entity.buoyancyCoefficient;
-                }
-                if (entity.velocityX < maxFlowVelocity)
-                {
-                    entity.accelerationX += flowingDirection.X * fluidFlowForce;
-                    entity.accelerationY += flowingDirection.Y * fluidFlowForce;
-                }
-                entity.isInFluid = true;
-
-            }
-        }
-
-        public void setDistanceFromLastDown(int distance) {
-            distanceFromLastDown = distance;
-
-            sourceRectangle.X = distance * textureSize;
-        }
-
-        public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
-        {
-            base.onBlockPlaced(worldContext, location);
-            setSource(location.x, location.y);
-        }
-
-        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            if (isSourceBlock)
-            {
-                base.onBlockDestroyed(exposedBlocks, wc);
-            }
-        }
-
-        public void tickFluid(WorldContext wc) {
-            if (deleteNextFrame) {
-                wc.deleteBlock(x, y);
-            }
-            else {
-                if (addNextFrame) {
-                    wc.deleteBlock(gridXToAdd, gridYToAdd);
-                    wc.addBlock(gridXToAdd, gridYToAdd, ID);
-                    if (wc.worldArray[gridXToAdd, gridYToAdd] is FluidBlock f) 
-                    {
-                        if (gridXToAdd < x) {
-                            f.sourceRectangle.Y = leftFlowingY;
-                            f.flowingDirection.X = -1;
-                        }
-                        if (gridXToAdd > x)
-                        {
-                            f.flowingDirection.X = 1;
-                        }
-                        f.isSourceBlock = false;
-                        if (gravity > 0 ? gridYToAdd > y : gridYToAdd < y)
-                        {
-                            f.setDistanceFromLastDown(0);
-                            f.flowingDirection.X = 0;
-                        }
-                        else {
-                            f.setDistanceFromLastDown(distanceFromLastDown + 1);
-                        }
-                        f.setSource(x, y);
-                        addNextFrame = false;
-                    }
-                }
-            if (!isSourceBlock)
-            {
-                //Find if any block around them is a fluid: if not, then terminate itself (ID == 0)
-                bool hasAdjacentFluid = false;
-
-                if (wc.worldArray[sourceX, sourceY].ID == ID)
-                {
-                    hasAdjacentFluid = true;
-                }
-
-
-                if (hasAdjacentFluid == false)
-                {
-                    deleteNextFrame = true;
-                }
-            }
-
-                if (y < wc.worldArray.GetLength(1) - gravity && distanceFromLastDown < maxDistanceFromLastDown)
-                {
-                    if ((wc.worldArray[x, y + gravity].ID == (int)blockIDs.air || wc.worldArray[x, y + gravity].isBlockTransparent) && wc.worldArray[x, y + gravity].ID != (int)blockIDs.chest && wc.worldArray[x, y + gravity] is not FluidBlock)
-                    {
-                        //spread downwards
-                        addNextFrame = true;
-                        gridXToAdd = x;
-                        gridYToAdd = y + gravity;
-                    }
-                    else
-                    {
-                        if (wc.worldArray[x, y + gravity].ID != ID)
-                        {
-                            //Check either side
-                            if (x < wc.worldArray.GetLength(0) - 1)
-                            {
-                                if ((wc.worldArray[x + 1, y].ID == (int)blockIDs.air || wc.worldArray[x + 1, y].isBlockTransparent) && wc.worldArray[x + 1, y].ID != (int)blockIDs.chest && wc.worldArray[x + 1, y] is not FluidBlock)
-                                {
-                                    addNextFrame = true;
-                                    gridXToAdd = x + 1;
-                                    gridYToAdd = y;
-                                }
-                            }
-                            if (x > 0)
-                            {
-                                if ((wc.worldArray[x - 1, y].ID == (int)blockIDs.air || wc.worldArray[x - 1, y].isBlockTransparent) && wc.worldArray[x - 1, y].ID != (int)blockIDs.chest && wc.worldArray[x - 1, y] is not FluidBlock)
-                                {
-                                    addNextFrame = true;
-                                    gridXToAdd = x - 1;
-                                    gridYToAdd = y;
-
-                                }
-                            }
-                        }
-
-                    }
-                }
-
-            }
-        }
-
-        public override Block copyBlock()
-        {
-            return new FluidBlock(sourceRectangle, ID);
-        }
-    }
-    public class InteractiveBlock : Block {
-        public double secondsSinceAction;
-        public double maximumCooldown;
-        
-        public InteractiveBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID) { }
-
-        //This one is slightly outdated?
-        public InteractiveBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        { }
-
-        public InteractiveBlock(int ID) : base(ID)
-        {
-            
-        }
-
-        public InteractiveBlock(Block b) : base(b)
-        {
-            
-        }
-        public virtual void onRightClick(WorldContext worldContext, GameTime gameTime) {
-            //Execute some code here. Perhaps pass in some variable data, such as world context or whatever, we'll just add what's needed
-        }
+        public SpriteEffects drawEffect { get; set; }
+        public double rotation { get; set; }
+        public Vector2 rotationOrigin { get; set; }
     }
 
-    public class OreBlock : Block {
-        int oreID;
 
-        
-
-        public OreBlock(Rectangle textureSourceRectangle, int ID, int oreID) : base(textureSourceRectangle, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.oreID = oreID;
-        }
-        public OreBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID, int oreID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-            this.oreID = oreID;
-        }
-        public OreBlock(int ID) : base(ID)
-        {
-            this.ID = ID;
-        }
-
-        public OreBlock(Block b) : base(b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            hardness = 15;
-            durability = 5;
-            if (b is OreBlock ob)
-            {
-                oreID = ob.oreID;
-            }
-        }
-
-        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            blockDestroyed(exposedBlocks);
-            Random r = new Random();
-            DroppedItem dropBlock = new DroppedItem(wc, new OreItem(oreID, wc.animationController, wc.player), (x, y), new Vector2((float)r.NextDouble(), (float)r.NextDouble()));
-
-            dropBlock.x = x * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0;
-            dropBlock.y = y * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0;
-            dropBlock.pickupDelay = 0f;
-        }
-
-        public override Block copyBlock()
-        {
-            return new OreBlock(this);
-        }
-    }
-    
-    public class GrassBlock : Block
-    {
-
-
-        public GrassBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-        }
-        public GrassBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-        }
-        public GrassBlock(int ID) : base(ID)
-        {
-            this.ID = ID;
-        }
-
-        public GrassBlock(Block b) : base(b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            hardness = 15;
-            durability = 5;
-        }
-
-        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            blockDestroyed(exposedBlocks);
-            Random r = new Random();
-            DroppedItem dropBlock = new DroppedItem(wc, new BlockItem((int)blockIDs.dirt, wc.animationController, wc.player), (x, y), new Vector2((float)r.NextDouble(), (float)r.NextDouble()));
-
-            dropBlock.x = x * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0;
-            dropBlock.y = y * wc.pixelsPerBlock + wc.pixelsPerBlock / 2.0;
-            dropBlock.pickupDelay = 0f;
-        }
-
-        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
-        {
-            bool emptyAbove = false;
-            bool emptyRight = false;
-            bool emptyLeft = false;
-
-            int xOffset = 2; //Set it to the default upwards block
-            //sprite sheet is as follows: |, |-, _, -|, |
-
-            if (blockLocation.x > 0 && blockLocation.y > 0 && blockLocation.x < worldArray.GetLength(0) - 1 && blockLocation.y < worldArray.GetLength(1) - 1)
-            {
-
-
-
-                if (worldArray[blockLocation.x, blockLocation.y - 1] == 0)
-                {
-                    emptyAbove = true;
-                }
-                if (worldArray[blockLocation.x - 1, blockLocation.y] == 0)
-                {
-                    emptyLeft = true;
-                }
-                if (worldArray[blockLocation.x + 1, blockLocation.y] == 0)
-                {
-                    emptyRight = true;
-                }
-                if (emptyRight && !emptyLeft && !emptyAbove)
-                {
-                    xOffset = 4;
-                }
-                else if (emptyLeft && !emptyRight && !emptyAbove)
-                {
-                    xOffset = 0;
-                }
-
-                if (emptyAbove)
-                {
-                    if (emptyRight)
-                    {
-                        xOffset = 3;
-                    }
-                    else if (emptyLeft)
-                    {
-                        xOffset = 1;
-                    }
-                }
-            }
-
-            sourceRectangle = new Rectangle(sourceRectangle.X + xOffset * 32, sourceRectangle.Y, 32, 32);
-
-            base.setupInitialData(worldContext, worldArray, blockLocation);
-        }
-
-
-        public override Block copyBlock()
-        {
-            return new GrassBlock(this);
-        }
-    }
-
-    public class TorchBlock : Block, IEmissiveBlock {
-
-        public Vector3 lightColor { get; set; }
-        public float luminosity { get; set; }
-        public float range { get; set; }
-        public RenderTarget2D shadowMap { get; set; }
-        public RenderTarget2D lightMap { get; set; }
-
-
-
-        public TorchBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            setData();
-        }
-        public TorchBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-            setData();
-        }
-        public TorchBlock(int ID) : base(ID)
-        {
-            this.ID = ID;
-            setData();
-        }
-
-        public TorchBlock(Block b) : base(b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            setData();
-        }
-        public void setData() {
-            isBlockTransparent = true;
-            lightColor = new Vector3(1, 0.2f, 0.1f);
-            luminosity = 1000f;
-            range = 496;
-        }
-        
-
-        public override bool canBlockBePlaced(WorldContext worldContext, (int x, int y) location)
-        {
-            bool isASolidBlockPresent = false;
-
-
-            if (worldContext.worldArray[location.x - 1, location.y].ID != (int)blockIDs.air && !worldContext.worldArray[location.x - 1, location.y].isBlockTransparent)
-            {
-                isASolidBlockPresent = true;
-            }
-            else if (worldContext.worldArray[location.x + 1, location.y].ID != (int)blockIDs.air && !worldContext.worldArray[location.x + 1, location.y].isBlockTransparent) {
-                isASolidBlockPresent = true;
-            }
-            else if (worldContext.worldArray[location.x, location.y + 1].ID != (int)blockIDs.air && !worldContext.worldArray[location.x, location.y + 1].isBlockTransparent)
-            {
-                isASolidBlockPresent = true;
-            } else if (worldContext.backgroundArray[location.x, location.y] != (int)backgroundBlockIDs.air) {
-                isASolidBlockPresent = true;
-            } 
-
-                return isASolidBlockPresent;
-        }
-        public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
-        {
-            base.onBlockPlaced(worldContext, location);
-            sourceRectangle = new Rectangle(0, 96, 32, 32);
-            calculateVariant(worldContext.worldArray, location.x, location.y);
-            shadowMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
-            lightMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
-            setData();
-            if (!worldContext.engineController.lightingSystem.emissiveBlocks.Contains(this))
-            {
-                worldContext.engineController.lightingSystem.emissiveBlocks.Add(this);
-            }
-        }
-
-        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
-        {
-            base.setupInitialData(worldContext, worldArray, blockLocation);
-            sourceRectangle = new Rectangle(0, 96, 32, 32);
-            shadowMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
-            lightMap = new RenderTarget2D(worldContext.engineController.lightingSystem.graphics.GraphicsDevice, (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferWidth * worldContext.engineController.lightingSystem.shaderPrecision), (int)(worldContext.engineController.lightingSystem.graphics.PreferredBackBufferHeight * worldContext.engineController.lightingSystem.shaderPrecision));
-            setData();
-            if (!worldContext.engineController.lightingSystem.emissiveBlocks.Contains(this))
-            {
-                worldContext.engineController.lightingSystem.emissiveBlocks.Add(this);
-            }
-        }
-        public override void setupFaceVertices(Vector4 exposedFacesClockwise)
-        {
-            //the block is transparent...
-        }
-        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            wc.engineController.lightingSystem.emissiveBlocks.Remove(this);
-            base.onBlockDestroyed(exposedBlocks, wc);
-        }
-
-        public void calculateVariant(Block[,] worldArray, int x, int y) {
-            //Presumes that the torch can in fact be placed
-            bool isSolidBelow = false;
-            bool isSolidLeft = false;
-            bool isSolidRight = false;
-
-
-            if (worldArray[x - 1, y].ID != (int)blockIDs.air && !worldArray[x-1,y].isBlockTransparent) {
-                isSolidLeft = true;
-            }
-            if (worldArray[x + 1, y].ID != (int)blockIDs.air && !worldArray[x + 1, y].isBlockTransparent) {
-                isSolidRight = true;
-            }
-            if (worldArray[x, y + 1].ID != (int)blockIDs.air && !worldArray[x, y + 1].isBlockTransparent) {
-                isSolidBelow = true;
-            }
-
-            if (isSolidBelow)
-            {
-                //Don't change the source rect, as the default is towards the bottom
-            }
-            else if (isSolidLeft)
-            {
-                sourceRectangle.X = 32;
-            }
-            else if (isSolidRight) {
-                sourceRectangle.X = 64;
-            }
-
-
-        }
-        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
-        {
-            //Null the default collision logic
-        }
-
-        public override Block copyBlock() {
-            return new TorchBlock(this);
-        }
-    }
-
-    public class ChestBlock : InteractiveBlock, IInventory{
-        public UIItem[,] inventory { get; set; }
-        public UIElement inventoryBackground { get; set; }
-
-        LootTable lootTable;
-
-        public ChestBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID) {
-            maximumCooldown = 0.1f;
-            isBlockTransparent = true;
-        }
-        public ChestBlock(Rectangle textureSourceRectangle, int emissiveStrength, int ID) : base(textureSourceRectangle, emissiveStrength, ID) { 
-            maximumCooldown = 0.1f;
-            isBlockTransparent = true;
-        }
-
-        public ChestBlock(Block b) : base(b) { isBlockTransparent = true; }
-        public ChestBlock(int ID) : base(ID) { isBlockTransparent = true; }
-        public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
-        {
-            base.onBlockPlaced(worldContext, location);
-
-            initialiseChestData(worldContext);
-            
-        }
-
-        public void initialiseChestData(WorldContext worldContext) {
-            inventoryBackground = new InventoryBackground();
-            inventoryBackground.drawRectangle.Y += 450;
-            int inventoryWidth = 9;
-            int inventoryHeight = 4;
-            ((IInventory)this).initialiseInventory(worldContext, inventoryWidth, inventoryHeight);
-            ((IInventory)this).showInventory();
-            ((IInventory)this).hideInventory();
-            maximumCooldown = 0.1f;
-            isBlockTransparent = true;
-        }
-
-        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            Random r = new Random();
-            //Destroy the inventory, and randomise the item drop locations a 'lil
-            ((IInventory)this).destroyInventory(wc, x * wc.pixelsPerBlock + r.Next(wc.pixelsPerBlock), y * wc.pixelsPerBlock + r.Next(wc.pixelsPerBlock));
-            base.onBlockDestroyed(exposedBlocks, wc);   
-        }
-        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
-        {
-            base.setupInitialData(worldContext, worldArray, blockLocation);
-            initialiseChestData(worldContext);
-            initialiseLootTables(worldContext);
-            generateLootFromLootTable();
-        }
-
-        private void initialiseLootTables(WorldContext worldContext) {
-            Player p = worldContext.player;
-            AnimationController a = worldContext.animationController;
-            //A crappy way of determining what structure the chest is in. If it's the shrine then the block below is dirt. I'll adjust everything later.
-            lootTable = new LootTable();
-
-            if (worldContext.backgroundArray[x, y - 1] == (int)backgroundBlockIDs.stone)
-            {
-                lootTable.addLootTable(new List<(double percentage, IndividualLootTable)> {
-                    (100,
-                    new IndividualLootTable(new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>{
-                        (100, 30, 40, new BlockItem((int)blockIDs.stone, a, p)),
-                        (40, 1, 1, new Helmet(a, p)),
-                        (70, 1, 1, new AmuletOfFallDamage(a,p))
-                    }
-                    ))
-                });
-            }
-            else
-            {
-                lootTable.addLootTable(new List<(double percentage, IndividualLootTable itable)>() {
-                (50, new IndividualLootTable(
-                    new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)> {
-                        (100, 20, 30, new BlockItem((int)blockIDs.stone, a, p)),
-                        (50, 1, 1, new Weapon(a, p))
-                    }
-                    )),
-                (50, new IndividualLootTable(
-                    new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>{
-                (100, 45,90, new BlockItem((int)blockIDs.torch, a,p)),
-                (30, 1, 1, new Bow(a,p))
-                }))
-
-
-             });
-            }
-        }
-        private void generateLootFromLootTable() {
-            Random r = new Random();
-            //Pick loot table to generate from:
-            
-            foreach (Item item in lootTable.generateLoot())
-            {
-                //Add it to a random, empty slot in the chests inventory
-                bool foundASlot = false;
-                int maxAttempts = 20;
-                int attempts = 0;
-                while (!foundASlot && maxAttempts > attempts)
-                {
-                    int slotX = r.Next(inventory.GetLength(0));
-                    int slotY = r.Next(inventory.GetLength(1));
-                    if (inventory[slotX, slotY].item == null)
-                    {
-                        inventory[slotX, slotY].setItem(item);
-                        foundASlot = true;
-                    }
-                    attempts += 1;
-                }
-            }
-            
-        }
-
-        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
-        {
-            //Don't collide
-        }
-        public override void onRightClick(WorldContext worldContext, GameTime gameTime)
-        {
-            if (gameTime.TotalGameTime.TotalSeconds - secondsSinceAction > maximumCooldown)
-            {
-                secondsSinceAction = gameTime.TotalGameTime.TotalSeconds;
-                if (inventory[0, 0].isUIElementActive)
-                {
-                    ((IInventory)this).hideInventory();
-                    worldContext.player.hideInventory();
-                }
-                else
-                {
-                    ((IInventory)this).showInventory();
-                    worldContext.player.showInventory();
-                    if (!worldContext.player.activeInventories.Contains(this))
-                    {
-                        worldContext.player.activeInventories.Add(this);
-                    }
-                }
-            }
-        }
-
-        public override Block copyBlock()
-        {
-            return new ChestBlock(sourceRectangle, ID);
-        }
-
-    }
-
-    public class TreeBlock : Block {
-        public TreeBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-        }
-        public TreeBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-        }
-        public TreeBlock(int ID) : base(ID)
-        {
-            this.ID = ID;
-        }
-
-        public TreeBlock(Block b) : base(b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            hardness = 15;
-            durability = 4;
-            
-        }
-
-        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
-        {
-
-        }
-
-        public override Block copyBlock()
-        {
-            return new TreeBlock(this);
-        }
-    }
-
-    public class LeafBlock : Block {
-        public LeafBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-        }
-        public LeafBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-        }
-        public LeafBlock(int ID) : base(ID)
-        {
-            this.ID = ID;
-        }
-
-        public LeafBlock(Block b) : base(b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            hardness = 1;
-            durability = 1;
-        }
-
-        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
-        {
-            
-        }
-        /*
-        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            blockDestroyed(exposedBlocks);
-        }*/
-
-        public override Block copyBlock()
-        {
-            return new LeafBlock(this);
-        }
-    }
-
-    public class SemiLeafBlock : Block
-    {
-        public SemiLeafBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            isBlockTransparent = true;
-
-        }
-        public SemiLeafBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-            isBlockTransparent = true;
-
-        }
-        public SemiLeafBlock(int ID) : base(ID)
-        {
-            this.ID = ID;
-            isBlockTransparent = true;
-
-        }
-
-        public SemiLeafBlock(Block b) : base(b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            hardness = 1;
-            durability = 1;
-            isBlockTransparent = true;
-        }
-
-        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
-        {
-
-        }
-
-        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
-        {
-            //check all the surrounding blocks to see if they're leaves:
-            bool[] directions = new bool[8];
-            int i = 0;
-            for (int y = - 1; y <=  + 1; y++)
-            {
-                for (int x = - 1; x <= + 1; x++) {
-                    if (!(x == 0 && y == 0)) {
-                        if (x + blockLocation.x >= 0 && x + blockLocation.x < worldArray.GetLength(0) && y + blockLocation.y >= 0 && y + blockLocation.y < worldArray.GetLength(1))
-                        {
-                            directions[i] = worldArray[x + blockLocation.x, y + blockLocation.y] == (int)blockIDs.leaves;
-                        }
-                        i += 1;
-                    }
-                }
-            }
-
-
-
-            /*  0 | 1 | 2
-             *  3 |   | 4
-             *  5 | 6 | 7
-             * */
-
-            //Do all the checks for the different possiblilities:
-            
-            if (directions[1] && directions[3] && directions[4] && directions[6])
-            {
-                //Fully surrounded:
-                sourceRectangle.X = 544;
-            }
-            //Threes
-            else if (directions[3] && directions[4] && directions[6])
-            {
-                sourceRectangle.X = 416;
-            }
-            else if (directions[1] && directions[4] && directions[6])
-            {
-                sourceRectangle.X = 512;
-
-            }
-            else if (directions[1] && directions[3] && directions[6])
-            {
-                sourceRectangle.X = 448;
-
-            }
-            else if (directions[1] && directions[3] && directions[4])
-            {
-                sourceRectangle.X = 480;
-            }
-            //Twos
-            else if (directions[4] && directions[6])
-            {
-                sourceRectangle.X = 384;
-
-            }
-            else if (directions[1] && directions[4])
-            {
-                sourceRectangle.X = 352;
-
-            }
-            else if (directions[3] && directions[6])
-            {
-                sourceRectangle.X = 288;
-
-            }
-            else if (directions[1] && directions[3])
-            {
-                sourceRectangle.X = 320;
-            }
-            //Ones
-            
-            else if (directions[1])
-            {
-                sourceRectangle.X = 160;
-
-            }
-            
-            else if (directions[3])
-            {
-                sourceRectangle.X = 96;
-
-            }
-            else if (directions[4])
-            {
-                sourceRectangle.X = 224;
-
-            }
-            
-            else if (directions[6])
-            {
-                sourceRectangle.X = 32;
-            }
-            
-            else if (directions[0])
-            {
-                sourceRectangle.X = 128;
-            }
-            else if (directions[2])
-            {
-                sourceRectangle.X = 192;
-
-            }
-            else if (directions[5])
-            {
-                sourceRectangle.X = 64;
-            }
-            else if (directions[7])
-            {
-                sourceRectangle.X = 256;
-            }
-
-            base.setupInitialData(worldContext, worldArray, blockLocation);
-        }
-
-        public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
-        {
-            //check all the surrounding blocks to see if they're leaves:
-            bool[] directions = new bool[8];
-            int i = 0;
-            for (int y = -1; y <= +1; y++)
-            {
-                for (int x = -1; x <= +1; x++)
-                {
-                    if (!(x == 0 && y == 0))
-                    {
-                        if (x + location.x >= 0 && x + location.x < worldContext.worldArray.GetLength(0) && y + location.y >= 0 && y + location.y < worldContext.worldArray.GetLength(1))
-                        {
-                            System.Diagnostics.Debug.WriteLine(worldContext.worldArray[x + location.x, y + location.y].ID);
-                            directions[i] = worldContext.worldArray[x + location.x, y + location.y].ID == (int)blockIDs.leaves;
-                        }
-                        else {
-                            System.Diagnostics.Debug.WriteLine("was at the edge");
-                        }
-                            i += 1;
-                    }
-                }
-            }
-
-            for (int y = 0; y < directions.Count(); y++) {
-                System.Diagnostics.Debug.WriteLine(y + " : " + directions[y]);
-            }
-
-
-            /*  0 | 1 | 2
-             *  3 |   | 4
-             *  5 | 6 | 7
-             * */
-
-            //Do all the checks for the different possiblilities:
-
-            if (directions[1] && directions[3] && directions[4] && directions[6])
-            {
-                //Fully surrounded:
-                sourceRectangle.X = 544;
-            }
-            //Threes
-            else if (directions[3] && directions[4] && directions[6])
-            {
-                sourceRectangle.X = 416;
-            }
-            else if (directions[1] && directions[4] && directions[6])
-            {
-                sourceRectangle.X = 512;
-
-            }
-            else if (directions[1] && directions[3] && directions[6])
-            {
-                sourceRectangle.X = 448;
-
-            }
-            else if (directions[1] && directions[3] && directions[4])
-            {
-                sourceRectangle.X = 480;
-            }
-            //Twos
-            else if (directions[4] && directions[6])
-            {
-                sourceRectangle.X = 384;
-
-            }
-            else if (directions[1] && directions[4])
-            {
-                sourceRectangle.X = 352;
-
-            }
-            else if (directions[3] && directions[6])
-            {
-                sourceRectangle.X = 288;
-
-            }
-            else if (directions[1] && directions[3])
-            {
-                sourceRectangle.X = 320;
-            }
-            //Ones
-
-            else if (directions[1])
-            {
-                sourceRectangle.X = 160;
-
-            }
-
-            else if (directions[3])
-            {
-                sourceRectangle.X = 96;
-
-            }
-            else if (directions[4])
-            {
-                sourceRectangle.X = 224;
-
-            }
-
-            else if (directions[6])
-            {
-                sourceRectangle.X = 32;
-            }
-
-            else if (directions[0])
-            {
-                sourceRectangle.X = 128;
-            }
-            else if (directions[2])
-            {
-                sourceRectangle.X = 192;
-
-            }
-            else if (directions[5])
-            {
-                sourceRectangle.X = 64;
-            }
-            else if (directions[7])
-            {
-                sourceRectangle.X = 256;
-            }
-            base.onBlockPlaced(worldContext, location);
-        }
-        /*public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            blockDestroyed(exposedBlocks);
-        }*/
-
-        public override Block copyBlock()
-        {
-            return new SemiLeafBlock(this);
-        }
-    }
-
-    public class BushBlock: Block
-    {
-        public BushBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            isBlockTransparent = true;
-        }
-        public BushBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-            isBlockTransparent = true;
-
-        }
-        public BushBlock(int ID) : base(ID)
-        {
-            this.ID = ID;
-            isBlockTransparent = true;
-
-        }
-
-        public BushBlock(Block b) : base(b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            hardness = 1;
-            durability = 1;
-            isBlockTransparent = true;
-        }
-
-        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
-        {
-
-        }
-
-        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            blockDestroyed(exposedBlocks);
-        }
-
-        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
-        {
-            Random r = new Random();
-            sourceRectangle.X += 32 * r.Next(3);
-            base.setupInitialData(worldContext, worldArray, blockLocation);
-        }
-        public override Block copyBlock()
-        {       
-            return new BushBlock(this);
-        }
-    }
-
-    public class BigBushBlock : Block {
-
-        public int blockPairX;
-        public int blockPairY;
-
-        bool attemptedToDelete = false;
-        public BigBushBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            isBlockTransparent = true;
-
-        }
-        public BigBushBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        {
-            this.sourceRectangle = textureSourceRectangle;
-            this.emmissiveStrength = emmissiveStrength;
-            isBlockTransparent = true;
-
-        }
-        public BigBushBlock(int ID) : base(ID)
-        {
-            this.ID = ID;
-            isBlockTransparent = true;
-
-        }
-
-        public BigBushBlock(Block b) : base(b)
-        {
-            sourceRectangle = b.sourceRectangle;
-            emmissiveStrength = b.emmissiveStrength;
-            ID = b.ID;
-            hardness = 1;
-            durability = 1;
-            isBlockTransparent = true;
-        }
-
-        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
-        {
-
-        }
-
-        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
-        {
-            if (attemptedToDelete == false)
-            {
-                attemptedToDelete = true;
-
-                if (wc.worldArray[blockPairX, blockPairY].ID == ID)
-                {
-                    wc.deleteBlock(blockPairX, blockPairY);
-                }
-
-                blockDestroyed(exposedBlocks);
-            }
-
-        }
-
-
-
-        public override void setupInitialData(WorldContext worldContext, int[,] worldArray, (int x, int y) blockLocation)
-        {
-            if (worldArray[blockLocation.x - 1, blockLocation.y] != ID)
-            {
-                worldArray[blockLocation.x + 1, blockLocation.y] = ID;
-                if (worldArray[blockLocation.x + 1, blockLocation.y] == ID)
-                {
-                    this.blockPairX = blockLocation.x + 1;
-                    this.blockPairY = blockLocation.y;
-                }
-
-            } else
-            {
-                
-                sourceRectangle.X += 32;
-
-                blockPairX = blockLocation.x - 1;
-                blockPairY = blockLocation.y;
-
-            }
-
-            base.setupInitialData(worldContext, worldArray, blockLocation);
-
-        }
-
-        public override void updateBlock(WorldContext wc)
-        {
-        }
-
-        
-            public override Block copyBlock()
-            {
-                return new BigBushBlock(this);
-            }
-        
-    }
-    #endregion
-
-    #region Loot Table classes
-        public class LootTable {
-        public List<List<(double percentage, IndividualLootTable)>> lootTable = new List<List<(double percentage, IndividualLootTable)>>();
-
-        public void addLootTable(List<(double percentage, IndividualLootTable individualTable)> lootTable) {
-            this.lootTable.Add(lootTable);
-        }
-
-        public List<Item> generateLoot()
-        {
-            Random r = new Random();
-            List<Item> generatedItems = new List<Item>();
-            for (int i = 0; i < lootTable.Count; i++)
-            {
-                double cummulativePercentage = 0;
-                for (int l = 0; l < lootTable[i].Count; l++)
-                {
-                    cummulativePercentage += lootTable[i][l].percentage;
-                    if (r.NextDouble() * 100 < cummulativePercentage)
-                    {
-                        //This loot table was chosen:
-                        foreach (Item item in lootTable[i][l].Item2.generateLootFromTable())
-                        {
-                            generatedItems.Add(item);
-                        }
-                        break;
-                    }
-                }
-            }
-
-            return generatedItems;
-        }
-    }
-    public class IndividualLootTable {
-        public List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)> lootTable = new List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)>();
-
-        public IndividualLootTable(List<(double percentageOfItem, int minItemCount, int maxItemCount, Item item)> lootTable) {
-            this.lootTable = lootTable;
-        }
-
-        public List<Item> generateLootFromTable() {
-            List<Item> generatedLoot = new List<Item>();
-            Random r = new Random();
-            foreach ((double percentage, int minItemCount, int maxItemCount, Item item) in lootTable)
-            {
-                //Determine if the item should be added to the chest
-                if (r.Next(100) < percentage)
-                {
-                    //Pick the amount:
-                    int itemCount = r.Next(minItemCount, maxItemCount + 1);
-                    item.currentStackSize = itemCount;
-
-                    generatedLoot.Add(item);
-                }
-            }
-
-            return generatedLoot;
-        }
-    }
-    #endregion
-    
-    #region Evolutions
-    public class Evolution
-    {
-        public Entity owner;
-        public EvolutionTree tree;
-
-        public int iconSourceY;
-
-        public int treeLayer;
-        public int indexWithinLayer;
-
-        public bool isEvolutionActive = false;
-        
-        public bool canBeActivated = false;
-
-        public List<(ExperienceField field, double cost)> evolutionCost = new List<(ExperienceField field, double cost)>();
-        //Just defines some functions or variable changes
-        public Evolution(EvolutionTree tree, int treeLayer, int indexWithinLayer)
-        {
-            this.owner = tree.owner;
-            this.treeLayer = treeLayer;
-            this.indexWithinLayer = indexWithinLayer;
-            this.tree = tree;
-        }
-
-        public void requestActivation() {
-            if (tree != null) {
-                tree.activateEvolution(treeLayer, indexWithinLayer);
-            }
-        }
-
-        public virtual void onAppliedToEntity() {
-            isEvolutionActive = true;
-            //Add whatever action listeers that the evolution needs
-        }
-
-        public virtual void onRemovedFromEntity() {
-        }
-    }
-
-    public class EvolutionTreeLayer {
-        //A single layer of the evolution tree. The prerequisite evolutions must come from the previous layer, and there can be multiple
-        public List<(Evolution evolution, List<int> prerequisiteEvolutions)> evolutionLayer;
-
-        public EvolutionTreeLayer() {
-            evolutionLayer = new List<(Evolution evolution, List<int>)>();
-        }
-    }
-
-    public class EvolutionTree {
-        //A class that contains a structured list of evolutions and their prerequesits.
-        public Entity owner;
-        //Not sure how to contain a tree
-        public List<EvolutionTreeLayer> evolutionTree = new List<EvolutionTreeLayer>();
-        List<Evolution> activeEvolutions = new List<Evolution>();
-        Dictionary<ExperienceField, double> entityExperience = new Dictionary<ExperienceField, double>();
-
-        public EvolutionTree(Entity treeOwner) {
-            owner = treeOwner;
-
-            entityExperience.Add(ExperienceField.Knowledge, 0);
-            entityExperience.Add(ExperienceField.Durability, 0);
-            entityExperience.Add(ExperienceField.Maneuverability, 0);
-            entityExperience.Add(ExperienceField.Damage, 0);
-        }
-
-        public Evolution getEvolution(Type evolutionTpe) {
-
-            for (int x = 0; x < evolutionTree.Count; x++)
-            {
-                for (int y = 0; y < evolutionTree[x].evolutionLayer.Count; y++)
-                {
-                    if (evolutionTpe.IsInstanceOfType(evolutionTree[x].evolutionLayer[y].evolution)) {
-                        return evolutionTree[x].evolutionLayer[y].evolution;
-                    }
-                }
-            }
-
-            return null;
-        }
-        public void addEvolutionTreeLayer(EvolutionTreeLayer e) {
-            if (evolutionTree.Count == 0) {
-                for(int i = 0; i < e.evolutionLayer.Count; i++)
-                {
-                    e.evolutionLayer[i].evolution.canBeActivated = true;
-                }
-            }
-            evolutionTree.Add(e);
-            
-        }
-
-        public void activateEvolution(int treeLayer, int indexWithinLayer)
-        {
-            if (treeLayer >= 0 && treeLayer < evolutionTree.Count) {
-                if (canEvolutionBeActivated(treeLayer, indexWithinLayer)) {
-                    evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution.onAppliedToEntity();
-                    activeEvolutions.Add(evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution);
-
-                    //Reduce the entities experience based on the costs of the evolution
-                    
-                    List<(ExperienceField field, double cost)> cost = evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution.evolutionCost;
-                    for (int i = 0; i < cost.Count; i++)
-                    {
-                        entityExperience[cost[i].field] -= cost[i].cost;
-
-                    }
-
-                    owner.worldContext.engineController.evolutionController.updateExperienceCounters();
-
-                    //Check up the tree to see if any evolutions can now be activated and update them corrospondingly:
-                    recalculateAvailableEvolutions();
-
-                }
-            }
-        }
-
-        public void recalculateAvailableEvolutions() {
-            for (int x = 0; x < evolutionTree.Count; x++) {
-                for (int y = 0; y < evolutionTree[x].evolutionLayer.Count; y++) {
-                    int evolutionTreeLayer = evolutionTree[x].evolutionLayer[y].evolution.treeLayer;
-                    int evolutionIndexWithinLayer = evolutionTree[x].evolutionLayer[y].evolution.indexWithinLayer;
-                    evolutionTree[x].evolutionLayer[y].evolution.canBeActivated = canEvolutionBeActivated(evolutionTreeLayer, evolutionIndexWithinLayer);
-                }
-            }
-        }
-
-        public bool canEvolutionBeActivated(int treeLayer, int indexWithinLayer)
-        {
-            bool allPrerequisitesAreActive = true;
-            if (treeLayer > 0)
-            {
-                foreach (int index in evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].prerequisiteEvolutions)
-                {
-                    if (!evolutionTree[treeLayer - 1].evolutionLayer[index].evolution.isEvolutionActive)
-                    {
-                        allPrerequisitesAreActive = false;
-                        break;
-                    }
-                }
-            }
-
-            bool canPayCost = true;
-            
-            List<(ExperienceField field, double cost)> cost = evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution.evolutionCost;
-            for (int i = 0; i < cost.Count; i++)
-            {
-                if (entityExperience[cost[i].field] < cost[i].cost)
-                {
-                    canPayCost = false;
-                    break;
-                }
-            }
-
-            bool canEvolutionBeActivated = false;
-            if (allPrerequisitesAreActive && canPayCost && !activeEvolutions.Contains(evolutionTree[treeLayer].evolutionLayer[indexWithinLayer].evolution))
-            {
-                canEvolutionBeActivated = true;
-            }
-            return canEvolutionBeActivated;
-        }
-        public void addExperience(ExperienceField field, double experienceGain) {
-            entityExperience[field] += experienceGain;
-            owner.worldContext.engineController.evolutionController.updateExperienceCounters();
-        }
-
-        public double getExperience(ExperienceField field) {
-            return entityExperience[field];
-        }
-    }
-
-    public class JumpEvolution : Evolution 
-    {
-
-        double jumpIncrease;
-        public JumpEvolution(EvolutionTree tree, int treeLayer, int indexWithinLayer) : base(tree, treeLayer, indexWithinLayer) {
-            iconSourceY = 16;
-            evolutionCost.Add((ExperienceField.Maneuverability, 10));
-        }
-
-
-
-        public override void onAppliedToEntity()
-        {
-            jumpIncrease = owner.baseJumpAcceleration;
-            owner.baseJumpAcceleration += jumpIncrease;
-            base.onAppliedToEntity();
-        }
-
-        public override void onRemovedFromEntity()
-        {
-            owner.baseJumpAcceleration -= jumpIncrease;
-            jumpIncrease = 0;
-            base.onRemovedFromEntity();
-        }
-    }
-
-    public class DoubleJumpEvolution : Evolution, IEntityActionListener {
-        public double jumpWaitTime;
-        public double maxJumpWaitTime = 0.4f;
-        public bool hasSetWaitTimeOnce = false;
-        public bool hasDoubleJumped = false;
-
-        public double jumpAcceleration;
-        public DoubleJumpEvolution(EvolutionTree tree, int treeLayer, int indexWithinLayer) : base(tree, treeLayer, indexWithinLayer) {
-            iconSourceY = 32;
-            evolutionCost.Add((ExperienceField.Maneuverability, 15));
-        }
-
-        public override void onAppliedToEntity()
-        {
-            owner.inputListeners.Add(this);
-            //Turn off the jump Evolution from before. Eg. Replace it:
-            JumpEvolution j = (JumpEvolution)tree.getEvolution(typeof(JumpEvolution));
-            if (j != null) {
-                if (j.isEvolutionActive) {
-                    j.onRemovedFromEntity();
-                }
-            }
-            base.onAppliedToEntity();
-        }
-
-        public override void onRemovedFromEntity()
-        {
-            owner.inputListeners.Remove(this);
-            base.onRemovedFromEntity();
-        }
-
-        public void onInput(double elapsedTime) {
-           
-            if (jumpWaitTime > 0)
-            {
-                jumpWaitTime -= elapsedTime;
-            }
-
-            jumpAcceleration = owner.jumpAcceleration;
-
-            if (!owner.isOnGround)
-            {
-                if (hasSetWaitTimeOnce)
-                {
-                    if (jumpWaitTime <= 0)
-                    {
-                        if ((Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space)) && !hasDoubleJumped)
-                        {
-                            hasDoubleJumped = true;
-                            if (owner.velocityY < 0)
-                            {
-                                owner.velocityY = 0;
-                            }
-                            owner.accelerationY += jumpAcceleration / elapsedTime;
-                        }
-                    }
-                }
-                else
-                {
-                    jumpWaitTime = maxJumpWaitTime;
-                    hasSetWaitTimeOnce = true;
-                }
-            }
-            else if (hasSetWaitTimeOnce || hasDoubleJumped)
-            {
-                hasSetWaitTimeOnce = false;
-                hasDoubleJumped = false;
-            }
-        }
-    }
-    #endregion
-
-    #region Crafting Dictionaries
-    public class CraftingManager {
-        //The manager contains the player's base dictionary, and when opening an inventory it searches all nearby blocks for blocks with crafting dictionaries and adds them to a list if that type is not already present
-
-        //The manager also controls the visibility of the crafting items in a set range of options that scroll.
-        public WorldContext worldContext;
-
-        const int numberOfVisibleRecipes = 4;
-
-        const int pixelsBetweenElements = 5;
-
-        List<CraftItemButton> craftableRecipes = new List<CraftItemButton>();
-
-        public int scrollValueWhenInventoryWasOpened = 0;
-
-        public int x = 10;
-        public int y = 500;
-
-        public bool showCraftingSystem = false;
-
-        List<CraftingDictionary> dictionaries = new List<CraftingDictionary>();
-        public CraftingManager(WorldContext worldContext) {
-            this.worldContext = worldContext;
-        }
-
-        public void inventoryWasOpened() {
-            scrollValueWhenInventoryWasOpened = Mouse.GetState().ScrollWheelValue / 120;
-            showCraftingSystem = true;
-            //Find all of the nearby crafting dictionaries:
-            
-            dictionaries.Add(worldContext.player.craftingDictionary);
-           
-        }
-
-        public void inventoryWasClosed() {
-            showCraftingSystem = false;
-            dictionaries.Clear();
-        }
-        public void managerUpdate() {
-            if (showCraftingSystem)
-            {
-                //Reset and update them all
-                for (int i = 0; i < dictionaries.Count; i++)
-                {
-                    dictionaries[i].resetCraftingRecipes();
-                    dictionaries[i].updateCraftingRecipes(worldContext.player);
-                }
-
-                int indexValue = (Mouse.GetState().ScrollWheelValue / 120) - scrollValueWhenInventoryWasOpened;
-
-                for (int i = 0; i < craftableRecipes.Count; i++)
-                {
-                    craftableRecipes[i].isUIElementActive = false;
-                    craftableRecipes[i].background.isUIElementActive = false;
-                }
-
-                for (int i = indexValue; i < craftableRecipes.Count && i < indexValue + numberOfVisibleRecipes; i++)
-                {
-                    if (i >= 0)
-                    {
-                        craftableRecipes[i].drawRectangle.Y = (int)(((craftableRecipes[i].background.drawRectangle.Height + pixelsBetweenElements) * (i - indexValue)) + y + craftableRecipes[i].y);
-                        craftableRecipes[i].drawRectangle.X = x + craftableRecipes[i].x;
-
-                        craftableRecipes[i].isUIElementActive = true;
-                        craftableRecipes[i].background.isUIElementActive = true;
-                    }
-                }
-
-                craftableRecipes.Clear();
-            }
-        }
-
-        public void addRecipeButton(CraftItemButton button) {
-            if (!craftableRecipes.Contains(button)) {
-                craftableRecipes.Add(button);
-            }
-        }
-
-        public void reduceItemQuantity(Item item, int quantity) {
-            IInventory inventory = worldContext.player;
-
-            
-            Item itemInInventory = null;
-            int indexX;
-            int indexY;
-
-            (itemInInventory, indexX, indexY) = inventory.findItemInInventory(item);
-
-
-            while (quantity > 0 && itemInInventory != null)
-            {
-                (itemInInventory, indexX, indexY) = inventory.findItemInInventory(item);
-
-                if (itemInInventory != null)
-                {
-                    if (quantity <= itemInInventory.currentStackSize)
-                    {
-                        itemInInventory.currentStackSize -= quantity;
-                        quantity = 0;
-                    }
-                    else
-                    {
-                        quantity -= itemInInventory.currentStackSize;
-                        itemInInventory.currentStackSize = 0;
-                    }
-
-                    if (itemInInventory.currentStackSize <= 0) {
-                        inventory.inventory[indexX, indexY].setItem(null);
-                    }
-                }
-            }
-        }
-    }
-    public class CraftingDictionary {
-        /*
-         A dictionary of craftable options that can be parented in different child classes for crafting stations
-
-         The dictionary is a controller of crafting recipes, passing in an inventory, it enables UI elements th
-         at pertain to a crafting recipe
-        
-         Contains a list of:
-         InteractiveUI crafting button,
-         List of (Item, recipe quantity, inventory quantity) recipe materials
-         */
-
-
-        public CraftingManager manager;
-        public List<CraftingRecipe> craftingRecipes = new List<CraftingRecipe>();
-        public CraftingDictionary(CraftingManager manager) {
-            this.manager = manager;
-        }
-        public void updateCraftingRecipes(IInventory inventory) {
-            //For each item within the inventory, loop through the crafting recipe list and add the ingredient quantity to any relevant recipe
-            for (int y = 0; y < inventory.inventory.GetLength(1); y++) {
-                for (int x = 0; x < inventory.inventory.GetLength(0); x++) {
-                    if (inventory.inventory[x, y].item != null) {
-                        for (int r = 0; r < craftingRecipes.Count; r++)
-                        {
-                            for (int i = 0; i < craftingRecipes[r].ingredientList.Count; i++)
-                            {
-                                if (craftingRecipes[r].ingredientList[i].ingredient.isItemIdentical(inventory.inventory[x, y].item))
-                                {
-                                    craftingRecipes[r].ingredientList[i].addInventoryQuantity(inventory.inventory[x, y].item.currentStackSize);
-                                }
-                            }
-
-                        }
-                    }
-                }
-            }
-
-            //Then, check each crafting recipe and see if it is craftable given the items in the inventory
-            for (int i = 0; i < craftingRecipes.Count; i++) {
-                craftingRecipes[i].canRecipeBeCrafted();
-            }
-            //This could almost definitely be more optimized, but for now this seems logical
-        }
-
-        public void resetCraftingRecipes() {
-            for (int i = 0; i < craftingRecipes.Count; i++) {
-                for (int y = 0; y < craftingRecipes[i].ingredientList.Count; y++) {
-                    craftingRecipes[i].ingredientList[y].setInventoryQuantity(0);
-                }
-            }
-        }
-
-    }
-    public class CraftingRecipe {
-        public CraftingManager manager;
-        public Item recipeOutput;
-        public CraftItemButton craftButton;
-        public List<RecipeIngredient> ingredientList;
-
-        public bool canBeCrafted = false;
-
-        public CraftingRecipe(Item recipeResult, int resultQuantity, List<RecipeIngredient> ingredientList, CraftingManager manager){
-            recipeOutput = recipeResult;
-            if (resultQuantity <= recipeOutput.maxStackSize)
-            {
-                recipeOutput.currentStackSize = resultQuantity;
-            } else {
-                recipeOutput.currentStackSize = recipeOutput.maxStackSize;
-            }
-            this.ingredientList = ingredientList;
-            this.manager = manager;
-
-            craftButton = new CraftItemButton(this);
-        }
-
-        public void canRecipeBeCrafted() {
-            canBeCrafted = true;
-
-            for (int i = 0; i < ingredientList.Count; i++) {
-                if (!ingredientList[i].doesRecipeHaveEnough()) {
-                    canBeCrafted = false;
-                }
-            }
-
-            if (canBeCrafted)
-            {
-                manager.addRecipeButton(craftButton);
-            }
-                craftButton.isUIElementActive = false;
-        }
-
-        public void itemWasCrafted() {
-            //Put the logic in here for reducing the ingredients within the users inventory
-            for (int i = 0; i < ingredientList.Count; i++) {
-                manager.reduceItemQuantity(ingredientList[i].ingredient, ingredientList[i].requiredQuantity);
-            }
-        }
-    }
-    public class RecipeIngredient {
-        public Item ingredient;
-        public int requiredQuantity;
-        public int inventoryQuantity;
-
-        public RecipeIngredient(Item ingredient, int requiredQuantity) {
-            this.ingredient = ingredient;
-            this.requiredQuantity = requiredQuantity;
-        }
-
-        public void setInventoryQuantity(int inventoryQuantity) {
-            this.inventoryQuantity = inventoryQuantity;
-        }
-
-        public void addInventoryQuantity(int newQuantity) {
-            inventoryQuantity += newQuantity;
-        }
-
-        public bool doesRecipeHaveEnough() {
-            return inventoryQuantity >= requiredQuantity;
-        }
-        
-    }
-
-    public class PlayerCraftingDictionary : CraftingDictionary {
-        public PlayerCraftingDictionary(CraftingManager manager) : base(manager) {
-          
-
-            CraftingRecipe ironIngot = new CraftingRecipe(new IngotItem((int)oreIDs.iron, manager.worldContext.animationController, manager.worldContext.player), 1, new List<RecipeIngredient>() { new RecipeIngredient(new OreItem((int)oreIDs.iron, manager.worldContext.animationController, manager.worldContext.player), 3)}, manager);
-
-            craftingRecipes.Add(ironIngot);
-
-            CraftingRecipe swordRecipe = new CraftingRecipe(new Weapon(manager.worldContext.animationController, manager.worldContext.player), 1, new List<RecipeIngredient>() { new RecipeIngredient(new IngotItem((int)oreIDs.iron, manager.worldContext.animationController, manager.worldContext.player), 10) }, manager);
-            craftingRecipes.Add(swordRecipe);
-
-            CraftingRecipe woodenBackgroundRecipe = new CraftingRecipe(recipeResult : new BackgroundBlockItem((int)backgroundBlockIDs.woodenPlanks, manager.worldContext.animationController, manager.worldContext.player), 5, new List<RecipeIngredient>() { new RecipeIngredient(new BlockItem((int)blockIDs.treeTrunk, manager.worldContext.animationController, manager.worldContext.player), 1) }, manager);
-            craftingRecipes.Add(woodenBackgroundRecipe);
-        }
-    }
-    #endregion
     #region Interfaces
     public interface ICollider
     {
@@ -11314,8 +7384,8 @@ namespace PixelMidpointDisplacement
     }
 
     public interface IEmissiveBlock {
-        public int x { get; set; }
-        public int y { get; set; }
+        public double x { get; set; }
+        public double y { get; set; }
 
         public Vector3 lightColor { get; set; }
         public float luminosity { get; set; }
