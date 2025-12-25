@@ -38,6 +38,7 @@ namespace PixelMidpointDisplacement {
         public UIController UIController;
         public EvolutionUIController evolutionController;
         public CraftingManager craftingManager;
+        public AnimationController animationController;
 
         public WorldContext worldContext;
 
@@ -45,12 +46,14 @@ namespace PixelMidpointDisplacement {
         public void initialiseEngines(WorldContext wc)
         {
             worldContext = wc;
+            animationController = new AnimationController();
+            wc.animationController = animationController;
             lightingSystem = new LightingSystem(wc);
             physicsEngine = new PhysicsEngine(wc);
             collisionController = new CollisionController();
             entityController = new EntityController();
             spriteController = new SpriteController();
-            UIController = new UIController();
+            UIController = new UIController(wc);
             evolutionController = new EvolutionUIController(wc);
             craftingManager = new CraftingManager(wc);
         }
@@ -522,10 +525,12 @@ namespace PixelMidpointDisplacement {
         public List<UILine> UILines = new List<UILine>();
         public List<UIElement> inventoryBackgrounds = new List<UIElement>();
         public List<UIItem> inventorySlots = new List<UIItem>();
+        public EngineController engineController;
 
         public bool wasElementAdded = false;
-        public UIController()
+        public UIController(WorldContext worldContext)
         {
+            this.engineController = worldContext.engineController;
             resetMainMenuUI();
         }
         private void resetMainMenuUI()
@@ -535,7 +540,7 @@ namespace PixelMidpointDisplacement {
             InteractiveUI.Clear();
             MainMenuTitle title = new MainMenuTitle();
             MainMenuWorldGenText generationText = new MainMenuWorldGenText();
-            MainMenuStartButton start = new MainMenuStartButton(generationText);
+            MainMenuStartButton start = new MainMenuStartButton(engineController.animationController, generationText);
             UIElements.Add((0, title));
             UIElements.Add((0, start));
             UIElements.Add((0, generationText));

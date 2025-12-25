@@ -82,14 +82,13 @@ namespace PixelMidpointDisplacement {
 
     public class SpriteAnimator
     {
-        public Texture2D spriteSheet; //The sprite sheet to take pictures from
         public Vector2 sourceOffset; //The initial offset to shift over all the draws
         double maxDuration; //The entire duration of the animation
         double duration; //The current duration
         Vector2 frameOffset; //The offset each frame. The y value will be the offset for different animations (from the yOffset from the dictionary)
         Vector2 sourceDimensions; //The dimensions of the source
         int frame;
-        public Rectangle sourceRect; //The rectangle to draw from as the source rect. This takes the sourceDimensions, and the frameOffset * frame to get the location to draw from.
+         //The rectangle to draw from as the source rect. This takes the sourceDimensions, and the frameOffset * frame to get the location to draw from.
         public Dictionary<String, (int frameCount, int yOffset)> animationDictionary; //The string indicates the animation, and the int value indicates the y offset (an index value) to get to said animation
         int currentAnimationFrameCount;
         int currentAnimationYOffset;
@@ -99,19 +98,18 @@ namespace PixelMidpointDisplacement {
         public bool isAnimationActive;
 
         public AnimationController animationController;
-        public Entity owner; //Substitute with something else later on.
+        public DrawnClass owner; //Substitute with something else later on.
 
-        public SpriteAnimator(AnimationController animationController, Vector2 constantOffset, Vector2 frameOffset, Vector2 sourceDimensions, Rectangle animationlessSourceRect, Entity owner)
+        public SpriteAnimator(AnimationController animationController, Vector2 constantOffset, Vector2 frameOffset, Vector2 sourceDimensions, Rectangle animationlessSourceRect, DrawnClass owner)
         {
             this.owner = owner;
-            this.spriteSheet = owner.spriteSheet;
             this.animationController = animationController;
             this.sourceOffset = constantOffset;
             this.frameOffset = frameOffset;
 
             this.sourceDimensions = sourceDimensions;
             animationlessSourceRectangle = animationlessSourceRect;
-            sourceRect = animationlessSourceRectangle;
+            owner.sourceRectangle = animationlessSourceRectangle;
         }
 
         public void startAnimation(double duration, string animation)
@@ -136,7 +134,7 @@ namespace PixelMidpointDisplacement {
                 currentAnimationYOffset = 0;
                 currentDurationPerFrame = 0;
                 frame = 0;
-                sourceRect = animationlessSourceRectangle;
+                owner.sourceRectangle = animationlessSourceRectangle;
                 animationController.removeSpriteAnimator(this);
 
                 return;
@@ -144,8 +142,8 @@ namespace PixelMidpointDisplacement {
 
             frame = (int)Math.Floor(duration / currentDurationPerFrame);
 
-            sourceRect = new Rectangle((int)(frame * frameOffset.X), (int)(currentAnimationYOffset * frameOffset.Y), (int)sourceDimensions.X, (int)sourceDimensions.Y);
-
+            owner.sourceRectangle = new Rectangle((int)(frame * frameOffset.X), (int)(currentAnimationYOffset * frameOffset.Y), (int)sourceDimensions.X, (int)sourceDimensions.Y);
+            
         }
     }
 }

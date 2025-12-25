@@ -25,14 +25,12 @@ namespace PixelMidpointDisplacement {
      *  
      * ========================================
      */
-    public class Item
+    public class Item : DrawnClass
     {
         //Two ways of going about dropping and picking items up. One: Make each item a physics object, and activate the physics when they are dropped.Seems needlessly bulky
         //Two: Have a "dropped item" class which is itself an entity, and make it point to an Item Class. On the "input" update function of entities, if the player is within
         //A set range, apply a force towards the player. Items float towards the player, and when they get within a smaller range, they add the item to the players inventory
         //and destroy the "dropped item" class
-        public Rectangle sourceRectangle { get; set; }
-        public int spriteSheetID { get; set; }
 
         public string id { get; set; }
 
@@ -45,15 +43,11 @@ namespace PixelMidpointDisplacement {
         public string tooltip;
         public StringRenderer tooltipRenderer;
 
-
-        public (int width, int height) drawDimensions { get; set; }
         public Animator itemAnimator { get; set; }
         public AnimationController animationController { get; set; }
         public Vector2 origin { get; set; }
         public int verticalDirection { get; set; }
         public double constantRotationOffset { get; set; }
-
-        public SpriteEffects spriteEffect;
 
         public int colliderWidth { get; set; }
         public int colliderHeight { get; set; }
@@ -72,7 +66,7 @@ namespace PixelMidpointDisplacement {
 
             currentStackSize = 1;
 
-            spriteEffect = SpriteEffects.None;
+            drawEffect = SpriteEffects.None;
 
             tooltipRenderer = new StringRenderer(Scene.Game, UIAlignOffset.TopLeft, 11, true);
 
@@ -250,7 +244,7 @@ namespace PixelMidpointDisplacement {
             rotationOrigin = new Vector2(-2, 18f);
 
             sourceRectangle = new Rectangle(0, 0, 16, 16);
-            drawDimensions = (48, 48);
+            drawRectangle = new Rectangle(0,0, 48, 48);
 
 
 
@@ -282,7 +276,7 @@ namespace PixelMidpointDisplacement {
                 isActive = true;
                 if (!swungDownwardsLastIteration)
                 {
-                    spriteEffect = SpriteEffects.None;
+                    drawEffect = SpriteEffects.None;
                     verticalDirection = 1;
                     origin = new Vector2(-2f, 18f);
                     x = (owner.x - origin.X);
@@ -298,7 +292,7 @@ namespace PixelMidpointDisplacement {
                 else
                 {
 
-                    spriteEffect = SpriteEffects.FlipVertically;
+                    drawEffect = SpriteEffects.FlipVertically;
 
                     verticalDirection = -1;
                     x = (owner.x - origin.X);
@@ -389,7 +383,7 @@ namespace PixelMidpointDisplacement {
 
 
             sourceRectangle = new Rectangle(32, 0, 16, 16);
-            drawDimensions = (40, 40);
+            drawRectangle = new Rectangle (0,0,40, 40);
 
 
             maxStackSize = 1;
@@ -482,7 +476,7 @@ namespace PixelMidpointDisplacement {
 
             sourceRectangle = new Rectangle(0, (blockID - 1) * 8, 8, 8);
 
-            drawDimensions = (16, 16); //J
+            drawRectangle = new Rectangle(0,0,16, 16); //J
 
             origin = new Vector2(-2, 18f); //J
             constantRotationOffset = 0; //J
@@ -564,7 +558,7 @@ namespace PixelMidpointDisplacement {
             spriteSheetID = (int)spriteSheetIDs.oreSpriteSheet;
 
 
-            drawDimensions = (24, 24);
+            drawRectangle = new Rectangle(0,0,24, 24);
 
             origin = new Vector2(-2, 18f);
 
@@ -622,7 +616,7 @@ namespace PixelMidpointDisplacement {
             spriteSheetID = (int)spriteSheetIDs.ingotSpriteSheet;
 
 
-            drawDimensions = (24, 24);
+            drawRectangle = new Rectangle(0,0,24, 24);
 
             origin = new Vector2(-2, 18f);
 
@@ -683,7 +677,7 @@ namespace PixelMidpointDisplacement {
 
             sourceRectangle = new Rectangle(0, (blockID) * 32, 32, 32);
 
-            drawDimensions = (16, 16);
+            drawRectangle = new Rectangle(0,0,16, 16);
 
             origin = new Vector2(-2, 18f);
 
@@ -756,82 +750,6 @@ namespace PixelMidpointDisplacement {
         }
     }
 
-    public class DroppedItem : Entity
-    {
-        public Item item { get; set; }
-        float pickupAcceleration = 50f;
-
-        public double pickupDelay;
-        double pickupMoveDistance = 96f;
-        double pickupDistance = 48f;
-
-        public DroppedItem(WorldContext wc, Item item, (double x, double y) location, Vector2 initialVelocity) : base(wc)
-        {
-            //Set the texture from the item's spritesheet
-
-
-            spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, Vector2.Zero, new Vector2(item.sourceRectangle.Width, item.sourceRectangle.Height), item.sourceRectangle, this);
-            setSpriteTexture(wc.engineController.spriteController.spriteSheetList[item.spriteSheetID]);
-            drawWidth = item.drawDimensions.width / (double)wc.pixelsPerBlock;
-            drawHeight = item.drawDimensions.height / (double)wc.pixelsPerBlock;
-            width = drawWidth;
-            height = drawHeight;
-
-            this.item = item;
-
-            collider = new Rectangle(0, 0, (int)(width * wc.pixelsPerBlock), (int)(height * wc.pixelsPerBlock));
-
-            kX = 5;
-            kY = 0.01;
-
-            minVelocityX = 0.25;
-            minVelocityY = 0.01;
-
-            velocityX = initialVelocity.X;
-            velocityY = initialVelocity.Y;
-
-            x = location.x;
-            y = location.y;
-
-            wc.engineController.entityController.addEntity(this);
-        }
-
-        public override void onBlockCollision(Vector2 collisionNormal, WorldContext worldContext, int blockX, int blockY)
-        {
-            //Do nothing, don't take fall damage or anything of the sorts
-        }
-
-        public override void inputUpdate(double elapsedTime)
-        {
-            if (pickupDelay > 0)
-            {
-                pickupDelay -= elapsedTime;
-            }
-            else
-            {
-                double distance = Math.Pow(Math.Pow((worldContext.player.y + worldContext.player.height * worldContext.pixelsPerBlock / 2.0) - (y + drawHeight * worldContext.pixelsPerBlock / 2.0f), 2) + Math.Pow((worldContext.player.x + worldContext.player.width * worldContext.pixelsPerBlock / 2.0) - (x + drawWidth * worldContext.pixelsPerBlock / 2.0f), 2), 0.5);
-                if (distance < pickupMoveDistance)
-                {
-
-                    accelerationX = pickupAcceleration * (((worldContext.player.x + worldContext.player.width * worldContext.pixelsPerBlock / 2.0) - (x + drawWidth * worldContext.pixelsPerBlock / 2.0f)) / distance);
-                    accelerationY = -pickupAcceleration * (((worldContext.player.y + worldContext.player.height * worldContext.pixelsPerBlock / 2.0) - (y + drawHeight * worldContext.pixelsPerBlock / 2.0f)) / distance);
-
-                }
-                if (distance < pickupDistance)
-                {
-                    //Pickup action
-                    //Now I just need to make an inventory system and sorting
-
-                    if (worldContext.player.addItemToInventory(item))
-                    {
-                        item.onPickup(worldContext.player);
-                        worldContext.engineController.entityController.removeEntity(this);
-                    }
-                }
-            }
-        }
-    }
-
     /*
      * ========================================
      * 
@@ -852,7 +770,7 @@ namespace PixelMidpointDisplacement {
             origin = new Vector2(-6f, -6f);
 
             sourceRectangle = new Rectangle(16, 0, 16, 16);
-            drawDimensions = (48, 48);
+            drawRectangle = new Rectangle(0,0,48, 48);
 
             maxStackSize = 1;
 
@@ -912,7 +830,7 @@ namespace PixelMidpointDisplacement {
 
             spriteSheetID = (int)spriteSheetIDs.armour;
             sourceRectangle = new Rectangle(0, 0, 16, 16);
-            drawDimensions = (48, 48);
+            drawRectangle = new Rectangle(0,0,48, 48);
         }
 
 
@@ -946,7 +864,7 @@ namespace PixelMidpointDisplacement {
         {
             spriteSheetID = (int)spriteSheetIDs.accessories;
             sourceRectangle = new Rectangle(0, 0, 16, 16);
-            drawDimensions = (32, 32);
+            drawRectangle = new Rectangle(0,0,32, 32);
 
             tooltip =
                 "<h2>Amulet of fall negation</h2>\n\n" +
@@ -987,7 +905,7 @@ namespace PixelMidpointDisplacement {
         {
             spriteSheetID = (int)spriteSheetIDs.accessories;
             sourceRectangle = new Rectangle(0, 0, 16, 16);
-            drawDimensions = (32, 32);
+            drawRectangle = new Rectangle(0,0,32, 32);
 
 
             tooltip =
