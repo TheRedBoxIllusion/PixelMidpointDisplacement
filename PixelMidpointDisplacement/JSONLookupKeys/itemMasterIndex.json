@@ -1,7 +1,0 @@
-{
-  //"id" : "file path"
-
-  "block_item": "ClassData/Items/block_item.json",
-  "helmet": "ClassData/Items/helmet.json",
-  "amulet_of_fall_damage" :  "ClassData/Items/amulet_of_fall_damage.json"
-}
