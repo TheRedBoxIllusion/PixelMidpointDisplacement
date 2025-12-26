@@ -1054,8 +1054,7 @@ namespace PixelMidpointDisplacement {
 
         HealthBar healthBar = new HealthBar();
 
-        RespawnScreen rs;
-        RespawnButton rb;
+        public RespawnUI respawnUI;
 
         public PlayerUIController(Player player) {
             this.owner = player;
@@ -1065,10 +1064,8 @@ namespace PixelMidpointDisplacement {
             wc.engineController.UIController.addUIElement(5, hbo);
             wc.engineController.UIController.addUIElement(5, healthBar);
 
-            rs = new RespawnScreen();
-            wc.engineController.UIController.addUIElement(150, rs);
-            rb = new RespawnButton(owner, rs);
-            wc.engineController.UIController.addUIElement(150, rb);
+            respawnUI = new RespawnUI(wc, owner);
+           
 
             wc.engineController.UIController.addUIElement(3, hotbar);
             wc.engineController.UIController.inventoryBackgrounds.Add(hotbar);
@@ -1076,13 +1073,12 @@ namespace PixelMidpointDisplacement {
 
         }
 
-        public void damageTaken() {
+        public void damageTaken(object source) {
             healthBar.drawRectangle.Width = (int)((owner.currentHealth / (double)owner.maxHealth) * healthBar.maxHealthDrawWidth);
 
             if (owner.currentHealth <= 0)
             {
-                rb.isUIElementActive = true;
-                rs.isUIElementActive = true;
+                respawnUI.onDeath(source);
             }
         }
 

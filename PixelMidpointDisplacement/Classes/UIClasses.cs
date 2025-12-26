@@ -1,16 +1,38 @@
-﻿using Microsoft.Xna.Framework;
+﻿using System;
+using System.IO;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
+
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
+
+using System.IO;
 using System.Linq;
-using System.Text;
+using System.Numerics;
 using System.Threading;
-using System.Threading.Tasks;
+
+
+using Vector2 = Microsoft.Xna.Framework.Vector2;
+using Vector3 = Microsoft.Xna.Framework.Vector3;
+using Vector4 = Microsoft.Xna.Framework.Vector4;
 
 namespace PixelMidpointDisplacement {
+    //Due to the complex, and often multi-component nature of ui elements, they shall be grouped by purpose, and individually defined instead of grouping into parent classes
+
+    /*
+     * ========================================
+     *  Display Enums
+     *  
+     *  THe display enums define the position, scale and anchor point of all UI elements as the screen size changes
+     *  
+     *  UIAlignOffset defines the anchor point (top left, centre)
+     *  Position defines how the position scales with screen dimensions (absolute, relative)
+     *  Scale defines how the scale changes with screen dimensions (absolute, relative)
+     * ========================================
+    */
+
     public enum UIAlignOffset
     {
         TopLeft,
@@ -27,6 +49,14 @@ namespace PixelMidpointDisplacement {
         Relative
     }
 
+    /*
+     * ========================================
+     * UI Parent Classes
+     * 
+     * UI Element is the base UI element, containing ordinary draw variables, display enums, the element's scene (when to display it) and other key things for all elements
+     * Interactive UI Element is a child of the UI element with additional functionality, including left and right click functions for buttons and other interactable features.
+     * ========================================
+    */
     public class UIElement : DrawnClass
     {
 
@@ -58,6 +88,17 @@ namespace PixelMidpointDisplacement {
         public virtual void onRightClick(Game1 game) { }
     }
 
+    /*
+     * ========================================
+     * Generalised components
+     * 
+     * UILine
+     * StringRenderer and subclasses:
+     *      - StringCharacter
+     *      - StringRendererBackground
+     *      - StringRendererBackgroundSegment
+     * ========================================
+    */
     public class UILine
     {
         public Vector2 point1;
@@ -110,683 +151,6 @@ namespace PixelMidpointDisplacement {
             {
                 rotation += MathHelper.PiOver2;
             }
-        }
-    }
-    public class MainMenuTitle : UIElement
-    {
-        public MainMenuTitle()
-        {
-            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
-            drawRectangle = new Rectangle(0, 50, 1160, 152);
-            sourceRectangle = new Rectangle(0, 0, 145, 19);
-            alignment = UIAlignOffset.Centre;
-            scaleType = Scale.Relative;
-            positionType = Position.Relative;
-
-            scene = Scene.MainMenu;
-        }
-    }
-    public class MainMenuStartButton : InteractiveUIElement
-    {
-        UIElement generateWorldText;
-        int tickCount = 0;
-
-        Timer t;
-        bool timerFinished = true;
-
-        SpriteAnimator animator;
-        public MainMenuStartButton(AnimationController ac, UIElement generateWorldText)
-        {
-            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
-            drawRectangle = new Rectangle(0, 400, 192, 66);
-            sourceRectangle = new Rectangle(0, 25, 33, 12);
-            alignment = UIAlignOffset.Centre;
-            positionType = Position.Relative;
-            scaleType = Scale.Relative;
-            tickCount = 0;
-            scene = Scene.MainMenu;
-
-            animator = new SpriteAnimator(animationController : ac, constantOffset : new Vector2(0,25), frameOffset : new Vector2(33, 25), sourceDimensions : new Vector2(33,12), new Rectangle(0, 25, 33, 12), owner : this);
-
-
-            //this.generateWorldText = generateWorldText;
-
-            animator.animationDictionary = new Dictionary<string, (int frameCount, int yOffset)>()
-            {
-                { "shine", (4,1)}
-            };
-
-
-            t = new Timer(new TimerCallback(shineAnimation));
-            t.Change(100, 0);
-        }
-
-        public void shineAnimation(object state) {
-            animator.startAnimation(1, "shine");
-            timerFinished = true;
-        }
-        public override void onLeftClick(Game1 game)
-        {
-            //generateWorldText.isUIElementActive = true;
-            if (tickCount == 0)
-            {
-                StringRenderer sr = new StringRenderer(Scene.MainMenu, UIAlignOffset.Centre, 42, false);
-                sr.setWorldContext(game.worldContext);
-                sr.setString("Generating the world");
-                sr.updateLocation(0, 350);
-
-            }
-            tickCount += 1;
-
-        }
-        public override void updateElement(double elapsedTime, Game1 game)
-        {
-            if (timerFinished)
-            {
-                Random r = new Random();
-                t.Change(r.Next(1600, 3600), 0);
-                timerFinished = false;
-            }
-
-            //If the button was pressed for 2 ticks, then generate the world. This allows the UI to update
-
-            if (tickCount > 10)
-            {
-                (int width, int height) worldDimensions = (800, 800);
-                game.worldContext.generateWorld(worldDimensions);
-                game.changeScene(Scene.Game);
-            }
-        }
-    }
-    public class MainMenuWorldGenText : UIElement
-    {
-        public MainMenuWorldGenText()
-        {
-            isUIElementActive = false;
-            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
-            drawRectangle = new Rectangle(0, 350, 576, 30);
-            sourceRectangle = new Rectangle(0, 38, 96, 5);
-            alignment = UIAlignOffset.Centre;
-            positionType = Position.Relative;
-            scaleType = Scale.Relative;
-            scene = Scene.MainMenu;
-        }
-    }
-
-    public class InventoryBackground : UIElement
-    {
-        public InventoryBackground()
-        {
-            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
-            drawRectangle = new Rectangle(0, 66, 594, 266);
-            sourceRectangle = new Rectangle(0, 32, 297, 132);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Absolute;
-            scaleType = Scale.Absolute;
-            scene = Scene.Game;
-            isUIElementActive = false;
-        }
-    }
-
-    public class EquipmentBackground : UIElement
-    {
-        public EquipmentBackground()
-        {
-            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
-            isUIElementActive = false;
-            sourceRectangle = new Rectangle(297, 0, 65, 132);
-            drawRectangle = new Rectangle(700, 66, 130, 264);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Absolute;
-            scaleType = Scale.Absolute;
-            scene = Scene.Game;
-        }
-    }
-    public class Hotbar : UIElement
-    {
-        public Hotbar()
-        {
-            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
-            drawRectangle = new Rectangle(0, 0, 594, 64);
-            sourceRectangle = new Rectangle(0, 0, 297, 32);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Absolute;
-            scaleType = Scale.Absolute;
-            scene = Scene.Game;
-        }
-    }
-    public class HotbarSelected : UIElement
-    {
-        public HotbarSelected()
-        {
-            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
-            drawRectangle = new Rectangle(0, 0, 64, 64);
-            sourceRectangle = new Rectangle(1, 165, 32, 32);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Absolute;
-            scaleType = Scale.Absolute;
-            scene = Scene.Game;
-        }
-
-        public void swapItem(int x)
-        {
-            int pixelsPerHotbarSlot = 66;
-            drawRectangle = new Rectangle(pixelsPerHotbarSlot * x, 0, 64, 64);
-        }
-    }
-
-    public class HealthBarOutline : UIElement
-    {
-        public HealthBarOutline()
-        {
-            spriteSheetID = (int)spriteSheetIDs.healthUI;
-            sourceRectangle = new Rectangle(0, 0, 145, 23);
-            drawRectangle = new Rectangle(0, 900, 290, 46);
-            alignment = UIAlignOffset.Centre;
-            positionType = Position.Relative;
-            scaleType = Scale.Relative;
-            scene = Scene.Game;
-        }
-    }
-    public class HealthBar : UIElement
-    {
-        public int maxHealthDrawWidth = 290;
-        public HealthBar()
-        {
-            spriteSheetID = (int)spriteSheetIDs.healthUI;
-            sourceRectangle = new Rectangle(0, 25, 145, 21);
-            drawRectangle = new Rectangle(0, 902, 290, 46);
-            alignment = UIAlignOffset.Centre;
-            positionType = Position.Relative;
-            scaleType = Scale.Relative;
-            scene = Scene.Game;
-        }
-    }
-
-    public class RespawnScreen : UIElement
-    {
-        public RespawnScreen()
-        {
-            spriteSheetID = (int)spriteSheetIDs.deathScreen;
-            sourceRectangle = new Rectangle(0, 0, 384, 216);
-            drawRectangle = new Rectangle(0, 0, 1920, 1080);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Absolute;
-            scaleType = Scale.Relative;
-            scene = Scene.Game;
-
-            isUIElementActive = false;
-        }
-    }
-
-    public class RespawnButton : InteractiveUIElement
-    {
-        Player player;
-        RespawnScreen rs;
-        public RespawnButton(Player owner, RespawnScreen rs)
-        {
-            spriteSheetID = (int)spriteSheetIDs.deathScreen;
-            sourceRectangle = new Rectangle(177, 74, 40, 8);
-            drawRectangle = new Rectangle(885, 370, 200, 40);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Relative;
-            scaleType = Scale.Relative;
-            scene = Scene.Game;
-            isUIElementActive = false;
-            player = owner;
-            this.rs = rs;
-        }
-
-        public override void onLeftClick(Game1 game)
-        {
-            player.respawn();
-            game.changeScene(Scene.Evolution);
-            rs.isUIElementActive = false;
-            isUIElementActive = false;
-        }
-    }
-
-    public class EndEvolutionButton : InteractiveUIElement
-    {
-
-        double mouseMovementCoefficient = 0.027;
-        public EndEvolutionButton()
-        {
-            spriteSheetID = (int)spriteSheetIDs.deathScreen;
-            sourceRectangle = new Rectangle(177, 74, 40, 12);
-            drawRectangle = new Rectangle(885, 900, 200, 60);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Relative;
-            scaleType = Scale.Relative;
-            scene = Scene.Evolution;
-            isUIElementActive = true;
-        }
-
-        public override void updateElement(double elapsedTime, Game1 game)
-        {
-            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
-            {
-                drawRectangle.X = 885 + (int)(mouseMovementCoefficient * Mouse.GetState().X);
-            }
-
-            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
-            {
-                drawRectangle.Y = 900 + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
-            }
-        }
-
-        public override void onLeftClick(Game1 game)
-        {
-            game.changeScene(Scene.Game);
-        }
-    }
-
-    public class Damage : UIElement
-    {
-        WorldContext worldContext;
-
-        double x;
-        double y;
-
-        int drawOrder;
-
-        double yIncrease = 30;
-        double maxExistingDuration = 0.5;
-        double existingDuration;
-
-        public Damage(WorldContext wc, int damageAmount, double x, double y, int drawOrder)
-        {
-
-            this.drawOrder = drawOrder;
-            drawRectangle = new Rectangle((int)x + wc.screenSpaceOffset.x, (int)y + wc.screenSpaceOffset.y, 10, 14);
-            this.x = x;
-            this.y = y;
-            existingDuration = maxExistingDuration;
-
-            sourceRectangle = new Rectangle(damageAmount * 6, 0, 5, 7);
-            worldContext = wc;
-            spriteSheetID = (int)spriteSheetIDs.pixelNumbers;
-
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Absolute;
-            scaleType = Scale.Absolute;
-            scene = Scene.Game;
-            isUIElementActive = true;
-        }
-
-        public override void updateElement(double elapsedTime, Game1 game)
-        {
-            existingDuration -= elapsedTime;
-            y -= ((yIncrease / maxExistingDuration) * elapsedTime);
-
-            drawRectangle = new Rectangle((int)x + worldContext.screenSpaceOffset.x, (int)(y + worldContext.screenSpaceOffset.y), 10, 14);
-
-            if (existingDuration <= 0)
-            {
-                worldContext.engineController.UIController.removeUIElement(drawOrder, this);
-            }
-        }
-    }
-
-    public class EvolutionStarBackground : UIElement
-    {
-
-        public double mouseMovementCoefficient;
-
-
-        int startXOffset = 1920;
-        int startYOffset = 1080;
-
-        int sourceY = 0;
-        int sourceX = 0;
-
-        public EvolutionStarBackground()
-        {
-            spriteSheetID = (int)spriteSheetIDs.evolutionBackground;
-            sourceRectangle = new Rectangle(0, 0, 960, 540);
-            drawRectangle = new Rectangle(0, 0, 1920, 1080);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Absolute;
-            scaleType = Scale.Relative;
-            scene = Scene.Evolution;
-            isUIElementActive = true;
-
-
-            mouseMovementCoefficient = 1;
-        }
-
-        public void setSourceLocation(int x, int y)
-        {
-
-            sourceY = y;
-            sourceX = x;
-        }
-
-        public void zeroStartingOffset()
-        {
-            startXOffset = 0;
-            startYOffset = 0;
-        }
-
-        public override void updateElement(double elapsedTime, Game1 game)
-        {
-            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
-            {
-                sourceRectangle.X = sourceX + (int)(startXOffset * mouseMovementCoefficient) - (int)(mouseMovementCoefficient * Mouse.GetState().X);
-            }
-
-            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
-            {
-                sourceRectangle.Y = sourceY + (int)(startYOffset * mouseMovementCoefficient) - (int)(mouseMovementCoefficient * Mouse.GetState().Y);
-            }
-        }
-    }
-
-    public class EvolutionButton : InteractiveUIElement
-    {
-        double mouseMovementCoefficient = 0.027;
-
-        const int iconWidth = 15;
-
-        const int heightBetweenLayers = 75;
-
-        int defaultX;
-        int defaultY;
-
-        const int heightOffset = 200;
-
-        public Evolution ownerEvolution;
-
-        bool isClicked = false;
-        public EvolutionButton(Evolution owner)
-        {
-            spriteSheetID = (int)spriteSheetIDs.evolutionIcons;
-            sourceRectangle = new Rectangle(0, owner.iconSourceY, 15, 15);
-            //Adjust the draw location based on the location within the tree
-            drawRectangle = new Rectangle(50, 50, 45, 45);
-            alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Relative;
-            scaleType = Scale.Relative;
-            scene = Scene.Evolution;
-            isUIElementActive = true;
-
-            ownerEvolution = owner;
-        }
-
-        public void setSourceLocation(int x, int y)
-        {
-            sourceRectangle.X = x;
-            sourceRectangle.Y = y;
-        }
-
-        public void setLocationFromTree()
-        {
-            //Set the x and y location on screen based on the tree layer
-            int evolutionsInLayer = ownerEvolution.tree.evolutionTree[ownerEvolution.treeLayer].evolutionLayer.Count;
-            defaultX = (ownerEvolution.indexWithinLayer + 1) * (defaultScreenWidth / (evolutionsInLayer + 1));
-            defaultY = defaultScreenHeight - ((ownerEvolution.treeLayer + 1) * heightBetweenLayers + heightOffset);
-        }
-
-        public override void updateElement(double elapsedTime, Game1 game)
-        {
-            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
-            {
-                drawRectangle.X = defaultX + (int)(mouseMovementCoefficient * Mouse.GetState().X);
-            }
-
-            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
-            {
-                drawRectangle.Y = defaultY + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
-            }
-
-            if (ownerEvolution.isEvolutionActive)
-            {
-                sourceRectangle.X = 3 * iconWidth;
-            }
-            else if (!ownerEvolution.canBeActivated)
-            {
-                if (isClicked)
-                {
-                    sourceRectangle.X = iconWidth;
-                }
-                else
-                {
-                    sourceRectangle.X = 0;
-                }
-            }
-            else
-            {
-                sourceRectangle.X = 2 * iconWidth;
-            }
-
-            isClicked = false;
-        }
-
-        public override void onLeftClick(Game1 game)
-        {
-            isClicked = true;
-            ownerEvolution.requestActivation();
-        }
-    }
-
-    public class EvolutionDependencyLine : UILine
-    {
-        EvolutionButton evolution;
-        EvolutionButton dependencyEvolution;
-        public EvolutionDependencyLine(EvolutionButton evolution, EvolutionButton dependency, Vector2 point1, Vector2 point2) : base(point1, point2)
-        {
-            this.evolution = evolution;
-            dependencyEvolution = dependency;
-
-            scene = Scene.Evolution;
-
-            point1 = new Vector2(evolution.drawRectangle.X + evolution.drawRectangle.Width / 2, evolution.drawRectangle.Y + evolution.drawRectangle.Height);
-            point2 = new Vector2(dependencyEvolution.drawRectangle.X + dependencyEvolution.drawRectangle.Width / 2, dependencyEvolution.drawRectangle.Y + dependencyEvolution.drawRectangle.Height);
-
-        }
-
-        public override void updateLine()
-        {
-
-            point1 = new Vector2(evolution.drawRectangle.X + evolution.drawRectangle.Width / 2, evolution.drawRectangle.Y + evolution.drawRectangle.Height);
-
-            point2 = new Vector2(dependencyEvolution.drawRectangle.X + dependencyEvolution.drawRectangle.Width / 2, dependencyEvolution.drawRectangle.Y);
-
-            drawRectangle.X = (int)point1.X;
-            drawRectangle.Y = (int)point1.Y;
-
-
-            if (dependencyEvolution.ownerEvolution.isEvolutionActive)
-            {
-                drawColor = Color.White;
-            }
-            else
-            {
-                drawColor = new Color(50, 50, 50);
-            }
-            base.updateLine();
-        }
-    }
-
-    public class ExperienceStringCharacter : UIElement
-    {
-        const int characterSizeInPixels = 6;
-
-        double mouseMovementCoefficient = 0.027;
-
-        int defaultX;
-        int defaultY;
-        public ExperienceStringCharacter(int character, int x, int y)
-        {
-            spriteSheetID = (int)spriteSheetIDs.evolutionCounterCharacters;
-            sourceRectangle = new Rectangle(character * characterSizeInPixels, 0, 5, 7);
-            drawRectangle = new Rectangle(x, y, 10, 14);
-            defaultX = x;
-            defaultY = y;
-            scene = Scene.Evolution;
-            alignment = UIAlignOffset.TopLeft;
-            scaleType = Scale.Relative;
-            positionType = Position.Relative;
-
-            isUIElementActive = true;
-
-
-        }
-
-        public override void updateElement(double elapsedTime, Game1 game)
-        {
-            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
-            {
-                drawRectangle.X = defaultX + (int)(mouseMovementCoefficient * Mouse.GetState().X);
-            }
-
-            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
-            {
-                drawRectangle.Y = defaultY + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
-            }
-        }
-    }
-
-    public class ExperienceCounter
-    {
-        public List<ExperienceStringCharacter> stringCharacters = new List<ExperienceStringCharacter>();
-        const int stringDrawLayer = 14;
-        public WorldContext worldContext;
-
-        public string stringNumber;
-
-        int x;
-        int y;
-
-        const int characterSizeInPixels = 10;
-        public ExperienceCounter(WorldContext wc, int x, int y)
-        {
-            worldContext = wc;
-            this.x = x;
-            this.y = y;
-        }
-        public void updateString(string newString)
-        {
-            while (stringCharacters.Count > 0)
-            {
-                worldContext.engineController.UIController.removeUIElement(stringDrawLayer, stringCharacters[0]);
-                stringCharacters.RemoveAt(0);
-            }
-
-
-            stringNumber = newString;
-
-            //for each character of the string:
-            for (int i = 0; i < newString.Length; i++)
-            {
-                string character = newString[i].ToString();
-                ExperienceStringCharacter esc = new ExperienceStringCharacter(Convert.ToInt32(character), x + i * characterSizeInPixels, y);
-                stringCharacters.Add(esc);
-                worldContext.engineController.UIController.addUIElement(stringDrawLayer, esc);
-            }
-        }
-    }
-
-    public class CraftItemButton : InteractiveUIElement
-    {
-        Player owner;
-        Item craftedItem;
-        CraftingRecipe recipe;
-
-        public CraftItemBackground background;
-
-        const int drawLayer = 15;
-
-        public int x;
-        public int y;
-
-        public CraftItemButton(CraftingRecipe recipe)
-        {
-            this.recipe = recipe;
-            setItem(recipe.recipeOutput);
-            owner = recipe.manager.worldContext.player;
-
-            recipe.manager.worldContext.engineController.UIController.addUIElement(drawLayer, this);
-
-            scene = Scene.Game;
-            positionType = Position.Absolute;
-            scaleType = Scale.Absolute;
-
-            maxClickCooldown = 0.25f;
-
-
-            background = new CraftItemBackground();
-            recipe.manager.worldContext.engineController.UIController.addUIElement(drawLayer - 1, background);
-
-        }
-        public void setItem(Item item)
-        {
-            if (item != null)
-            {
-                this.craftedItem = item;
-                if (item.currentStackSize <= 1) { buttonText = null; }
-                spriteSheetID = item.spriteSheetID;
-                sourceRectangle = item.sourceRectangle;
-                int offsetWidth = item.drawRectangle.Width;
-                int offsetHeight = item.drawRectangle.Height;
-
-                //If the sprite is the exact same size, don't offset it by anything
-                //If the sprite is smaller, offset it by half - half the width
-                drawRectangle.Width = item.drawRectangle.Width;
-                drawRectangle.Height = item.drawRectangle.Height;
-                x = ((64 - offsetWidth) / 2);
-                y = ((64 - offsetHeight) / 2);
-                textLocation = new Vector2(offsetWidth + ((64 - offsetWidth) / 2), offsetWidth + ((64 - offsetHeight) / 2));
-            }
-            else
-            {
-                this.craftedItem = null;
-                sourceRectangle = new Rectangle(0, 0, 0, 0);
-                drawRectangle = new Rectangle(0, 0, 64, 64);
-            }
-        }
-
-        public override void updateElement(double elapsedTime, Game1 game)
-        {
-            isUIElementActive = recipe.canBeCrafted && recipe.manager.showCraftingSystem;
-            background.drawRectangle.X = drawRectangle.X - x;
-            background.drawRectangle.Y = drawRectangle.Y - y;
-            background.isUIElementActive = isUIElementActive;
-
-            base.updateElement(elapsedTime, game);
-        }
-        public override void onLeftClick(Game1 game)
-        {
-            clickCooldown = maxClickCooldown;
-
-            if (recipe.canBeCrafted)
-            {
-                Item floatingItem = owner.selectedItem.item;
-                bool couldCombineItems = false;
-                owner.selectedItem.clickedOnAUIElement = true;
-                if (floatingItem != null && craftedItem != null)
-                {
-                    //Add some logic in here for combining items onto a stack when crafting. Shouldn't be super hard to do
-                }
-                else
-                {
-                    owner.selectedItem.setItem(craftedItem.itemCopy(craftedItem.currentStackSize));
-                    recipe.itemWasCrafted();
-                }
-            }
-        }
-    }
-
-    public class CraftItemBackground : UIElement
-    {
-        public CraftItemBackground()
-        {
-            scene = Scene.Game;
-            positionType = Position.Absolute;
-            scaleType = Scale.Absolute;
-            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
-            sourceRectangle = new Rectangle(0, 32, 32, 33);
-            drawRectangle = new Rectangle(0, 0, 64, 66);
         }
     }
 
@@ -1379,6 +743,117 @@ namespace PixelMidpointDisplacement {
         }
     }
 
+    /*
+     * ========================================
+     *  Main Menu
+     * ========================================
+    */
+    public class MainMenuTitle : UIElement
+    {
+        public MainMenuTitle()
+        {
+            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
+            drawRectangle = new Rectangle(0, 50, 1160, 152);
+            sourceRectangle = new Rectangle(0, 0, 145, 19);
+            alignment = UIAlignOffset.Centre;
+            scaleType = Scale.Relative;
+            positionType = Position.Relative;
+
+            scene = Scene.MainMenu;
+        }
+    }
+    public class MainMenuStartButton : InteractiveUIElement
+    {
+        UIElement generateWorldText;
+        int tickCount = 0;
+
+        Timer t;
+        bool timerFinished = true;
+
+        SpriteAnimator animator;
+        public MainMenuStartButton(AnimationController ac, UIElement generateWorldText)
+        {
+            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
+            drawRectangle = new Rectangle(0, 400, 192, 66);
+            sourceRectangle = new Rectangle(0, 25, 33, 12);
+            alignment = UIAlignOffset.Centre;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            tickCount = 0;
+            scene = Scene.MainMenu;
+
+            animator = new SpriteAnimator(animationController : ac, constantOffset : new Vector2(0,25), frameOffset : new Vector2(33, 25), sourceDimensions : new Vector2(33,12), new Rectangle(0, 25, 33, 12), owner : this);
+
+
+            //this.generateWorldText = generateWorldText;
+
+            animator.animationDictionary = new Dictionary<string, (int frameCount, int yOffset)>()
+            {
+                { "shine", (4,1)}
+            };
+
+
+            t = new Timer(new TimerCallback(shineAnimation));
+            t.Change(100, 0);
+        }
+
+        public void shineAnimation(object state) {
+            animator.startAnimation(1, "shine");
+            timerFinished = true;
+        }
+        public override void onLeftClick(Game1 game)
+        {
+            //generateWorldText.isUIElementActive = true;
+            if (tickCount == 0)
+            {
+                StringRenderer sr = new StringRenderer(Scene.MainMenu, UIAlignOffset.Centre, 42, false);
+                sr.setWorldContext(game.worldContext);
+                sr.setString("Generating the world");
+                sr.updateLocation(0, 350);
+
+            }
+            tickCount += 1;
+
+        }
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            if (timerFinished)
+            {
+                Random r = new Random();
+                t.Change(r.Next(1600, 3600), 0);
+                timerFinished = false;
+            }
+
+            //If the button was pressed for 2 ticks, then generate the world. This allows the UI to update
+
+            if (tickCount > 10)
+            {
+                (int width, int height) worldDimensions = (800, 800);
+                game.worldContext.generateWorld(worldDimensions);
+                game.changeScene(Scene.Game);
+            }
+        }
+    }
+    public class MainMenuWorldGenText : UIElement
+    {
+        public MainMenuWorldGenText()
+        {
+            isUIElementActive = false;
+            spriteSheetID = (int)spriteSheetIDs.mainMenuUI;
+            drawRectangle = new Rectangle(0, 350, 576, 30);
+            sourceRectangle = new Rectangle(0, 38, 96, 5);
+            alignment = UIAlignOffset.Centre;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            scene = Scene.MainMenu;
+        }
+    }
+
+    /*
+     * ========================================
+     * Functional inventory UI
+     * ========================================
+    */
     public class FloatingUIItem : InteractiveUIElement
     {
 
@@ -1716,6 +1191,642 @@ namespace PixelMidpointDisplacement {
                 owner.selectedItem.setItem(item);
                 setItem(null);
             }
+        }
+    }
+
+    /*
+     * ========================================
+     *  Inventory background / UX
+     * ========================================
+    */
+    public class InventoryBackground : UIElement
+    {
+        public InventoryBackground()
+        {
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            drawRectangle = new Rectangle(0, 66, 594, 266);
+            sourceRectangle = new Rectangle(0, 32, 297, 132);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            scene = Scene.Game;
+            isUIElementActive = false;
+        }
+    }
+
+    public class EquipmentBackground : UIElement
+    {
+        public EquipmentBackground()
+        {
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            isUIElementActive = false;
+            sourceRectangle = new Rectangle(297, 0, 65, 132);
+            drawRectangle = new Rectangle(700, 66, 130, 264);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            scene = Scene.Game;
+        }
+    }
+    public class Hotbar : UIElement
+    {
+        public Hotbar()
+        {
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            drawRectangle = new Rectangle(0, 0, 594, 64);
+            sourceRectangle = new Rectangle(0, 0, 297, 32);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            scene = Scene.Game;
+        }
+    }
+    public class HotbarSelected : UIElement
+    {
+        public HotbarSelected()
+        {
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            drawRectangle = new Rectangle(0, 0, 64, 64);
+            sourceRectangle = new Rectangle(1, 165, 32, 32);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            scene = Scene.Game;
+        }
+
+        public void swapItem(int x)
+        {
+            int pixelsPerHotbarSlot = 66;
+            drawRectangle = new Rectangle(pixelsPerHotbarSlot * x, 0, 64, 64);
+        }
+    }
+
+    /*
+     * ========================================
+     * Health UI
+     * ========================================
+    */
+    public class HealthBarOutline : UIElement
+    {
+        public HealthBarOutline()
+        {
+            spriteSheetID = (int)spriteSheetIDs.healthUI;
+            sourceRectangle = new Rectangle(0, 0, 145, 23);
+            drawRectangle = new Rectangle(0, 900, 290, 46);
+            alignment = UIAlignOffset.Centre;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            scene = Scene.Game;
+        }
+    }
+    public class HealthBar : UIElement
+    {
+        public int maxHealthDrawWidth = 290;
+        public HealthBar()
+        {
+            spriteSheetID = (int)spriteSheetIDs.healthUI;
+            sourceRectangle = new Rectangle(0, 25, 145, 21);
+            drawRectangle = new Rectangle(0, 902, 290, 46);
+            alignment = UIAlignOffset.Centre;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            scene = Scene.Game;
+        }
+    }
+
+    /*
+     * ========================================
+     * Respawn UI
+     * ========================================
+    */
+
+    public class RespawnUI {
+        RespawnScreen rs = new RespawnScreen();
+        RespawnButton rb;
+        StringRenderer sr;
+        Player player;
+
+        //Put a _ where the source should be
+        List<string> deathMessages = new List<string>() {
+            "_ tried and succeeded to kill you!"
+        };
+        public RespawnUI(WorldContext wc, Player player) {
+            this.player = player;
+            rb = new RespawnButton(this);
+            wc.engineController.UIController.addUIElement(150, rb);
+            wc.engineController.UIController.addUIElement(150, rs);
+
+            sr = new StringRenderer(Scene.Game, UIAlignOffset.Centre, 13, false);
+            sr.setWorldContext(wc);
+        }
+
+        public void onDeath(object source) {
+            //Generate a string to render
+            Random r = new Random();
+            int index = r.Next(deathMessages.Count);
+            string baseString = deathMessages[index];
+            baseString.Replace("_", "\"" + source.ToString().Substring(source.ToString().LastIndexOf(".")));
+            sr.setString(baseString);
+        }
+
+        public void respawn(Game1 game){
+            player.respawn();
+            game.changeScene(Scene.Evolution);
+            rs.isUIElementActive = false;
+            rb.isUIElementActive = false;
+            sr.hideString();
+        }
+    }
+    public class RespawnScreen : UIElement
+    {
+        public RespawnScreen()
+        {
+            spriteSheetID = (int)spriteSheetIDs.deathScreen;
+            sourceRectangle = new Rectangle(0, 0, 384, 216);
+            drawRectangle = new Rectangle(0, 0, 1920, 1080);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Relative;
+            scene = Scene.Game;
+
+            isUIElementActive = false;
+        }
+    }
+
+    public class RespawnButton : InteractiveUIElement
+    {
+        RespawnUI rUI;
+        public RespawnButton(RespawnUI respawnUI)
+        {
+            spriteSheetID = (int)spriteSheetIDs.deathScreen;
+            sourceRectangle = new Rectangle(177, 74, 40, 8);
+            drawRectangle = new Rectangle(885, 370, 200, 40);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            scene = Scene.Game;
+            isUIElementActive = false;
+            this.rUI = respawnUI;
+        }
+
+        public override void onLeftClick(Game1 game)
+        {
+            rUI.respawn(game);
+            
+        }
+    }
+
+    public class EndEvolutionButton : InteractiveUIElement
+    {
+
+        double mouseMovementCoefficient = 0.027;
+        public EndEvolutionButton()
+        {
+            spriteSheetID = (int)spriteSheetIDs.deathScreen;
+            sourceRectangle = new Rectangle(177, 74, 40, 12);
+            drawRectangle = new Rectangle(885, 900, 200, 60);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            scene = Scene.Evolution;
+            isUIElementActive = true;
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
+            {
+                drawRectangle.X = 885 + (int)(mouseMovementCoefficient * Mouse.GetState().X);
+            }
+
+            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
+            {
+                drawRectangle.Y = 900 + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
+            }
+        }
+
+        public override void onLeftClick(Game1 game)
+        {
+            game.changeScene(Scene.Game);
+        }
+    }
+
+    public class Damage : UIElement
+    {
+        WorldContext worldContext;
+
+        double x;
+        double y;
+
+        int drawOrder;
+
+        double yIncrease = 30;
+        double maxExistingDuration = 0.5;
+        double existingDuration;
+
+        public Damage(WorldContext wc, int damageAmount, double x, double y, int drawOrder)
+        {
+
+            this.drawOrder = drawOrder;
+            drawRectangle = new Rectangle((int)x + wc.screenSpaceOffset.x, (int)y + wc.screenSpaceOffset.y, 10, 14);
+            this.x = x;
+            this.y = y;
+            existingDuration = maxExistingDuration;
+
+            sourceRectangle = new Rectangle(damageAmount * 6, 0, 5, 7);
+            worldContext = wc;
+            spriteSheetID = (int)spriteSheetIDs.pixelNumbers;
+
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            scene = Scene.Game;
+            isUIElementActive = true;
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            existingDuration -= elapsedTime;
+            y -= ((yIncrease / maxExistingDuration) * elapsedTime);
+
+            drawRectangle = new Rectangle((int)x + worldContext.screenSpaceOffset.x, (int)(y + worldContext.screenSpaceOffset.y), 10, 14);
+
+            if (existingDuration <= 0)
+            {
+                worldContext.engineController.UIController.removeUIElement(drawOrder, this);
+            }
+        }
+    }
+
+    /*
+     * ========================================
+     * Evolution scene UI
+     * ========================================
+    */
+    public class EvolutionStarBackground : UIElement
+    {
+
+        public double mouseMovementCoefficient;
+
+
+        int startXOffset = 1920;
+        int startYOffset = 1080;
+
+        int sourceY = 0;
+        int sourceX = 0;
+
+        public EvolutionStarBackground()
+        {
+            spriteSheetID = (int)spriteSheetIDs.evolutionBackground;
+            sourceRectangle = new Rectangle(0, 0, 960, 540);
+            drawRectangle = new Rectangle(0, 0, 1920, 1080);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Absolute;
+            scaleType = Scale.Relative;
+            scene = Scene.Evolution;
+            isUIElementActive = true;
+
+
+            mouseMovementCoefficient = 1;
+        }
+
+        public void setSourceLocation(int x, int y)
+        {
+
+            sourceY = y;
+            sourceX = x;
+        }
+
+        public void zeroStartingOffset()
+        {
+            startXOffset = 0;
+            startYOffset = 0;
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
+            {
+                sourceRectangle.X = sourceX + (int)(startXOffset * mouseMovementCoefficient) - (int)(mouseMovementCoefficient * Mouse.GetState().X);
+            }
+
+            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
+            {
+                sourceRectangle.Y = sourceY + (int)(startYOffset * mouseMovementCoefficient) - (int)(mouseMovementCoefficient * Mouse.GetState().Y);
+            }
+        }
+    }
+
+    public class EvolutionButton : InteractiveUIElement
+    {
+        double mouseMovementCoefficient = 0.027;
+
+        const int iconWidth = 15;
+
+        const int heightBetweenLayers = 75;
+
+        int defaultX;
+        int defaultY;
+
+        const int heightOffset = 200;
+
+        public Evolution ownerEvolution;
+
+        bool isClicked = false;
+        public EvolutionButton(Evolution owner)
+        {
+            spriteSheetID = (int)spriteSheetIDs.evolutionIcons;
+            sourceRectangle = new Rectangle(0, owner.iconSourceY, 15, 15);
+            //Adjust the draw location based on the location within the tree
+            drawRectangle = new Rectangle(50, 50, 45, 45);
+            alignment = UIAlignOffset.TopLeft;
+            positionType = Position.Relative;
+            scaleType = Scale.Relative;
+            scene = Scene.Evolution;
+            isUIElementActive = true;
+
+            ownerEvolution = owner;
+        }
+
+        public void setSourceLocation(int x, int y)
+        {
+            sourceRectangle.X = x;
+            sourceRectangle.Y = y;
+        }
+
+        public void setLocationFromTree()
+        {
+            //Set the x and y location on screen based on the tree layer
+            int evolutionsInLayer = ownerEvolution.tree.evolutionTree[ownerEvolution.treeLayer].evolutionLayer.Count;
+            defaultX = (ownerEvolution.indexWithinLayer + 1) * (defaultScreenWidth / (evolutionsInLayer + 1));
+            defaultY = defaultScreenHeight - ((ownerEvolution.treeLayer + 1) * heightBetweenLayers + heightOffset);
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
+            {
+                drawRectangle.X = defaultX + (int)(mouseMovementCoefficient * Mouse.GetState().X);
+            }
+
+            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
+            {
+                drawRectangle.Y = defaultY + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
+            }
+
+            if (ownerEvolution.isEvolutionActive)
+            {
+                sourceRectangle.X = 3 * iconWidth;
+            }
+            else if (!ownerEvolution.canBeActivated)
+            {
+                if (isClicked)
+                {
+                    sourceRectangle.X = iconWidth;
+                }
+                else
+                {
+                    sourceRectangle.X = 0;
+                }
+            }
+            else
+            {
+                sourceRectangle.X = 2 * iconWidth;
+            }
+
+            isClicked = false;
+        }
+
+        public override void onLeftClick(Game1 game)
+        {
+            isClicked = true;
+            ownerEvolution.requestActivation();
+        }
+    }
+
+    public class EvolutionDependencyLine : UILine
+    {
+        EvolutionButton evolution;
+        EvolutionButton dependencyEvolution;
+        public EvolutionDependencyLine(EvolutionButton evolution, EvolutionButton dependency, Vector2 point1, Vector2 point2) : base(point1, point2)
+        {
+            this.evolution = evolution;
+            dependencyEvolution = dependency;
+
+            scene = Scene.Evolution;
+
+            point1 = new Vector2(evolution.drawRectangle.X + evolution.drawRectangle.Width / 2, evolution.drawRectangle.Y + evolution.drawRectangle.Height);
+            point2 = new Vector2(dependencyEvolution.drawRectangle.X + dependencyEvolution.drawRectangle.Width / 2, dependencyEvolution.drawRectangle.Y + dependencyEvolution.drawRectangle.Height);
+
+        }
+
+        public override void updateLine()
+        {
+
+            point1 = new Vector2(evolution.drawRectangle.X + evolution.drawRectangle.Width / 2, evolution.drawRectangle.Y + evolution.drawRectangle.Height);
+
+            point2 = new Vector2(dependencyEvolution.drawRectangle.X + dependencyEvolution.drawRectangle.Width / 2, dependencyEvolution.drawRectangle.Y);
+
+            drawRectangle.X = (int)point1.X;
+            drawRectangle.Y = (int)point1.Y;
+
+
+            if (dependencyEvolution.ownerEvolution.isEvolutionActive)
+            {
+                drawColor = Color.White;
+            }
+            else
+            {
+                drawColor = new Color(50, 50, 50);
+            }
+            base.updateLine();
+        }
+    }
+
+    public class ExperienceStringCharacter : UIElement
+    {
+        const int characterSizeInPixels = 6;
+
+        double mouseMovementCoefficient = 0.027;
+
+        int defaultX;
+        int defaultY;
+        public ExperienceStringCharacter(int character, int x, int y)
+        {
+            spriteSheetID = (int)spriteSheetIDs.evolutionCounterCharacters;
+            sourceRectangle = new Rectangle(character * characterSizeInPixels, 0, 5, 7);
+            drawRectangle = new Rectangle(x, y, 10, 14);
+            defaultX = x;
+            defaultY = y;
+            scene = Scene.Evolution;
+            alignment = UIAlignOffset.TopLeft;
+            scaleType = Scale.Relative;
+            positionType = Position.Relative;
+
+            isUIElementActive = true;
+
+
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            if (Mouse.GetState().X >= 0 && Mouse.GetState().X < game.GraphicsDevice.Viewport.Width)
+            {
+                drawRectangle.X = defaultX + (int)(mouseMovementCoefficient * Mouse.GetState().X);
+            }
+
+            if (Mouse.GetState().Y >= 0 && Mouse.GetState().Y < game.GraphicsDevice.Viewport.Height)
+            {
+                drawRectangle.Y = defaultY + (int)(mouseMovementCoefficient * Mouse.GetState().Y);
+            }
+        }
+    }
+
+    public class ExperienceCounter
+    {
+        public List<ExperienceStringCharacter> stringCharacters = new List<ExperienceStringCharacter>();
+        const int stringDrawLayer = 14;
+        public WorldContext worldContext;
+
+        public string stringNumber;
+
+        int x;
+        int y;
+
+        const int characterSizeInPixels = 10;
+        public ExperienceCounter(WorldContext wc, int x, int y)
+        {
+            worldContext = wc;
+            this.x = x;
+            this.y = y;
+        }
+        public void updateString(string newString)
+        {
+            while (stringCharacters.Count > 0)
+            {
+                worldContext.engineController.UIController.removeUIElement(stringDrawLayer, stringCharacters[0]);
+                stringCharacters.RemoveAt(0);
+            }
+
+
+            stringNumber = newString;
+
+            //for each character of the string:
+            for (int i = 0; i < newString.Length; i++)
+            {
+                string character = newString[i].ToString();
+                ExperienceStringCharacter esc = new ExperienceStringCharacter(Convert.ToInt32(character), x + i * characterSizeInPixels, y);
+                stringCharacters.Add(esc);
+                worldContext.engineController.UIController.addUIElement(stringDrawLayer, esc);
+            }
+        }
+    }
+
+    /*
+     * ========================================
+     * Crafting UI
+     * ========================================
+    */
+    public class CraftItemButton : InteractiveUIElement
+    {
+        Player owner;
+        Item craftedItem;
+        CraftingRecipe recipe;
+
+        public CraftItemBackground background;
+
+        const int drawLayer = 15;
+
+        public int x;
+        public int y;
+
+        public CraftItemButton(CraftingRecipe recipe)
+        {
+            this.recipe = recipe;
+            setItem(recipe.recipeOutput);
+            owner = recipe.manager.worldContext.player;
+
+            recipe.manager.worldContext.engineController.UIController.addUIElement(drawLayer, this);
+
+            scene = Scene.Game;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+
+            maxClickCooldown = 0.25f;
+
+
+            background = new CraftItemBackground();
+            recipe.manager.worldContext.engineController.UIController.addUIElement(drawLayer - 1, background);
+
+        }
+        public void setItem(Item item)
+        {
+            if (item != null)
+            {
+                this.craftedItem = item;
+                if (item.currentStackSize <= 1) { buttonText = null; }
+                spriteSheetID = item.spriteSheetID;
+                sourceRectangle = item.sourceRectangle;
+                int offsetWidth = item.drawRectangle.Width;
+                int offsetHeight = item.drawRectangle.Height;
+
+                //If the sprite is the exact same size, don't offset it by anything
+                //If the sprite is smaller, offset it by half - half the width
+                drawRectangle.Width = item.drawRectangle.Width;
+                drawRectangle.Height = item.drawRectangle.Height;
+                x = ((64 - offsetWidth) / 2);
+                y = ((64 - offsetHeight) / 2);
+                textLocation = new Vector2(offsetWidth + ((64 - offsetWidth) / 2), offsetWidth + ((64 - offsetHeight) / 2));
+            }
+            else
+            {
+                this.craftedItem = null;
+                sourceRectangle = new Rectangle(0, 0, 0, 0);
+                drawRectangle = new Rectangle(0, 0, 64, 64);
+            }
+        }
+
+        public override void updateElement(double elapsedTime, Game1 game)
+        {
+            isUIElementActive = recipe.canBeCrafted && recipe.manager.showCraftingSystem;
+            background.drawRectangle.X = drawRectangle.X - x;
+            background.drawRectangle.Y = drawRectangle.Y - y;
+            background.isUIElementActive = isUIElementActive;
+
+            base.updateElement(elapsedTime, game);
+        }
+        public override void onLeftClick(Game1 game)
+        {
+            clickCooldown = maxClickCooldown;
+
+            if (recipe.canBeCrafted)
+            {
+                Item floatingItem = owner.selectedItem.item;
+                bool couldCombineItems = false;
+                owner.selectedItem.clickedOnAUIElement = true;
+                if (floatingItem != null && craftedItem != null)
+                {
+                    //Add some logic in here for combining items onto a stack when crafting. Shouldn't be super hard to do
+                }
+                else
+                {
+                    owner.selectedItem.setItem(craftedItem.itemCopy(craftedItem.currentStackSize));
+                    recipe.itemWasCrafted();
+                }
+            }
+        }
+    }
+
+    public class CraftItemBackground : UIElement
+    {
+        public CraftItemBackground()
+        {
+            scene = Scene.Game;
+            positionType = Position.Absolute;
+            scaleType = Scale.Absolute;
+            spriteSheetID = (int)spriteSheetIDs.inventoryUI;
+            sourceRectangle = new Rectangle(0, 32, 32, 33);
+            drawRectangle = new Rectangle(0, 0, 64, 66);
         }
     }
 

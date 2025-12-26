@@ -1175,7 +1175,7 @@ namespace PixelMidpointDisplacement {
             velocityX = 0;
             velocityY = 0;
             currentHealth = maxHealth;
-            playerUI.damageTaken();
+            playerUI.damageTaken(null);
         }
 
         public override void applyDamage(object attacker, DamageType damageType, double damage)
@@ -1195,7 +1195,7 @@ namespace PixelMidpointDisplacement {
 
                 base.applyDamage(attacker, damageType, damage);
 
-                playerUI.damageTaken();
+                playerUI.damageTaken(attacker);
             }
         }
 

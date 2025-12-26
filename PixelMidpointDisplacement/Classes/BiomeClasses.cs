@@ -700,6 +700,8 @@ namespace PixelMidpointDisplacement {
      * 
      * Surface Biomes
      * 
+     * Biomes that spawn across the world from top to bottom. They compose the primary content of the world
+     * 
      * MeadowBiome
      * MountainBiome
      * ========================================
