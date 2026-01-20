@@ -216,6 +216,10 @@ namespace PixelMidpointDisplacement
             {
                 worldArray[x, y] = new BigBushBlock(blockFromID[ID]);
             }
+            else if (ID == blockIDs.woodenDoor)
+            {
+                worldArray[x, y] = new WoodenDoorBlock(blockFromID[ID]);
+            }
 
             worldArray[x, y].setupInitialData(this, intArray, (x, y));
         }
@@ -329,6 +333,8 @@ namespace PixelMidpointDisplacement
             blockFromID.Add(blockIDs.semiLeaves, new SemiLeafBlock(new Rectangle(0, 288, 32, 32), (int)blockIDs.semiLeaves));
             blockFromID.Add(blockIDs.bush, new BushBlock(new Rectangle(0, 320, 32, 32), (int)blockIDs.bush));
             blockFromID.Add(blockIDs.bigBush, new BigBushBlock(new Rectangle(96, 320, 32, 32), (int)blockIDs.bigBush));
+            blockFromID.Add(blockIDs.woodenDoor, new WoodenDoorBlock(new Rectangle(0, 416, 32, 32), (int)blockIDs.woodenDoor));
+            blockFromID.Add(blockIDs.woodenPlatform, new WoodenPlatformBlock(new Rectangle(0, 448, 32, 32), (int)blockIDs.woodenPlatform));
         }
 
         public Block getBlockFromID(blockIDs ID)
@@ -384,17 +390,18 @@ namespace PixelMidpointDisplacement
         {
             this.player = player;
         }
-
         public bool damageBlock(double damageStrength, double durabilityLoss, int x, int y)
         {
             bool canDamageBlock = false;
 
-            if (worldArray[x, y].ID != 0)
+            if (worldArray[x, y].ID != (int)blockIDs.air)
             {
                 if (damageStrength >= worldArray[x, y].hardness)
                 {
                     worldArray[x, y].durability -= durabilityLoss;
-
+                    if (worldArray[x, y].durability <= 0) {
+                        deleteBlock(x, y);
+                    }
                     return true;
                 }
                 else
@@ -411,6 +418,7 @@ namespace PixelMidpointDisplacement
         {
             if (worldArray[x, y].ID != 0)
             {
+                
                 worldArray[x, y].onBlockDestroyed(exposedBlocks, this);
                 worldArray[x, y] = new Block(blockFromID[blockIDs.air]);
                 worldArray[x, y].setLocation((x, y));
@@ -418,10 +426,13 @@ namespace PixelMidpointDisplacement
                 {
                     for (int checkY = y - 1; checkY <= y + 1; checkY++)
                     {
-                        if (worldArray[checkX, checkY].ID != (int)blockIDs.air)
+                        if (checkX >= 0 && checkY >= 0 && checkX < worldArray.GetLength(0) && checkY < worldArray.GetLength(1))
                         {
-                            addBlockToDictionaryIfExposedToAir(worldArray, checkX, checkY);
-                            worldArray[checkX, checkY].updateBlock(this);
+                            if (worldArray[checkX, checkY].ID != (int)blockIDs.air)
+                            {
+                                addBlockToDictionaryIfExposedToAir(worldArray, checkX, checkY);
+                                worldArray[checkX, checkY].updateBlock(this);
+                            }
                         }
                     }
                 }
@@ -433,17 +444,18 @@ namespace PixelMidpointDisplacement
         }
         public bool addBlock(int x, int y, int ID)
         {
-            if (worldArray[x, y].ID == (int)blockIDs.air && blockFromID[blockIDFromInt[ID]].canBlockBePlaced(this, (x, y)))
+            if (x >= 0 && x < worldArray.GetLength(0) && y >= 0 && y < worldArray.GetLength(1))
             {
-                worldArray[x, y] = blockFromID[blockIDFromInt[ID]].copyBlock();
-                worldArray[x, y].onBlockPlaced(this, (x, y));
-                addBlockToDictionaryIfExposedToAir(worldArray, x, y);
-                return true;
+                if (worldArray[x, y].ID == (int)blockIDs.air && blockFromID[blockIDFromInt[ID]].canBlockBePlaced(this, (x, y)))
+                {
+                    worldArray[x, y] = blockFromID[blockIDFromInt[ID]].copyBlock();
+                    worldArray[x, y].onBlockPlaced(this, (x, y));
+                    addBlockToDictionaryIfExposedToAir(worldArray, x, y);
+                    return true;
+                }
             }
-
             return false;
         }
-
         public bool setBackground(int x, int y, int ID)
         {
             if (x >= 0 && y >= 0 && x < backgroundArray.GetLength(0) && y < backgroundArray.GetLength(1))
@@ -570,7 +582,4 @@ namespace PixelMidpointDisplacement
             //drawRectangle.Y = (int)(y * movement);
         }
     }
-
-
-
 }

@@ -33,7 +33,7 @@ namespace PixelMidpointDisplacement
     public interface IActiveCollider : ICollider
     {
 
-        Player owner { get; set; }
+        Entity owner { get; set; }
 
         Rectangle collider { get; set; }
         public virtual void calculateCollision(IPassiveCollider externalCollider)
@@ -195,7 +195,7 @@ namespace PixelMidpointDisplacement
 
         public void calculateRotation(float rotation)
         {
-            rotation *= owner.playerDirection;
+            rotation *= owner.entityDirection;
             rotatedPoints[0] = Vector2.RotateAround(originalPoints[0], new Vector2(0, 0), rotation);
             rotatedPoints[1] = Vector2.RotateAround(originalPoints[1], new Vector2(0, 0), rotation);
             rotatedPoints[2] = Vector2.RotateAround(originalPoints[2], new Vector2(0, 0), rotation);
@@ -479,7 +479,7 @@ namespace PixelMidpointDisplacement
                         {
                             //If the block to the left and at the floor level is either transparent or air, jump
 
-                            if (worldContext.worldArray[playerBlockX - 1, playerBlockY + (int)Math.Round(height)].isBlockTransparent || worldContext.worldArray[playerBlockX - 1, playerBlockY + (int)Math.Round(height)].ID == 0)
+                            if (!worldContext.worldArray[playerBlockX - 1, playerBlockY + (int)Math.Round(height)].hasCollisions || worldContext.worldArray[playerBlockX - 1, playerBlockY + (int)Math.Round(height)].ID == (int)blockIDs.air)
                             {
                                 upDown = 1;
                             }
@@ -491,14 +491,19 @@ namespace PixelMidpointDisplacement
 
                         if (playerBlockX >= 0 && playerBlockX + 1 < worldContext.worldArray.GetLength(0) && playerBlockY > 0 && playerBlockY + (int)height < worldContext.worldArray.GetLength(1))
                         {
-                            if (worldContext.worldArray[playerBlockX + 1, playerBlockY + (int)Math.Round(height)].isBlockTransparent || worldContext.worldArray[playerBlockX + 1, playerBlockY + (int)Math.Round(height)].ID == 0)
+                            if (!worldContext.worldArray[playerBlockX + 1, playerBlockY + (int)Math.Round(height)].hasCollisions || worldContext.worldArray[playerBlockX + 1, playerBlockY + (int)Math.Round(height)].ID == (int)blockIDs.air)
                             {
                                 upDown = 1;
                             }
 
                         }
                     }
+
                 }
+                else {
+                    upDown = -1;
+                }
+
 
                 //There's a wall in front of them and they should jump over: 
                 if (leftRight == 2)
@@ -510,9 +515,12 @@ namespace PixelMidpointDisplacement
                         if (playerBlockX > 0 && playerBlockX < worldContext.worldArray.GetLength(0) && playerBlockY > 0 && playerBlockY + (int)y < worldContext.worldArray.GetLength(1))
                         {
                             //If the block is solid, then jump
-                            if (!worldContext.worldArray[playerBlockX - 1, playerBlockY + (int)y].isBlockTransparent && worldContext.worldArray[playerBlockX - 1, playerBlockY + (int)y].ID != 0)
+                            if (worldContext.worldArray[playerBlockX - 1, playerBlockY + (int)y].hasCollisions && worldContext.worldArray[playerBlockX - 1, playerBlockY + (int)y].ID != (int)blockIDs.air)
                             {
-                                upDown = 1;
+                                if (upDown != -1)
+                                {
+                                    upDown = 1;
+                                }
                             }
                         }
                     }
@@ -525,9 +533,12 @@ namespace PixelMidpointDisplacement
                     {
                         if (playerBlockX >= 0 && playerBlockX + 1 < worldContext.worldArray.GetLength(0) && playerBlockY > 0 && playerBlockY + (int)y < worldContext.worldArray.GetLength(1))
                         {
-                            if (!worldContext.worldArray[playerBlockX + 1, playerBlockY + (int)y].isBlockTransparent && worldContext.worldArray[playerBlockX + 1, playerBlockY + (int)y].ID != 0)
+                            if (worldContext.worldArray[playerBlockX + 1, playerBlockY + (int)y].hasCollisions && worldContext.worldArray[playerBlockX + 1, playerBlockY + (int)y].ID != (int)blockIDs.air)
                             {
-                                upDown = 1;
+                                if (upDown != -1)
+                                {
+                                    upDown = 1;
+                                }
                             }
 
                         }

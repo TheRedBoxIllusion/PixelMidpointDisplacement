@@ -56,7 +56,7 @@ namespace PixelMidpointDisplacement {
 
         public float useCooldown;
 
-        public Player owner { get; set; }
+        public Entity owner { get; set; }
 
         public Item()
         {
@@ -145,14 +145,15 @@ namespace PixelMidpointDisplacement {
 
         public override void onLeftClick()
         {
-            for (int y = 0; y < owner.equipmentInventory.GetLength(1); y++)
+         if(owner is Player o)   
+            for (int y = 0; y < o.equipmentInventory.GetLength(1); y++)
             {
-                if (owner.equipmentInventory[0, y].item == null)
+                if (o.equipmentInventory[0, y].item == null)
                 {
-                    owner.equipmentInventory[0, y].setItem(this);
+                    o.equipmentInventory[0, y].setItem(this);
                     onEquipToSlot();
-                    owner.inventory[owner.mainHandIndex, 0].setItem(null);
-                    owner.mainHand = null;
+                    o.inventory[o.mainHandIndex, 0].setItem(null);
+                    o.mainHand = null;
                     break;
                 }
 
@@ -173,13 +174,17 @@ namespace PixelMidpointDisplacement {
 
         public override void onLeftClick()
         {
-            Equipment previouslyEquipped = (Equipment)owner.equipmentInventory[1, (int)equipmentType].item;
-            owner.equipmentInventory[1, (int)equipmentType].setItem(this);
-            owner.inventory[owner.mainHandIndex, 0].setItem(previouslyEquipped);
-            owner.mainHand = previouslyEquipped;
-            if (previouslyEquipped != null)
+            if (owner is Player o)
             {
-                previouslyEquipped.onUnequipFromSlot();
+                Equipment previouslyEquipped = (Equipment)o.equipmentInventory[1, (int)equipmentType].item;
+                o.equipmentInventory[1, (int)equipmentType].setItem(this);
+                o.inventory[o.mainHandIndex, 0].setItem(previouslyEquipped);
+                o.mainHand = previouslyEquipped;
+
+                if (previouslyEquipped != null)
+                {
+                    previouslyEquipped.onUnequipFromSlot();
+                }
             }
             onEquipToSlot();
         }
@@ -272,7 +277,7 @@ namespace PixelMidpointDisplacement {
         {
             if (itemAnimator == null)
             {
-                offsetFromEntity = new Vector2(owner.playerDirection * 8, 48);
+                offsetFromEntity = new Vector2(owner.entityDirection * 8, 48);
                 isActive = true;
                 if (!swungDownwardsLastIteration)
                 {
@@ -344,7 +349,7 @@ namespace PixelMidpointDisplacement {
         {
             if (externalCollider is Entity e)
             {
-                e.velocityX = 7 * owner.playerDirection;
+                e.velocityX = 7 * owner.entityDirection;
                 e.velocityY += 7;
                 //Have to move the player up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
                 e.y -= 12;
@@ -400,7 +405,7 @@ namespace PixelMidpointDisplacement {
         {
             if (itemAnimator == null)
             {
-                itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, new Vector2(owner.playerDirection * 8f, 25f));
+                itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, new Vector2(owner.entityDirection * 8f, 25f));
                 animationController.addAnimator(itemAnimator);
                 if (Mouse.GetState().ScrollWheelValue / 120 != digSize - 1)
                 {
@@ -425,7 +430,6 @@ namespace PixelMidpointDisplacement {
                             if (owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY].ID != 0 && owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY].durability <= 0)
                             {
                                 onBlockDeleted(owner.worldContext.worldArray[mouseXGridSpace + usedX, mouseYGridSpace + usedY], mouseXGridSpace + usedX, mouseYGridSpace + usedY);
-                                owner.worldContext.deleteBlock(mouseXGridSpace + usedY, mouseYGridSpace + usedY);
                             }
                         }
                     }
@@ -499,7 +503,7 @@ namespace PixelMidpointDisplacement {
             if (itemAnimator == null)
             {
                 semiAnimationAdditions = 0;
-                offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
+                offsetFromEntity = new Vector2(owner.entityDirection * 8, 16);
                 itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
 
                 animationController.addAnimator(itemAnimator);
@@ -576,7 +580,7 @@ namespace PixelMidpointDisplacement {
 
         public override void onLeftClick()
         {
-            offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
+            offsetFromEntity = new Vector2(owner.entityDirection * 8, 16);
             itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
 
             animationController.addAnimator(itemAnimator);
@@ -634,7 +638,7 @@ namespace PixelMidpointDisplacement {
 
         public override void onLeftClick()
         {
-            offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
+            offsetFromEntity = new Vector2(owner.entityDirection * 8, 16);
             itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
 
             animationController.addAnimator(itemAnimator);
@@ -702,7 +706,7 @@ namespace PixelMidpointDisplacement {
             if (itemAnimator == null)
             {
                 semiAnimationAdditions = 0;
-                offsetFromEntity = new Vector2(owner.playerDirection * 8, 16);
+                offsetFromEntity = new Vector2(owner.entityDirection * 8, 16);
                 itemAnimator = new Animator(animationController, this, 0.15, (0, 0, 0), (0, 0, 2 * Math.PI / 3), constantRotationOffset, offsetFromEntity);
 
                 animationController.addAnimator(itemAnimator);
@@ -788,12 +792,12 @@ namespace PixelMidpointDisplacement {
             if (itemAnimator == null)
             {
                 itemAnimator = new Animator(animationController, this, 0.3, (0, 0, 0), (0, 0, 0), 0, new Vector2(0, 0));
-                if (Mouse.GetState().X < owner.x + owner.worldContext.screenSpaceOffset.x) { owner.playerDirection = -1; owner.directionalEffect = SpriteEffects.FlipHorizontally; }
+                if (Mouse.GetState().X < owner.x + owner.worldContext.screenSpaceOffset.x) { owner.entityDirection = -1; owner.directionalEffect = SpriteEffects.FlipHorizontally; }
                 else if
-                    (Mouse.GetState().X > owner.x + owner.worldContext.screenSpaceOffset.x) { owner.playerDirection = 1; owner.directionalEffect = SpriteEffects.None; }
+                    (Mouse.GetState().X > owner.x + owner.worldContext.screenSpaceOffset.x) { owner.entityDirection = 1; owner.directionalEffect = SpriteEffects.None; }
                 animationController.addAnimator(itemAnimator);
                 //Generate an arrow entity
-                Arrow firedArrow = new Arrow(owner.worldContext, (owner.x, owner.y), 30, owner);
+                Arrow firedArrow = new Arrow(owner.worldContext, (owner.x, owner.y), 3, owner);
 
             }
         }
@@ -927,53 +931,55 @@ namespace PixelMidpointDisplacement {
 
             if (!owner.isOnGround)
             {
-                DoubleJumpEvolution j = (DoubleJumpEvolution)owner.evolutionTree.getEvolution(typeof(DoubleJumpEvolution));
-                bool canJump = false;
-                if (j == null)
+                if (owner is Player o)
                 {
-                    canJump = true;
-                }
-                else
-                {
-                    if (j.isEvolutionActive)
+                    DoubleJumpEvolution j = (DoubleJumpEvolution)o.evolutionTree.getEvolution(typeof(DoubleJumpEvolution));
+                    bool canJump = false;
+                    if (j == null)
                     {
-                        if (j.hasDoubleJumped)
+                        canJump = true;
+                    }
+                    else
+                    {
+                        if (j.isEvolutionActive)
                         {
-                            canJump = true;
+                            if (j.hasDoubleJumped)
+                            {
+                                canJump = true;
+                            }
+                            else
+                            {
+                                canJump = false;
+                            }
                         }
                         else
                         {
-                            canJump = false;
+                            canJump = true;
+                        }
+                    }
+
+
+                    if (hasSetWaitTimeOnce && canJump)
+                    {
+                        if (jumpWaitTime <= 0)
+                        {
+                            if ((Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space)) && !hasUsedItem)
+                            {
+                                hasUsedItem = true;
+                                if (owner.velocityY < 0)
+                                {
+                                    owner.velocityY = 0;
+                                }
+                                owner.accelerationY += jumpAcceleration / elapsedTime;
+                            }
                         }
                     }
                     else
                     {
-                        canJump = true;
+                        jumpWaitTime = maxJumpWaitTime;
+                        hasSetWaitTimeOnce = true;
                     }
                 }
-
-
-                if (hasSetWaitTimeOnce && canJump)
-                {
-                    if (jumpWaitTime <= 0)
-                    {
-                        if ((Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space)) && !hasUsedItem)
-                        {
-                            hasUsedItem = true;
-                            if (owner.velocityY < 0)
-                            {
-                                owner.velocityY = 0;
-                            }
-                            owner.accelerationY += jumpAcceleration / elapsedTime;
-                        }
-                    }
-                }
-                else
-                {
-                    jumpWaitTime = maxJumpWaitTime;
-                    hasSetWaitTimeOnce = true;
-                }
-
 
             }
             else if (hasSetWaitTimeOnce || hasUsedItem)

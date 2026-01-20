@@ -747,7 +747,7 @@ namespace PixelMidpointDisplacement {
             };
 
             spawnableEntities = new List<BiomeSpawnableEntityVariables>() {
-                new BiomeSpawnableEntityVariables(new ControlledEntity(wg.worldContext, wg.worldContext.player), 50, 0, 20, 500, 10, false)
+                new BiomeSpawnableEntityVariables(new EvilClone(wg.worldContext, wg.worldContext.player), 50, 0, 20, 500, 10, false)
             };
 
             spawnableFluids = new List<BiomeSpawnableFluidVariables>()
@@ -799,6 +799,8 @@ namespace PixelMidpointDisplacement {
             initialIterationOffset = 100;
 
             backgroundBlockID = 1;
+
+
 
             ores = new BlockGenerationVariables[] {
                 new BlockGenerationVariables(1, new Block((int)blockIDs.stone), 8, 80),

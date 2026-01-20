@@ -1,0 +1,11 @@
+{
+  "Greetings": {
+    "generic" : "Hey, how are you this day?",
+    "laid back" : "Sup bro"
+
+  },
+  "Hints": {
+    "furnace": "I heard that you can smelt ore if you get enough \n stone and some wood!",
+    "weapons" :  "The monsters are scary! We gotta craft some \n weapons to kill them!"
+  }
+}

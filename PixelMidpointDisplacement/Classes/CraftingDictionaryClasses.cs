@@ -274,8 +274,6 @@ namespace PixelMidpointDisplacement {
     {
         public PlayerCraftingDictionary(CraftingManager manager) : base(manager)
         {
-
-
             CraftingRecipe ironIngot = new CraftingRecipe(new IngotItem((int)oreIDs.iron), 1, new List<RecipeIngredient>() { new RecipeIngredient(new OreItem((int)oreIDs.iron), 3) }, manager);
 
             craftingRecipes.Add(ironIngot);
@@ -285,6 +283,12 @@ namespace PixelMidpointDisplacement {
 
             CraftingRecipe woodenBackgroundRecipe = new CraftingRecipe(recipeResult: new BackgroundBlockItem((int)backgroundBlockIDs.woodenPlanks), 5, new List<RecipeIngredient>() { new RecipeIngredient(new BlockItem((int)blockIDs.treeTrunk), 1) }, manager);
             craftingRecipes.Add(woodenBackgroundRecipe);
+
+            CraftingRecipe woodenDoorRecipe = new CraftingRecipe(recipeResult: new BlockItem((int)blockIDs.woodenDoor), 1, new List<RecipeIngredient>() { new RecipeIngredient(new BlockItem((int)blockIDs.treeTrunk), 3) }, manager);
+            craftingRecipes.Add(woodenDoorRecipe);
+
+            CraftingRecipe woodenPlatformRecipe = new CraftingRecipe(recipeResult: new BlockItem((int)blockIDs.woodenPlatform), 2, new List<RecipeIngredient>() { new RecipeIngredient(new BlockItem((int)blockIDs.treeTrunk), 1) }, manager);
+            craftingRecipes.Add(woodenPlatformRecipe);
         }
     }
 }

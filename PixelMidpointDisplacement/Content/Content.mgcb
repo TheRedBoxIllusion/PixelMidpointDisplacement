@@ -13,47 +13,47 @@
 
 #---------------------------------- Content ---------------------------------#
 
-#begin ariel.spritefont
+#begin Effects/CombineLightAndColor.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/CombineLightAndColor.fx
+
+#begin Effects/CombineMasks.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/CombineMasks.fx
+
+#begin Effects/LightCalculator.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/LightCalculator.fx
+
+#begin Effects/MaskLight.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/MaskLight.fx
+
+#begin Effects/Rotation.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/Rotation.fx
+
+#begin Fonts/ariel.spritefont
 /importer:FontDescriptionImporter
 /processor:FontDescriptionProcessor
 /processorParam:PremultiplyAlpha=True
 /processorParam:TextureFormat=Compressed
-/build:ariel.spritefont
+/build:Fonts/ariel.spritefont
 
-#begin CombineLightAndColor.fx
-/importer:EffectImporter
-/processor:EffectProcessor
-/processorParam:DebugMode=Auto
-/build:CombineLightAndColor.fx
-
-#begin CombineMasks.fx
-/importer:EffectImporter
-/processor:EffectProcessor
-/processorParam:DebugMode=Auto
-/build:CombineMasks.fx
-
-#begin ItemFont.spritefont
+#begin Fonts/ItemFont.spritefont
 /importer:FontDescriptionImporter
 /processor:FontDescriptionProcessor
 /processorParam:PremultiplyAlpha=True
 /processorParam:TextureFormat=Compressed
-/build:ItemFont.spritefont
-
-#begin LightCalculator.fx
-/importer:EffectImporter
-/processor:EffectProcessor
-/processorParam:DebugMode=Auto
-/build:LightCalculator.fx
-
-#begin MaskLight.fx
-/importer:EffectImporter
-/processor:EffectProcessor
-/processorParam:DebugMode=Auto
-/build:MaskLight.fx
-
-#begin Rotation.fx
-/importer:EffectImporter
-/processor:EffectProcessor
-/processorParam:DebugMode=Auto
-/build:Rotation.fx
+/build:Fonts/ItemFont.spritefont
 

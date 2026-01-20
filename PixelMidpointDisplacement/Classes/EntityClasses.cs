@@ -151,6 +151,10 @@ namespace PixelMidpointDisplacement {
         public double baseJumpAcceleration;
         public double jumpAcceleration;
 
+        public int entityDirection = 1;
+
+        public bool collideWithPlatforms = true;
+        private bool isCollidingWithPlatforms = false;
 
 
         public Entity(WorldContext wc) : base(wc)
@@ -160,12 +164,15 @@ namespace PixelMidpointDisplacement {
 
         public virtual void inputUpdate(double elapsedTime)
         {
+            if (!isCollidingWithPlatforms)
+            {
+                collideWithPlatforms = true;
+            }
             for (int i = 0; i < inputListeners.Count; i++)
             {
                 inputListeners[i].onInput(elapsedTime);
             }
-
-
+            isCollidingWithPlatforms = false;
         }
 
         public override void onBlockCollision(Vector2 collisionNormal, WorldContext worldContext, int blockX, int blockY)
@@ -185,6 +192,10 @@ namespace PixelMidpointDisplacement {
                         applyDamage(null, DamageType.Falldamage, -velocityY);
                     }
                 }
+            }
+
+            if (worldContext.worldArray[blockX, blockY] is WoodenPlatformBlock wpb) {
+                isCollidingWithPlatforms = true;
             }
 
         }
@@ -211,6 +222,65 @@ namespace PixelMidpointDisplacement {
             }
         }
 
+
+        public void walkRight() {
+            if (velocityX < maxMovementVelocityX)
+            {
+                //The or is not on ground is there to allow air control for QOL
+                if (baseHorizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
+                {
+                    accelerationX += baseHorizontalAcceleration;
+                    frictionDirection += 1;
+                }
+                else
+                {
+                    accelerationX += cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity;
+                    frictionDirection += 1;
+                }
+            }
+            else
+            {
+                frictionDirection += 1;
+            }
+
+            directionalEffect = SpriteEffects.None;
+            entityDirection = 1;
+        }
+
+        public void walkLeft() {
+
+            if (velocityX > -maxMovementVelocityX)
+            {
+                //The or is not on ground is there to allow air control for QOL
+                if (baseHorizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
+                {
+                    accelerationX -= baseHorizontalAcceleration;
+                    frictionDirection -= 1;
+                }
+                else
+                {
+                    accelerationX -= cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity;
+                    frictionDirection -= 1;
+                }
+            }
+            else
+            {
+                frictionDirection -= 1;
+            }
+            directionalEffect = SpriteEffects.FlipHorizontally;
+            entityDirection = -1;
+        }
+
+        public void jump(double elapsedTime) {
+            if (isOnGround)
+            {
+                accelerationY += baseJumpAcceleration / elapsedTime;
+            }
+        }
+
+        public void drop() {
+            collideWithPlatforms = false;
+        }
 
         //Currently depricated
         public virtual void applyEffect() { }
@@ -268,9 +338,8 @@ namespace PixelMidpointDisplacement {
 
         }
     }
-    public class ControlledEntity : SpawnableEntity, IGroundTraversalAlgorithm, IPassiveCollider
+    public class EvilClone : SpawnableEntity, IGroundTraversalAlgorithm, IPassiveCollider
     {
-
         public double notJumpThreshold { get; set; }
         public double jumpWhenWithinXRange { get; set; }
 
@@ -297,9 +366,7 @@ namespace PixelMidpointDisplacement {
 
 
         Player player;
-
-        int playerDirection;
-        public ControlledEntity(WorldContext wc, Player target) : base(wc)
+        public EvilClone(WorldContext wc, Player target) : base(wc)
         {
             player = target;
 
@@ -308,24 +375,16 @@ namespace PixelMidpointDisplacement {
             xDifferenceThreshold = 10;
             drawWidth = 1.5f;
             drawHeight = 3;
-            playerDirection = 1;
+            entityDirection = 1;
 
             maxMovementVelocityX = 7;
 
             maxInvincibilityCooldown = 0.2;
-
-            accelerationX = 0.0;
-            accelerationY = 0.0;
-            velocityX = 0;
-            velocityY = 0;
-            x = 40.0;
-            y = 00.0;
             kX = 0.02;
             kY = 0.02;
 
             defaultkX = 0.02;
             defaultkY = 0.02;
-            bounceCoefficient = 0.0;
             minVelocityX = 0.5;
             minVelocityY = 0.01;
 
@@ -416,59 +475,23 @@ namespace PixelMidpointDisplacement {
 
             if (leftRight == 1)
             {
-                if (velocityX < maxMovementVelocityX)
-                {
-                    //The or is not on ground is there to allow air control for QOL
-                    if (baseHorizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
-                    {
-                        accelerationX += baseHorizontalAcceleration;
-                        frictionDirection += 1;
-                    }
-                    else
-                    {
-                        accelerationX += cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity;
-                        frictionDirection += 1;
-                    }
-                }
-                else
-                {
-                    frictionDirection += 1;
-                }
+                walkRight();
 
                 if (!spriteAnimator.isAnimationActive)
                 {
                     spriteAnimator.startAnimation(0.5, "walk");
                 }
-                playerDirection = 1;
-                directionalEffect = SpriteEffects.None;
+                entityDirection = 1;
 
             }
             if (leftRight == 2)
             {
-                if (velocityX > -maxMovementVelocityX)
-                {
-                    //The or is not on ground is there to allow air control for QOL
-                    if (baseHorizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
-                    {
-                        accelerationX -= baseHorizontalAcceleration;
-                        frictionDirection -= 1;
-                    }
-                    else
-                    {
-                        accelerationX -= cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity;
-                        frictionDirection -= 1;
-                    }
-                }
-                else
-                {
-                    frictionDirection -= 1;
-                }
+                walkLeft();
                 if (!spriteAnimator.isAnimationActive)
                 {
                     spriteAnimator.startAnimation(0.5, "walk");
                 }
-                playerDirection = -1;
-                directionalEffect = SpriteEffects.FlipHorizontally;
+                entityDirection = -1;
             }
             if (leftRight == 0)
             {
@@ -476,10 +499,10 @@ namespace PixelMidpointDisplacement {
             }
             if (upDown == 1)
             {
-                if (isOnGround)
-                {
-                    accelerationY += baseJumpAcceleration / elapsedTime;
-                }
+                jump(elapsedTime);
+            }
+            else if (upDown == -1) {
+                drop();
             }
 
             //Update invincibilityCooldown:
@@ -514,14 +537,14 @@ namespace PixelMidpointDisplacement {
 
         public override Entity copyEntity()
         {
-            return new ControlledEntity(worldContext, player);
+            return new EvilClone(worldContext, player);
         }
 
         public void onCollision(ICollider externalCollider)
         {
             if (externalCollider is Player p)
             {
-                p.velocityX = 7 * playerDirection;
+                p.velocityX = 7 * entityDirection;
                 p.velocityY += 7;
 
                 //Have to move the player up, because of the slight overlap with the lower block, it causes a collision to detect and counteract the velocity?
@@ -542,7 +565,7 @@ namespace PixelMidpointDisplacement {
 
         public bool writeToChat;
 
-        public Player owner { get; set; }
+        public Entity owner { get; set; }
         public bool isActive { get; set; }
         public double invincibilityCooldown { get; set; }
         public double maxInvincibilityCooldown { get; set; }
@@ -559,8 +582,8 @@ namespace PixelMidpointDisplacement {
         public UIElement equipmentBackground;
 
         public int collisionCount = 0;
-
-        public int playerDirection { get; set; }
+        public bool hasSpawnedAnNPC = false;
+        public int entityDirection { get; set; }
 
 
         int initialX = 10;
@@ -580,6 +603,8 @@ namespace PixelMidpointDisplacement {
         public EvolutionTree evolutionTree;
 
         public PlayerUIController playerUI;
+
+        public string playerName = "John";
 
         public Player(WorldContext wc) : base(wc)
         {
@@ -775,6 +800,8 @@ namespace PixelMidpointDisplacement {
                 }
                 equipmentBackground.isUIElementActive = true;
                 worldContext.engineController.craftingManager.inventoryWasOpened();
+                worldContext.engineController.housingController.inventoryWasOpened();
+
             }
 
 
@@ -804,6 +831,8 @@ namespace PixelMidpointDisplacement {
                 selectedItem.dropItem();
 
                 worldContext.engineController.craftingManager.inventoryWasClosed();
+                worldContext.engineController.housingController.inventoryWasClosed();
+
 
             }
 
@@ -868,60 +897,29 @@ namespace PixelMidpointDisplacement {
                         //Movement
                         if (Keyboard.GetState().IsKeyDown(Keys.D))
                         {
-                            if (velocityX < maxMovementVelocityX)
-                            {
-                                //The or is not on ground is there to allow air control for QOL
-                                if (horizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
-                                {
-                                    accelerationX += horizontalAcceleration;
-                                    frictionDirection += 1;
-                                }
-                                else
-                                {
-                                    accelerationX += cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity;
-                                    frictionDirection += 1;
-                                }
-                            }
-                            else
-                            {
-                                frictionDirection += 1;
-                            }
+                            walkRight();
 
                             if (!spriteAnimator.isAnimationActive)
                             {
                                 spriteAnimator.startAnimation(0.5, "walk");
                             }
-                            playerDirection = 1;
-                            directionalEffect = SpriteEffects.None;
+                            entityDirection = 1;
 
                         }
                         if (Keyboard.GetState().IsKeyDown(Keys.A))
                         {
-                            if (velocityX > -maxMovementVelocityX)
-                            {
-                                if (horizontalAcceleration < cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity || !isOnGround)
-                                {
-                                    accelerationX -= horizontalAcceleration;
-                                    frictionDirection -= 1;
-                                }
-                                else
-                                {
-                                    accelerationX -= cummulativeCoefficientOfFriction * worldContext.engineController.physicsEngine.gravity;
-                                    frictionDirection -= 1;
-                                }
-                            }
-                            else
-                            {
-                                frictionDirection -= 1;
-                            }
+                            walkLeft();
 
 
                             if (!spriteAnimator.isAnimationActive)
                             {
                                 spriteAnimator.startAnimation(0.5, "walk");
                             }
-                            playerDirection = -1;
-                            directionalEffect = SpriteEffects.FlipHorizontally;
+                            entityDirection = -1;
+                        }
+
+                        if (Keyboard.GetState().IsKeyDown(Keys.S)) {
+                            drop();
                         }
                     }
                     else
@@ -934,10 +932,7 @@ namespace PixelMidpointDisplacement {
                     }
                     if (Keyboard.GetState().IsKeyDown(Keys.W) || Keyboard.GetState().IsKeyDown(Keys.Space))
                     {
-                        if (isOnGround)
-                        {
-                            accelerationY += jumpAcceleration / elapsedTime;
-                        }
+                        jump(elapsedTime);
                     }
                     if (Keyboard.GetState().IsKeyDown(Keys.R))
                     {
@@ -1067,13 +1062,14 @@ namespace PixelMidpointDisplacement {
                     }
 
                     //Spawn an entity for testing:
-                    if (Keyboard.GetState().IsKeyDown(Keys.J) && openInventoryCooldown <= 0)
+                    if (Keyboard.GetState().IsKeyDown(Keys.J) && !hasSpawnedAnNPC)
                     {
+                        hasSpawnedAnNPC = true;
                         openInventoryCooldown = maxOpenInventoryCooldown;
-                        ControlledEntity testEntity = new ControlledEntity(worldContext, this);
+                        HandyNPC testEntity = new HandyNPC(worldContext);
                         testEntity.x = Mouse.GetState().X - worldContext.screenSpaceOffset.x;
                         testEntity.y = Mouse.GetState().Y - worldContext.screenSpaceOffset.y;
-
+                        worldContext.engineController.npcController.unlockedAnNPC(testEntity);
                         //testEntity.setSpriteTexture(spriteSheet);
                     }
 
@@ -1099,7 +1095,7 @@ namespace PixelMidpointDisplacement {
 
                             float initialVelocity = 8f;
                             double pickupDelay = 1f;
-                            if (playerDirection == -1)
+                            if (entityDirection == -1)
                             {
                                 initialVelocity *= -1;
                             }
@@ -1254,7 +1250,7 @@ namespace PixelMidpointDisplacement {
         public Vector3 lightColor { get; set; }
         public float luminosity { get; set; }
         public float range { get; set; }
-        public Player owner { get; set; }
+        public Entity owner { get; set; }
         public bool isActive { get; set; }
 
         public double weaponDamage = 10;
@@ -1265,7 +1261,7 @@ namespace PixelMidpointDisplacement {
         public double maxInvincibilityCooldown { get; set; }
         public RenderTarget2D shadowMap { get; set; }
         public RenderTarget2D lightMap { get; set; }
-        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity, Player shooter) : base(wc)
+        public Arrow(WorldContext wc, (double x, double y) arrowLocation, double initialVelocity, Entity shooter) : base(wc)
         {
             spriteSheetID = (int)spriteSheetIDs.arrow;
             spriteAnimator = new SpriteAnimator(wc.animationController, Vector2.Zero, new Vector2(16, 16), new Vector2(16, 16), new Rectangle(0, 0, 16, 16), this);

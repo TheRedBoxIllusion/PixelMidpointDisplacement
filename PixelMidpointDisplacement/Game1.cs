@@ -244,7 +244,7 @@ using System.Threading;
         Modular:
             - The sky constructor takes in a sprite sheet ID, source dimensions, and a layer count, and creates an appropriate number of layers, ordered appropriately and with correct (or automatic at least) movement values
 
-    Refactor the sprite animator:                                                                                                                                   - Done
+    Refactor the sprite animator:                                                                               - Done                                                           - Done
         Work for all classes that can be drawn, instead of just the entity class
         
 
@@ -253,6 +253,45 @@ using System.Threading;
 
     Sky class Fix:
         Figure out why rendering the sky causes a significant drag/draw on rendering and frames. Is it because it's a very large rendering? Is it because it's moving? Is it because there's values being constantly assigned? Why.
+
+    NPCs:
+        - Housing algorithm                                                                                                     - Done
+            -> Find a method of determining if a variable sized area could be considered suitable for an npc: A torch, complete background, a roof, floor and walls, a door.
+
+        - Make it so that at the start of each day, all of the houses within the list are re-checked to ensure that they are still a valid housing. This way it won't be as intensive computationally but will still appear like the NPC's had a 'bad sleep' and moved
+
+    Entity pathfinding:
+        Create an improved pathfinding algorithm, that if the entity is within the 'not move' distance, check sideways (and upwards or downwards as necessary) and see if that is closer, find the closest and move towards it for a short period of time.
+
+
+    Proper main menu:
+        World Saving:
+            - Create a 'worlds controller' that knows what each world is.
+            - Make the engine controller own the worlds controller, instead of the world context owning the engine controller. The world context is no longer the supporting class for all data
+            - JSOn Serialising of the world context class.
+            - Make sure that the Player is not serialized, as the player needs to be separate from the world
+        
+        Player Saving
+            - JSOn serializing of the player instance
+            - A "Player Controller' that knows all of the saved players and can pass the selected instance in to the game/world
+            - A method inside the player for updating all the variables when the world context is assigned as the world generates in.
+
+        World Creation
+            - UI for creating a name of the world, and control variables of the world. We'll see what variables we think are worth giving the player control over. 
+            - A 'generate' button that creates the world, and serializes it as a saved file, for the world controller to access.
+        
+        Player Creation
+            - A UI that lets the player assign a name to their character, then serializes the character upon creation.
+
+        World Selection:
+            - A UI that takes the selected player, assigns it to the world context and then loads the selected world to the game.
+            - Also allows for new worlds to be generated
+
+        Player Selection
+            - Allows players to be created and also selected from the loaded player files.
+            - The selected player is loaded into the active game.
+            
+
  */
 
 /*
@@ -407,27 +446,31 @@ namespace PixelMidpointDisplacement
             redTexture.SetData<Color>(new Color[] { Color.Red });
             List<Texture2D> spriteSheetList = new List<Texture2D>();
             //Need a better way to ensure that they are in the same order as the spriteSheetIDs enum
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockSpriteSheet.png")); //0
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\weaponSpriteSheet.png")); //1
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockItemSpriteSheet.png")); //2
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\PlayerSpriteSheet.png")); //3
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ArrowSpriteSheet.png")); //4
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\MainMenuUISpriteSheet.png")); //5
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\blockBackgroundSpriteSheet.png"));//6
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\inventorySpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\healthUISpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\deathScreenSpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\armourSpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\accessorySpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\pixelNumbers.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionBackground.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionIconsSpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\evolutionCounterCharacters.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\oreSpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\ingotSpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\stringRenderingSpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\tooltipBackgroundSpriteSheet.png"));
-            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\skySpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Blocks\\blockSpriteSheet.png")); //0
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Items\\weaponSpriteSheet.png")); //1
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Items\\blockItemSpriteSheet.png")); //2
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Entities\\PlayerSpriteSheet.png")); //3
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Entities\\ArrowSpriteSheet.png")); //4
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\MainMenuUISpriteSheet.png")); //5
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Blocks\\blockBackgroundSpriteSheet.png"));//6
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\inventorySpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\healthUISpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\deathScreenSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Items\\armourSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Items\\accessorySpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\pixelNumbers.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\evolutionBackground.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\evolutionIconsSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\evolutionCounterCharacters.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Items\\oreSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\Items\\ingotSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\stringRenderingSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\tooltipBackgroundSpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\World\\skySpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\houseUISpriteSheet.png"));
+            spriteSheetList.Add(Texture2D.FromFile(_graphics.GraphicsDevice, AppDomain.CurrentDomain.BaseDirectory + "Content\\SpriteSheets\\UI\\dialogueSpriteSheet.png"));
+
+
 
             worldContext.engineController.spriteController.setSpriteSheetList(spriteSheetList);
 
@@ -496,6 +539,14 @@ namespace PixelMidpointDisplacement
                 checkCollisions();
                 updateBiome(gameTime);
                 updateEntities(gameTime);
+
+                if (Mouse.GetState().MiddleButton == ButtonState.Pressed)
+                {
+                    int mouseX = (int)Math.Floor((double)(Mouse.GetState().X - worldContext.screenSpaceOffset.x) / worldContext.pixelsPerBlock);
+                    int mouseY = (int)Math.Floor((double)(Mouse.GetState().Y - worldContext.screenSpaceOffset.y) / worldContext.pixelsPerBlock);
+
+                    worldContext.engineController.housingController.checkRoom(mouseX, mouseY);
+                }
                 if (worldContext.sun.sky != null)
                 {
                     worldContext.sun.sky.updateSky(worldContext);
@@ -599,6 +650,8 @@ namespace PixelMidpointDisplacement
 
                 Rectangle uiElementCollisionRect = uiElement.drawRectangle;
                 if (uiElement.alignment == UIAlignOffset.Centre) { uiElementCollisionRect.X += (_graphics.PreferredBackBufferWidth - uiElementCollisionRect.Width) / 2; }
+                if (uiElement.positionType == Position.WorldSpace) { uiElementCollisionRect.X += worldContext.screenSpaceOffset.x; uiElementCollisionRect.Y += worldContext.screenSpaceOffset.y; }
+                else if (uiElement.positionType == Position.BlockSpace) { uiElementCollisionRect.X *= worldContext.pixelsPerBlock; uiElementCollisionRect.Y *= worldContext.pixelsPerBlock; uiElementCollisionRect.X += worldContext.screenSpaceOffset.x; uiElementCollisionRect.Y += worldContext.screenSpaceOffset.y; }
                 if (Mouse.GetState().LeftButton == ButtonState.Pressed && new Rectangle(Mouse.GetState().X, Mouse.GetState().Y, 10, 10).Intersects(uiElementCollisionRect))
                 {
                     return true;
@@ -621,12 +674,17 @@ namespace PixelMidpointDisplacement
                     double heightScale = _graphics.PreferredBackBufferHeight / 1080;
                     if (uiElement.scaleType == Scale.Relative) { drawRect.Width = (int)(drawRect.Width * widthScale); drawRect.Height = (int)(drawRect.Height * heightScale); }
                     if (uiElement.positionType == Position.Relative) { drawRect.X = (int)(drawRect.X * widthScale); drawRect.Y = (int)(drawRect.Y * heightScale); }
+                    else if (uiElement.positionType == Position.BlockSpace) { drawRect.X = worldContext.screenSpaceOffset.x + (drawRect.X * worldContext.pixelsPerBlock); drawRect.Y = worldContext.screenSpaceOffset.y + (drawRect.Y * worldContext.pixelsPerBlock); }
+                    else if (uiElement.positionType == Position.WorldSpace) { drawRect.X = worldContext.screenSpaceOffset.x + (drawRect.X); drawRect.Y = worldContext.screenSpaceOffset.y + (drawRect.Y); }
+
                     if (uiElement.isUIElementActive)
                     {
                         _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[uiElement.spriteSheetID], drawRect, uiElement.sourceRectangle, uiElement.color);
 
-                        if (uiElement is InteractiveUIElement iue) {
-                            if (iue.buttonText != null) {
+                        if (uiElement is InteractiveUIElement iue)
+                        {
+                            if (iue.buttonText != null)
+                            {
                                 _spriteBatch.DrawString(itemCountFont, iue.buttonText, iue.textLocation, Color.White);
                             }
                         }
@@ -880,7 +938,10 @@ namespace PixelMidpointDisplacement
                 int mouseXGridSpace = (int)Math.Floor(mouseXPixelSpace / worldContext.pixelsPerBlock);
                 int mouseYGridSpace = (int)Math.Floor(mouseYPixelSpace / worldContext.pixelsPerBlock);
                 if (worldContext.worldArray[mouseXGridSpace, mouseYGridSpace] is InteractiveBlock b) {
-                    b.onRightClick(worldContext, gameTime);
+                    if (b.canBeClickedOn)
+                    {
+                        b.onRightClick(worldContext, gameTime);
+                    }
                 }
             }
         }
@@ -1021,14 +1082,15 @@ namespace PixelMidpointDisplacement
         }
 
         public void drawSky() {
+            ///*
             if (worldContext.sun.sky != null)
             {
                 for (int i = 0; i < worldContext.sun.sky.skyLayers.Count; i++)
                 {
                     SkyLayer layer = worldContext.sun.sky.skyLayers[i];
-                    _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[worldContext.sun.sky.spriteSheet], layer.drawRectangle, layer.sourceRectangle, Color.White);
+                        _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[worldContext.sun.sky.spriteSheet], layer.drawRectangle, layer.sourceRectangle, Color.White);
                 }
-            }
+            }//*/
         }
         public void drawDebugInfo()
         {
@@ -1127,10 +1189,10 @@ namespace PixelMidpointDisplacement
                 int rotationXOffset = 0;
                 int rotationYOffset = 0;
                 int positionXOffset = 0;
-                if (owner.owner.playerDirection < 0)
+                if (owner.owner.entityDirection < 0)
                 {
                     //If the item is facing towards the negative x, account for flipping the image
-                    rotationXOffset = owner.owner.playerDirection * owner.sourceRectangle.Width;
+                    rotationXOffset = owner.owner.entityDirection * owner.sourceRectangle.Width;
                     positionXOffset = (int)(owner.owner.width * worldContext.pixelsPerBlock); //Might need to modify the collider to account for this change...
                 }
                 if (owner.verticalDirection < 0)
@@ -1138,9 +1200,9 @@ namespace PixelMidpointDisplacement
                     //If the item is facing towards negative y, account for flipping the image
                     rotationYOffset = owner.verticalDirection * owner.sourceRectangle.Height;
                 }
-                Vector2 origin = new Vector2(owner.owner.playerDirection * owner.origin.X - rotationXOffset, owner.verticalDirection * owner.origin.Y - rotationYOffset);
+                Vector2 origin = new Vector2(owner.owner.entityDirection * owner.origin.X - rotationXOffset, owner.verticalDirection * owner.origin.Y - rotationYOffset);
 
-                _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[owner.spriteSheetID], new Rectangle((int)(owner.owner.x + worldContext.screenSpaceOffset.x + a.currentPosition.xPos + positionXOffset), (int)(owner.owner.y + worldContext.screenSpaceOffset.y + a.currentPosition.yPos), (int)(owner.drawRectangle.Width), (int)(owner.drawRectangle.Height)), owner.sourceRectangle, Color.White, (float)(owner.owner.playerDirection * (a.currentPosition.rotation)), origin, owner.drawEffect | owner.owner.directionalEffect, 0f);
+                _spriteBatch.Draw(worldContext.engineController.spriteController.spriteSheetList[owner.spriteSheetID], new Rectangle((int)(owner.owner.x + worldContext.screenSpaceOffset.x + a.currentPosition.xPos + positionXOffset), (int)(owner.owner.y + worldContext.screenSpaceOffset.y + a.currentPosition.yPos), (int)(owner.drawRectangle.Width), (int)(owner.drawRectangle.Height)), owner.sourceRectangle, Color.White, (float)(owner.owner.entityDirection * (a.currentPosition.rotation)), origin, owner.drawEffect | owner.owner.directionalEffect, 0f);
 
             }
 
@@ -1173,7 +1235,8 @@ namespace PixelMidpointDisplacement
                     //Check to make sure that the light would actually be rendered on screen instead of just some random block far away. 
                     //Will need to adjust this once off screen shadows are considered, and a ton of other things to think about
                     //Just check the blocks that are within the lights 'range'
-                    if (lightPosition.X > -0.2 && lightPosition.Y > -0.2 && lightPosition.Y < 1.2 && lightPosition.X < 1.2)
+                    const double offScreenRange = 0.2;
+                    if (lightPosition.X > -offScreenRange && lightPosition.Y > -offScreenRange && lightPosition.Y < 1+offScreenRange && lightPosition.X < 1 + offScreenRange)
                     {
                         calculateShadowMap(worldContext.engineController.lightingSystem.emissiveBlocks[i], lightPosition); //A noticable performance drop at 10 dynamic lights. At 30 lights, it drops to 9-20fps
                         calculateLightmap(worldContext.engineController.lightingSystem.emissiveBlocks[i], lightPosition); //Minor impact on performance
@@ -1199,8 +1262,6 @@ namespace PixelMidpointDisplacement
             calculateLightmap(worldContext.sun, lightPosition); //Minor impact on performance
             addLightmapToGlobalLights(worldContext.sun);
         }
-
-
 
         public void calculateLightmap(IEmissiveBlock lightObject, Vector2 lightPosition)
         {
@@ -1650,7 +1711,9 @@ namespace PixelMidpointDisplacement
         leaves,
         semiLeaves,
         bush,
-        bigBush
+        bigBush,
+        woodenDoor,
+        woodenPlatform
     }
     public enum backgroundBlockIDs {
         air,
@@ -1683,7 +1746,9 @@ namespace PixelMidpointDisplacement
         ingotSpriteSheet,
         stringRendering,
         tooltipBackground,
-        skyLayers
+        skyLayers,
+        houseUI,
+        dialogue
     }
     public enum Scene {
         MainMenu,

@@ -170,7 +170,6 @@ namespace PixelMidpointDisplacement {
                     }
                     else if (r.NextDouble() < branchProbability && blocksTilBranch <= currentBlocksFromBranch)
                     {
-                        System.Diagnostics.Debug.WriteLine("Tried to branch");
                         branches[i].x = currentX;
                         branches[i].y = currentY;
                         //int angleDifferentSign = (r.Next(0, 2) * 2) - 1;

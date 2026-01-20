@@ -1,7 +1,17 @@
-﻿using Microsoft.Xna.Framework;
+﻿
+
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
 using System;
+
 using System.Collections.Generic;
+
+using System.Linq;
+using System.Threading;
+using Vector2 = Microsoft.Xna.Framework.Vector2;
+using Vector3 = Microsoft.Xna.Framework.Vector3;
 
 namespace PixelMidpointDisplacement {
 
@@ -30,13 +40,17 @@ namespace PixelMidpointDisplacement {
         public bool hasTransparency = false;
         public Vector4 faceDirection;
 
+        public Vector2 blockColliderDimensions = new Vector2(1, 1);
         public double hardness = 15;
         public double durability = 3;
+
+        public bool hasCollisions = true;
         public Block(Rectangle textureSourceRectangle, int ID)
         {
             this.sourceRectangle = textureSourceRectangle;
             this.ID = ID;
             drawRectangle = new Rectangle(0, 0, 1, 1);
+            setData();
         }
         public Block(Rectangle textureSourceRectangle, int emmissiveStrength, int ID)
         {
@@ -44,11 +58,13 @@ namespace PixelMidpointDisplacement {
             this.emmissiveStrength = emmissiveStrength;
             this.ID = ID;
             drawRectangle = new Rectangle(0, 0, 1, 1);
+            setData();
 
         }
         public Block(int ID)
         {
             this.ID = ID;
+            setData();
 
         }
 
@@ -61,6 +77,7 @@ namespace PixelMidpointDisplacement {
             x = b.x;
             y = b.y;
             drawRectangle = new Rectangle(0, 0, 1, 1);
+            setData();
         }
 
         public void setLocation((int x, int y) location)
@@ -112,34 +129,34 @@ namespace PixelMidpointDisplacement {
             if (exposedFacesClockwise.X == 1)
             {
                 faceVertices.Add(new Vector2((int)x, (int)y));
-                faceVertices.Add(new Vector2((int)x + drawRectangle.Width, (int)y));
+                faceVertices.Add(new Vector2((int)x + blockColliderDimensions.X, (int)y));
             }
             if (exposedFacesClockwise.Y == 1)
             {
                 //Check if the vertex already exists from the previous if statement
-                if (!faceVertices.Contains(new Vector2((int)x + drawRectangle.Width, (int)y)))
+                if (!faceVertices.Contains(new Vector2((int)x + blockColliderDimensions.X, (int)y)))
                 {
 
-                    faceVertices.Add(new Vector2((int)x + drawRectangle.Width, (int)y));
+                    faceVertices.Add(new Vector2((int)x + blockColliderDimensions.X, (int)y));
                 }
 
 
-                faceVertices.Add(new Vector2((int)x + drawRectangle.Width, (int)y + drawRectangle.Height));
+                faceVertices.Add(new Vector2((int)x + blockColliderDimensions.X, (int)y + blockColliderDimensions.Y));
             }
             if (exposedFacesClockwise.Z == 1)
             {
-                if (!faceVertices.Contains(new Vector2((int)x + drawRectangle.Width, (int)y + drawRectangle.Height)))
+                if (!faceVertices.Contains(new Vector2((int)x + blockColliderDimensions.X, (int)y + blockColliderDimensions.Y)))
                 {
-                    faceVertices.Add(new Vector2((int)x + drawRectangle.Width, (int)y + drawRectangle.Height));
+                    faceVertices.Add(new Vector2((int)x + blockColliderDimensions.X, (int)y + blockColliderDimensions.Y));
                 }
 
-                faceVertices.Add(new Vector2((int)x, (int)y + drawRectangle.Height));
+                faceVertices.Add(new Vector2((int)x, (int)y + blockColliderDimensions.Y));
             }
             if (exposedFacesClockwise.W == 1)
             {
-                if (!faceVertices.Contains(new Vector2((int)x, (int)y + drawRectangle.Height)))
+                if (!faceVertices.Contains(new Vector2((int)x, (int)y + blockColliderDimensions.Y)))
                 {
-                    faceVertices.Add(new Vector2((int)x, (int)y + drawRectangle.Height));
+                    faceVertices.Add(new Vector2((int)x, (int)y + blockColliderDimensions.Y));
                 }
 
                 faceVertices.Add(new Vector2((int)x, (int)y));
@@ -149,7 +166,7 @@ namespace PixelMidpointDisplacement {
         public virtual void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
         {
             Rectangle entityCollider = new Rectangle((int)entity.x, (int)entity.y, entity.collider.Width, entity.collider.Height);
-            Rectangle blockRect = new Rectangle((int)x * wc.pixelsPerBlock, (int)y * wc.pixelsPerBlock, wc.pixelsPerBlock, wc.pixelsPerBlock);
+            Rectangle blockRect = new Rectangle((int)x * wc.pixelsPerBlock, (int)y * wc.pixelsPerBlock, (int)(blockColliderDimensions.X * wc.pixelsPerBlock), (int)(blockColliderDimensions.Y * wc.pixelsPerBlock));
             Vector2 collisionNormal = physicsEngine.computeCollisionNormal(entityCollider, blockRect);
             entity.hasCollided();
 
@@ -199,6 +216,8 @@ namespace PixelMidpointDisplacement {
             }
 
         }
+
+        public virtual void setData() { }
 
         public virtual Block copyBlock()
         {
@@ -437,27 +456,40 @@ namespace PixelMidpointDisplacement {
     }
     public class InteractiveBlock : Block
     {
-        public double secondsSinceAction;
         public double maximumCooldown;
+        public Timer useTimer;
+        public bool canBeClickedOn = false;
 
-        public InteractiveBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID) { }
+        public InteractiveBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID) {
+            useTimer = new Timer(useTimerFinished, null, 0, Timeout.Infinite);
+
+        }
 
         //This one is slightly outdated?
         public InteractiveBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
-        { }
+        {
+            useTimer = new Timer(useTimerFinished, null, 0, Timeout.Infinite);
+        }
 
         public InteractiveBlock(int ID) : base(ID)
         {
+            useTimer = new Timer(useTimerFinished, null, 0, Timeout.Infinite);
 
         }
 
         public InteractiveBlock(Block b) : base(b)
         {
+            useTimer = new Timer(useTimerFinished, null, 0, Timeout.Infinite);
 
+        }
+        public virtual void useTimerFinished(object? objectInfo) {
+            canBeClickedOn = true;
         }
         public virtual void onRightClick(WorldContext worldContext, GameTime gameTime)
         {
             //Execute some code here. Perhaps pass in some variable data, such as world context or whatever, we'll just add what's needed
+            canBeClickedOn = false;
+            useTimer.Change((int)(maximumCooldown * 1000), Timeout.Infinite);
         }
     }
     public class OreBlock : Block
@@ -667,6 +699,7 @@ namespace PixelMidpointDisplacement {
             lightColor = new Vector3(1, 0.2f, 0.1f);
             luminosity = 1000f;
             range = 496;
+            hasCollisions = false;
         }
 
 
@@ -781,15 +814,18 @@ namespace PixelMidpointDisplacement {
         public TreeBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
         {
             this.sourceRectangle = textureSourceRectangle;
+            hasCollisions = false;
         }
         public TreeBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
         {
             this.sourceRectangle = textureSourceRectangle;
             this.emmissiveStrength = emmissiveStrength;
+            hasCollisions = false;
         }
         public TreeBlock(int ID) : base(ID)
         {
             this.ID = ID;
+            hasCollisions = false;
         }
 
         public TreeBlock(Block b) : base(b)
@@ -797,9 +833,15 @@ namespace PixelMidpointDisplacement {
             sourceRectangle = b.sourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
+ 
+
+        }
+
+        public override void setData()
+        {
             hardness = 15;
             durability = 4;
-
+            hasCollisions = false;
         }
 
         public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
@@ -818,6 +860,7 @@ namespace PixelMidpointDisplacement {
         public LeafBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
         {
             this.sourceRectangle = textureSourceRectangle;
+            hasCollisions = false;
         }
         public LeafBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
         {
@@ -834,6 +877,12 @@ namespace PixelMidpointDisplacement {
             sourceRectangle = b.sourceRectangle;
             emmissiveStrength = b.emmissiveStrength;
             ID = b.ID;
+
+        }
+
+        public override void setData()
+        {
+            hasCollisions = false;
             hardness = 1;
             durability = 1;
         }
@@ -1181,6 +1230,12 @@ namespace PixelMidpointDisplacement {
 
         }
 
+        public override void setData()
+        {
+            isBlockTransparent = true;
+            hasCollisions = false;
+
+        }
         public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
         {
             blockDestroyed(exposedBlocks);
@@ -1208,14 +1263,18 @@ namespace PixelMidpointDisplacement {
         public BigBushBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
         {
             this.sourceRectangle = textureSourceRectangle;
-            isBlockTransparent = true;
 
         }
         public BigBushBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
         {
             this.sourceRectangle = textureSourceRectangle;
             this.emmissiveStrength = emmissiveStrength;
+        }
+
+        public override void setData()
+        {
             isBlockTransparent = true;
+            hasCollisions = false;
 
         }
         public BigBushBlock(int ID) : base(ID)
@@ -1316,10 +1375,14 @@ namespace PixelMidpointDisplacement {
 
         public ChestBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
         {
-            maximumCooldown = 0.1f;
-            isBlockTransparent = true;
+
         }
         public ChestBlock(Rectangle textureSourceRectangle, int emissiveStrength, int ID) : base(textureSourceRectangle, emissiveStrength, ID)
+        {
+
+        }
+
+        public override void setData()
         {
             maximumCooldown = 0.1f;
             isBlockTransparent = true;
@@ -1406,9 +1469,7 @@ namespace PixelMidpointDisplacement {
         }
         public override void onRightClick(WorldContext worldContext, GameTime gameTime)
         {
-            if (gameTime.TotalGameTime.TotalSeconds - secondsSinceAction > maximumCooldown)
-            {
-                secondsSinceAction = gameTime.TotalGameTime.TotalSeconds;
+
                 if (inventory[0, 0].isUIElementActive)
                 {
                     ((IInventory)this).hideInventory();
@@ -1423,7 +1484,6 @@ namespace PixelMidpointDisplacement {
                         worldContext.player.activeInventories.Add(this);
                     }
                 }
-            }
         }
         public override Block copyBlock()
         {
@@ -1432,4 +1492,278 @@ namespace PixelMidpointDisplacement {
 
     }
 
+    public class WoodenDoorBlock : InteractiveBlock
+    {
+
+        public int topX;
+        public int topY;
+        public bool triedToBreak = false;
+
+        public int doorHeight = 3;
+        public bool isTopOfDoor = false;
+
+
+        public bool isDoorOpen = false;
+
+        public List<int> doorBlocks = new List<int>();
+
+        //Need to set the collider rectangle
+        public WoodenDoorBlock(Block b) : base(b)
+        {
+        }
+
+        public WoodenDoorBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
+        {
+
+        }
+
+        public WoodenDoorBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
+        {
+            
+        }
+
+        public override void setData()
+        {
+            blockColliderDimensions = new Vector2(0.25f, 1);
+            hasTransparency = true;
+            maximumCooldown = 0.4f;
+        }
+
+        public override bool canBlockBePlaced(WorldContext worldContext, (int x, int y) location)
+        {
+            bool isBlockBelowSolid = !worldContext.worldArray[location.x, location.y + 1].isBlockTransparent;
+            bool isBlockAboveAir = worldContext.worldArray[location.x, location.y - 1].isBlockTransparent || worldContext.worldArray[location.x, location.y - 1].ID == (int)blockIDs.air;
+            bool isBlockBelowAlsoTheSameDoor = worldContext.worldArray[location.x, location.y + 1].ID == ID;
+            return isBlockBelowAlsoTheSameDoor || (isBlockBelowSolid && isBlockAboveAir);
+        }
+
+        public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
+        {
+            //Search below to see if the block is a door:
+
+            /*bool isBlockBelowAlsoADoor = false;
+            for (int i = 1; i < doorHeight; i++)
+            {
+                if (location.x >= 0 && location.x < worldContext.worldArray.GetLength(0) && location.y + 1 >= 0 && location.y < worldContext.worldArray.GetLength(1))
+                {
+                    if (worldContext.worldArray[location.x, location.y + 1].ID == ID)
+                    {
+                        topX = location.x;
+                        topY = location.y + 1;
+                        isBlockBelowAlsoADoor = true;
+                        sourceRectangle.Y -= 32;
+                    }
+                }
+            }
+
+            if (!isBlockBelowAlsoADoor) {
+                //Generate a door above
+                worldContext.addBlock(location.x, location.y - 1, ID);
+                topX = location.x;
+                topY = location.y - 1;
+            }*/
+
+            //Check the block below, if it is a door, look at the list of door blocks to see if it contains the current block.
+            //If it does, then don't do anything, just set the doors list to the same as below
+            //Else, then its a new door, so populate the list with new values from this location to 2 above:
+
+            if (location.x >= 0 && location.x < worldContext.worldArray.GetLength(0) && location.y + 1 >= 0 && location.y < worldContext.worldArray.GetLength(1))
+            {
+                if (worldContext.worldArray[location.x, location.y + 1] is WoodenDoorBlock wdb)
+                {
+                    if (wdb.doorBlocks.Contains(location.y))
+                    {
+                        //Then it's part of an existing door
+                        doorBlocks = wdb.doorBlocks;
+                        sourceRectangle.Y -= 32 * doorBlocks.IndexOf(location.y);
+
+                    }
+                    else {
+                        //It's a new door, so generate the appropriate values:
+                        newDoor(worldContext, location);
+                    }
+                } else {
+                    newDoor(worldContext,location);
+                }
+            }
+
+                    base.onBlockPlaced(worldContext, location);
+
+
+        }
+
+        private void newDoor(WorldContext worldContext, (int x, int y) location) {
+            for (int i = 0; i < doorHeight; i++)
+            {
+                doorBlocks.Add(location.y - i);
+            }
+
+            for (int i = 1; i < doorBlocks.Count; i++)
+            {
+                worldContext.addBlock(location.x, doorBlocks[i], ID);
+            }
+        }
+
+        public override void onBlockDestroyed(Dictionary<(int x, int y), Block> exposedBlocks, WorldContext wc)
+        {
+            if (!triedToBreak) {
+                triedToBreak = true;
+                for (int i = 0; i < doorBlocks.Count; i++)
+                {
+                    wc.deleteBlock((int)x, doorBlocks[i]);
+                }
+            }
+            if (doorBlocks[0] == y)
+            {
+                base.onBlockDestroyed(exposedBlocks, wc);
+            }
+        }
+        public override void onRightClick(WorldContext worldContext, GameTime gameTime)
+        {
+            //Alternate the door:
+            setDoorState(worldContext, !isDoorOpen);
+            for (int i = 0; i < doorBlocks.Count; i++)
+            {
+                if (doorBlocks[i] != y)
+                {
+                    if (worldContext.worldArray[(int)x, doorBlocks[i]] is WoodenDoorBlock b)
+                    {
+                        b.setDoorState(worldContext, isDoorOpen);
+                    }
+                }
+            }
+            base.onRightClick(worldContext, gameTime);
+
+        }
+
+        public void setDoorState(WorldContext worldContext, bool isDoorOpen) {
+            this.isDoorOpen = isDoorOpen;
+            hasCollisions = !isDoorOpen;
+            if (isDoorOpen)
+            {
+                isBlockTransparent = true;
+                sourceRectangle.X = 32;
+            }
+            else
+            {
+                isBlockTransparent = false;
+                blockColliderDimensions.X = 0.25f;
+                sourceRectangle.X = 0;
+            }
+        }
+
+
+        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
+        {
+            if (!isDoorOpen)
+            {
+                base.onCollisionWithPhysicsObject(entity, physicsEngine, wc);
+            }
+
+        }
+
+        public override Block copyBlock()
+        {
+            return new WoodenDoorBlock(this);
+        }
+    }
+
+    public class WoodenPlatformBlock : Block {
+        public WoodenPlatformBlock(Block b) : base(b)
+        {
+        }
+
+        public WoodenPlatformBlock(Rectangle textureSourceRectangle, int ID) : base(textureSourceRectangle, ID)
+        {
+
+        }
+
+        public WoodenPlatformBlock(Rectangle textureSourceRectangle, int emmissiveStrength, int ID) : base(textureSourceRectangle, emmissiveStrength, ID)
+        {
+
+        }
+        public override void setData()
+        {
+            blockColliderDimensions = new Vector2(1f, 0.25f);
+
+            base.setData();
+        }
+
+        public override void onBlockPlaced(WorldContext worldContext, (int x, int y) location)
+        {
+            bool platformLeft = false;
+            bool platformRight = false;
+            if (x - 1 >= 0)
+            {
+                if (worldContext.worldArray[(int)x - 1, (int)y].ID == ID)
+                {
+                    platformLeft = true;
+                }
+            }
+            if (x + 1 < worldContext.worldArray.GetLength(0))
+            {
+                if (worldContext.worldArray[(int)x + 1, (int)y].ID == ID)
+                {
+                    platformRight = true;
+                }
+            }
+
+            if ((platformLeft && platformRight) || (!platformLeft && !platformRight))
+            {
+                sourceRectangle.X = 32;
+            }
+            else if (platformRight) {
+                sourceRectangle.X = 64;
+            }
+
+                base.onBlockPlaced(worldContext, location);
+        }
+
+        public override void onCollisionWithPhysicsObject(PhysicsObject entity, PhysicsEngine physicsEngine, WorldContext wc)
+        {
+            if (entity is Entity e)
+            {
+                if (e.collideWithPlatforms)
+                {
+
+                    Rectangle entityCollider = new Rectangle((int)entity.x, (int)entity.y, entity.collider.Width, entity.collider.Height);
+                    Rectangle blockRect = new Rectangle((int)x * wc.pixelsPerBlock, (int)y * wc.pixelsPerBlock, (int)(blockColliderDimensions.X * wc.pixelsPerBlock), (int)(blockColliderDimensions.Y * wc.pixelsPerBlock));
+                    Vector2 collisionNormal = physicsEngine.computeCollisionNormal(entityCollider, blockRect);
+                    entity.hasCollided();
+
+                    //If the signs are unequal on either the velocity or the acceleration then the forces should cancel as the resulting motion would be counteracted by the block
+                    if (((Math.Sign(collisionNormal.Y) != Math.Sign(entity.velocityY) && entity.velocityY != 0 && entity.velocityY < 0) || (Math.Sign(collisionNormal.Y) != Math.Sign(entity.accelerationY) && entity.accelerationY != 0) && entity.accelerationY < 0) && collisionNormal.Y != 0)
+                    {
+                        entity.velocityY -= (1 + entity.bounceCoefficient) * entity.velocityY;
+                        entity.accelerationY -= entity.accelerationY;
+
+                        if (Math.Sign(collisionNormal.Y) > 0)
+                        {
+                            entity.isOnGround = true;
+                            //Set the coefficient of friction if the current block has a greater friction value than the previous maximum
+                            if (entity.cummulativeCoefficientOfFriction < coefficientOfFriction + entity.objectCoefficientOfFriction)
+                            {
+                                entity.cummulativeCoefficientOfFriction = coefficientOfFriction + entity.objectCoefficientOfFriction;
+                            }
+
+                        }
+
+                        if (Math.Sign(collisionNormal.Y) > 0)
+                        {
+                            entity.y = blockRect.Y - entityCollider.Height + 1;
+                        }
+                        else
+                        {
+                            entity.y = blockRect.Bottom - 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        public override Block copyBlock()
+        {
+            return new WoodenPlatformBlock(this);
+        }
+    }
 }

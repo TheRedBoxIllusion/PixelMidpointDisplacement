@@ -1,19 +1,16 @@
-﻿using System;
-using System.IO;
-using Microsoft.Xna.Framework;
+﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
-
+using System;
 using System.Collections.Generic;
-
+using System.IO;
 using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading;
-
-
+using static System.Formats.Asn1.AsnWriter;
 using Vector2 = Microsoft.Xna.Framework.Vector2;
 using Vector3 = Microsoft.Xna.Framework.Vector3;
 using Vector4 = Microsoft.Xna.Framework.Vector4;
@@ -41,7 +38,9 @@ namespace PixelMidpointDisplacement {
     public enum Position
     {
         Absolute,
-        Relative
+        Relative,
+        WorldSpace,
+        BlockSpace
     }
     public enum Scale
     {
@@ -61,11 +60,11 @@ namespace PixelMidpointDisplacement {
     {
 
         public float scale = 1;
-        public SpriteEffects effect;
+        public SpriteEffects effect = SpriteEffects.None;
 
-        public UIAlignOffset alignment;
-        public Position positionType;
-        public Scale scaleType;
+        public UIAlignOffset alignment = UIAlignOffset.TopLeft;
+        public Position positionType = Position.Absolute;
+        public Scale scaleType = Scale.Absolute;
         public Color color = Color.White;
 
         public const int defaultScreenWidth = 1920;
@@ -84,8 +83,12 @@ namespace PixelMidpointDisplacement {
 
         public string buttonText;
         public Vector2 textLocation;
-        public virtual void onLeftClick(Game1 game) { }
-        public virtual void onRightClick(Game1 game) { }
+        public virtual void onLeftClick(Game1 game) {
+            clickCooldown = maxClickCooldown;
+        }
+        public virtual void onRightClick(Game1 game) {
+            clickCooldown = maxClickCooldown;
+        }
     }
 
     /*
@@ -161,7 +164,7 @@ namespace PixelMidpointDisplacement {
 
         public string stringToRender;
 
-        const int UILayer = 18;
+        int UILayer = 18;
 
         int textDrawHeight;
 
@@ -173,6 +176,8 @@ namespace PixelMidpointDisplacement {
 
         Scene scene;
         UIAlignOffset stringOffset;
+        public Position positionType;
+        public Scale scaleType;
 
         bool haveBackground = false;
 
@@ -190,6 +195,16 @@ namespace PixelMidpointDisplacement {
             this.textDrawHeight = textHeight;
 
             stringOffset = offset;
+        }
+
+        public StringRenderer(Scene scene, UIAlignOffset offset, int textHeight, bool haveBackground, int UILayer)
+        {
+            this.scene = scene;
+            this.haveBackground = haveBackground;
+            this.textDrawHeight = textHeight;
+
+            stringOffset = offset;
+            this.UILayer = UILayer;
         }
 
         public void setWorldContext(WorldContext wc)
@@ -264,143 +279,148 @@ namespace PixelMidpointDisplacement {
 
             Tag currentTag = Tag.None;
 
-            for (int i = 0; i < stringToRender.Length; i++)
+            if (stringToRender != null)
             {
-                if (stringToRender[i] == '\n')
+                for (int i = 0; i < stringToRender.Length; i++)
                 {
-                    currentLineY += maxLineHeight;
-                    trailingX = baseTrailingX;
-                    maxLineHeight = 0;
-                }
-                else if (stringToRender[i] == '<')
-                {
-                    //Find in the string the next '>' tag and take the string between
-                    if (stringToRender[i + 1] != '/')
+                    if (stringToRender[i] == '\n')
                     {
-                        int endTagIndex = stringToRender.IndexOf('>', i);
-                        string tag = stringToRender.Substring(i + 1, endTagIndex - (i + 1)).ToLower();
-
-                        switch (tag)
+                        currentLineY += maxLineHeight;
+                        trailingX = baseTrailingX;
+                        maxLineHeight = 0;
+                    }
+                    else if (stringToRender[i] == '<')
+                    {
+                        //Find in the string the next '>' tag and take the string between
+                        if (stringToRender[i + 1] != '/')
                         {
-                            case "purple":
-                                currentTag |= Tag.Purple;
-                                break;
-                            case "green":
-                                currentTag |= Tag.Green;
-                                break;
-                            case "grey":
-                                currentTag |= Tag.Grey;
-                                break;
-                            case "gold":
-                                currentTag |= Tag.Gold;
-                                break;
-                            case "red":
-                                currentTag |= Tag.Red;
-                                break;
-                            case "h1":
-                                currentTag |= Tag.H1;
-                                break;
-                            case "h2":
-                                currentTag |= Tag.H2;
-                                break;
-                            case "h3":
-                                currentTag |= Tag.H3;
-                                break;
+                            int endTagIndex = stringToRender.IndexOf('>', i);
+                            string tag = stringToRender.Substring(i + 1, endTagIndex - (i + 1)).ToLower();
 
+                            switch (tag)
+                            {
+                                case "purple":
+                                    currentTag |= Tag.Purple;
+                                    break;
+                                case "green":
+                                    currentTag |= Tag.Green;
+                                    break;
+                                case "grey":
+                                    currentTag |= Tag.Grey;
+                                    break;
+                                case "gold":
+                                    currentTag |= Tag.Gold;
+                                    break;
+                                case "red":
+                                    currentTag |= Tag.Red;
+                                    break;
+                                case "h1":
+                                    currentTag |= Tag.H1;
+                                    break;
+                                case "h2":
+                                    currentTag |= Tag.H2;
+                                    break;
+                                case "h3":
+                                    currentTag |= Tag.H3;
+                                    break;
+
+                            }
+
+                            i = endTagIndex;
                         }
+                        else
+                        {
+                            //Is an end tag
+                            int endTagIndex = stringToRender.IndexOf('>', i);
+                            string tag = stringToRender.Substring(i + 2, endTagIndex - (i + 2)).ToLower();
 
-                        i = endTagIndex;
+                            switch (tag)
+                            {
+                                case "purple":
+                                    currentTag &= ~Tag.Purple;
+                                    break;
+                                case "green":
+                                    currentTag &= ~Tag.Green;
+                                    break;
+                                case "grey":
+                                    currentTag &= ~Tag.Grey;
+                                    break;
+                                case "gold":
+                                    currentTag &= ~Tag.Gold;
+                                    break;
+                                case "red":
+                                    currentTag &= ~Tag.Red;
+                                    break;
+                                case "h1":
+                                    currentTag &= ~Tag.H1;
+                                    break;
+                                case "h2":
+                                    currentTag &= ~Tag.H2;
+                                    break;
+                                case "h3":
+                                    currentTag &= ~Tag.H3;
+                                    break;
+
+                            }
+                            i = endTagIndex;
+                        }
                     }
                     else
                     {
-                        //Is an end tag
-                        int endTagIndex = stringToRender.IndexOf('>', i);
-                        string tag = stringToRender.Substring(i + 2, endTagIndex - (i + 2)).ToLower();
-
-                        switch (tag)
+                        TextStyle currentStyle = TextStyle.None;
+                        if ((currentTag & Tag.H1) == Tag.H1)
                         {
-                            case "purple":
-                                currentTag &= ~Tag.Purple;
-                                break;
-                            case "green":
-                                currentTag &= ~Tag.Green;
-                                break;
-                            case "grey":
-                                currentTag &= ~Tag.Grey;
-                                break;
-                            case "gold":
-                                currentTag &= ~Tag.Gold;
-                                break;
-                            case "red":
-                                currentTag &= ~Tag.Red;
-                                break;
-                            case "h1":
-                                currentTag &= ~Tag.H1;
-                                break;
-                            case "h2":
-                                currentTag &= ~Tag.H2;
-                                break;
-                            case "h3":
-                                currentTag &= ~Tag.H3;
-                                break;
-
+                            currentStyle |= TextStyle.h1;
                         }
-                        i = endTagIndex;
-                    }
-                }
-                else
-                {
-                    TextStyle currentStyle = TextStyle.None;
-                    if ((currentTag & Tag.H1) == Tag.H1)
-                    {
-                        currentStyle |= TextStyle.h1;
-                    }
-                    else if ((currentTag & Tag.H2) == Tag.H2)
-                    {
-                        currentStyle |= TextStyle.h2;
-                    }
-                    else if ((currentTag & Tag.H3) == Tag.H3)
-                    {
-                        currentStyle |= TextStyle.h3;
-                    }
+                        else if ((currentTag & Tag.H2) == Tag.H2)
+                        {
+                            currentStyle |= TextStyle.h2;
+                        }
+                        else if ((currentTag & Tag.H3) == Tag.H3)
+                        {
+                            currentStyle |= TextStyle.h3;
+                        }
 
-                    StringCharacter c = new StringCharacter(stringToRender[i], textDrawHeight, trailingX, currentLineY, currentStyle);
+                        StringCharacter c = new StringCharacter(stringToRender[i], textDrawHeight, trailingX, currentLineY, currentStyle);
 
-                    c.scene = scene;
-                    c.alignment = stringOffset;
-                    //I could improve this by allowing for nested color tags
-                    if ((currentTag & Tag.Purple) == Tag.Purple)
-                    {
-                        c.color = Color.Purple;
-                    }
-                    else if ((currentTag & Tag.Green) == Tag.Green)
-                    {
-                        c.color = Color.Green;
-                    }
-                    else if ((currentTag & Tag.Gold) == Tag.Gold)
-                    {
-                        c.color = Color.Gold;
-                    }
-                    else if ((currentTag & Tag.Grey) == Tag.Grey)
-                    {
-                        c.color = Color.Gray;
-                    }
-                    else if ((currentTag & Tag.Red) == Tag.Red)
-                    {
-                        c.color = Color.Red;
-                    }
-                    trailingX += c.drawRectangle.Width;
-                    if (maxLineLength < trailingX)
-                    {
-                        maxLineLength = trailingX;
-                    }
-                    if (c.drawRectangle.Height > maxLineHeight)
-                    {
-                        maxLineHeight = c.drawRectangle.Height;
-                    }
+                        c.scene = scene;
+                        c.alignment = stringOffset;
+                        //I could improve this by allowing for nested color tags
+                        if ((currentTag & Tag.Purple) == Tag.Purple)
+                        {
+                            c.color = Color.Purple;
+                        }
+                        else if ((currentTag & Tag.Green) == Tag.Green)
+                        {
+                            c.color = Color.Green;
+                        }
+                        else if ((currentTag & Tag.Gold) == Tag.Gold)
+                        {
+                            c.color = Color.Gold;
+                        }
+                        else if ((currentTag & Tag.Grey) == Tag.Grey)
+                        {
+                            c.color = Color.Gray;
+                        }
+                        else if ((currentTag & Tag.Red) == Tag.Red)
+                        {
+                            c.color = Color.Red;
+                        }
+                        trailingX += c.drawRectangle.Width;
+                        if (maxLineLength < trailingX)
+                        {
+                            maxLineLength = trailingX;
+                        }
+                        if (c.drawRectangle.Height > maxLineHeight)
+                        {
+                            maxLineHeight = c.drawRectangle.Height;
+                        }
 
-                    visualisedString.Add(c);
-                    wc.engineController.UIController.addUIElement(UILayer, c);
+                        c.positionType = positionType;
+                        c.scaleType = scaleType;
+                        visualisedString.Add(c);
+                        wc.engineController.UIController.addUIElement(UILayer, c);
+                    }
                 }
             }
             if (background != null)
@@ -1316,7 +1336,8 @@ namespace PixelMidpointDisplacement {
             wc.engineController.UIController.addUIElement(150, rb);
             wc.engineController.UIController.addUIElement(150, rs);
 
-            sr = new StringRenderer(Scene.Game, UIAlignOffset.Centre, 13, false);
+            sr = new StringRenderer(Scene.Game, UIAlignOffset.Centre, 26, false, 151);
+
             sr.setWorldContext(wc);
         }
 
@@ -1325,8 +1346,18 @@ namespace PixelMidpointDisplacement {
             Random r = new Random();
             int index = r.Next(deathMessages.Count);
             string baseString = deathMessages[index];
-            baseString.Replace("_", "\"" + source.ToString().Substring(source.ToString().LastIndexOf(".")));
+            if (source != null)
+            {
+                baseString = baseString.Replace("_", "\"" + source.ToString().Substring(source.ToString().LastIndexOf(".")));
+            }
+            else {
+                baseString = baseString.Replace("_", "The world");
+            }
+
             sr.setString(baseString);
+            sr.updateLocation(sr.x, 200);
+            rs.isUIElementActive = true;
+            rb.isUIElementActive = true;
         }
 
         public void respawn(Game1 game){
@@ -1428,7 +1459,7 @@ namespace PixelMidpointDisplacement {
         {
 
             this.drawOrder = drawOrder;
-            drawRectangle = new Rectangle((int)x + wc.screenSpaceOffset.x, (int)y + wc.screenSpaceOffset.y, 10, 14);
+            drawRectangle = new Rectangle((int)x, (int)y, 10, 14);
             this.x = x;
             this.y = y;
             existingDuration = maxExistingDuration;
@@ -1438,7 +1469,7 @@ namespace PixelMidpointDisplacement {
             spriteSheetID = (int)spriteSheetIDs.pixelNumbers;
 
             alignment = UIAlignOffset.TopLeft;
-            positionType = Position.Absolute;
+            positionType = Position.WorldSpace;
             scaleType = Scale.Absolute;
             scene = Scene.Game;
             isUIElementActive = true;
@@ -1448,8 +1479,6 @@ namespace PixelMidpointDisplacement {
         {
             existingDuration -= elapsedTime;
             y -= ((yIncrease / maxExistingDuration) * elapsedTime);
-
-            drawRectangle = new Rectangle((int)x + worldContext.screenSpaceOffset.x, (int)(y + worldContext.screenSpaceOffset.y), 10, 14);
 
             if (existingDuration <= 0)
             {
@@ -1830,4 +1859,229 @@ namespace PixelMidpointDisplacement {
         }
     }
 
+    /*
+     * ========================================
+     * Housing UI
+     * ========================================
+    */
+
+    public class HouseUI : UIElement {
+        double baseX;
+        double baseY;
+        public HouseUI(double x, double y) {
+            scene = Scene.Game;
+            positionType = Position.BlockSpace;
+            scaleType = Scale.Absolute;
+            alignment = UIAlignOffset.TopLeft;
+
+            spriteSheetID = (int)spriteSheetIDs.houseUI;
+            drawRectangle = new Rectangle((int)x,(int)y,64,64);
+            sourceRectangle = new Rectangle(0,0,32,32);
+            baseX = x;
+            baseY = y;
+            
+        }
+    }
+
+    /*
+     * ========================================
+     * NPC Parent Dialogue UI
+     * ========================================
+    */
+
+    public class DialogueBox {
+
+        protected DialogueBackground background;
+        protected CloseDialogueButton closeDialogueButton;
+        protected StringRenderer dialogue;
+        protected WorldContext wc;
+        public NPC npc;
+
+        public string dialogueString;
+
+        public bool isDialogueOpen = false;
+
+        public const int drawLayer = 20;
+        int dialogueOffsetX = 25;
+        int dialogueOffsetY = 15;
+
+        public DialogueBox(WorldContext wc, NPC npc) {
+            background = new DialogueBackground();
+            closeDialogueButton = new CloseDialogueButton(this, wc);
+            dialogue = new StringRenderer(Scene.Game, UIAlignOffset.TopLeft, 15, false, drawLayer);
+            dialogue.positionType = Position.WorldSpace;
+
+            this.wc = wc;
+            this.npc = npc;
+            dialogue.setWorldContext(wc);
+            wc.engineController.UIController.addUIElement(drawLayer - 1, background);
+            wc.engineController.UIController.addUIElement(drawLayer, closeDialogueButton);
+        }
+
+        public virtual void closeDialogue() {
+            dialogue.hideString();
+            background.onDialogueClose();
+            closeDialogueButton.onDialogueClose();
+
+            isDialogueOpen = false;
+        }
+
+        public virtual void openDialogue(string dialogue) {
+            dialogueString = dialogue;
+            this.dialogue.setString(dialogue);
+            this.dialogue.updateLocation((int)npc.x + dialogueOffsetX, (int)npc.y + dialogueOffsetY);
+
+            background.onDialogueOpen((int)npc.x, (int)npc.y);
+            closeDialogueButton.onDialogueOpen((int)npc.x + background.drawRectangle.Width, (int)npc.y + background.drawRectangle.Height);
+
+            isDialogueOpen = true;
+        }
+    }
+
+    public class DialogueBackground : UIElement
+    {
+        
+        public DialogueBackground() {
+            spriteSheetID = (int)spriteSheetIDs.dialogue;
+            sourceRectangle = new Rectangle(0,0,256,88);
+            drawRectangle = new Rectangle(0,0,512,196);
+            positionType = Position.WorldSpace;
+            scene = Scene.Game;
+            isUIElementActive = false;
+        }
+
+        public void onDialogueOpen(int x, int y) {
+            drawRectangle.X = x;
+            drawRectangle.Y = y;
+            isUIElementActive = true;
+        }
+
+        public void onDialogueClose() {
+            isUIElementActive = false;
+        }
+    }
+
+    public class CloseDialogueButton : InteractiveUIElement {
+        public StringRenderer closeText;
+        public DialogueBox owner;
+        public int xOffset = 50;
+        public int yOffset = 35;
+        public CloseDialogueButton(DialogueBox owner, WorldContext wc) {
+
+            scene = Scene.Game;
+            spriteSheetID = (int)spriteSheetIDs.weapons;
+            sourceRectangle = new Rectangle(0,0,0,0);
+            drawRectangle = new Rectangle(0,0,50,25);
+            positionType = Position.WorldSpace;
+
+            closeText = new StringRenderer(Scene.Game, UIAlignOffset.TopLeft, 11, false, DialogueBox.drawLayer);
+            
+            closeText.positionType = Position.WorldSpace;
+            
+            closeText.setWorldContext(wc);
+
+            closeText.setString("Close");
+            closeText.hideString();
+
+
+            this.owner = owner;
+        }
+
+        public void onDialogueOpen(int x, int y) {
+            drawRectangle.X = x - xOffset;
+            drawRectangle.Y = y - yOffset;
+            isUIElementActive = true;
+            closeText.showString();
+            closeText.updateLocation((int)drawRectangle.X, (int)drawRectangle.Y);
+        }
+
+        public void onDialogueClose() {
+            closeText.hideString();
+            isUIElementActive = false;
+        }
+
+        public override void onLeftClick(Game1 game)
+        {
+            this.owner.npc.dialogueButtonPress("close");
+            base.onLeftClick(game);
+            
+        }
+
+    }
+
+
+    /*========================================
+     * NPC Dialogue UI
+     * ========================================
+    */
+
+    public class GuideDialogueBox : DialogueBox {
+        HelpDialogueButton helpButton;
+        public GuideDialogueBox(WorldContext wc, NPC npc) : base(wc, npc) {
+            helpButton = new HelpDialogueButton(this, wc);
+            wc.engineController.UIController.addUIElement(drawLayer, helpButton);
+        }
+
+        public override void openDialogue(string dialogue)
+        {
+            helpButton.onDialogueOpen((int)npc.x + background.drawRectangle.Width, (int)npc.y + background.drawRectangle.Height);
+            base.openDialogue(dialogue);
+        }
+
+        public override void closeDialogue()
+        {
+            helpButton.onDialogueClose();
+            base.closeDialogue();
+        }
+    }
+
+    public class HelpDialogueButton : InteractiveUIElement {
+        public StringRenderer helpText;
+        public DialogueBox owner;
+        public int xOffset = 100;
+        public int yOffset = 35;
+        public HelpDialogueButton(DialogueBox owner, WorldContext wc)
+        {
+
+            scene = Scene.Game;
+            spriteSheetID = (int)spriteSheetIDs.weapons;
+            sourceRectangle = new Rectangle(0, 0, 0, 0);
+            drawRectangle = new Rectangle(0, 0, 50, 25);
+            positionType = Position.WorldSpace;
+
+            helpText = new StringRenderer(Scene.Game, UIAlignOffset.TopLeft, 11, false, DialogueBox.drawLayer);
+
+            helpText.positionType = Position.WorldSpace;
+
+            helpText.setWorldContext(wc);
+
+            helpText.setString("Help");
+            helpText.hideString();
+
+            maxClickCooldown = 0.4f;
+
+            this.owner = owner;
+        }
+
+        public void onDialogueOpen(int x, int y)
+        {
+            drawRectangle.X = x - xOffset;
+            drawRectangle.Y = y - yOffset;
+            isUIElementActive = true;
+            helpText.showString();
+            helpText.updateLocation((int)drawRectangle.X, (int)drawRectangle.Y);
+        }
+
+        public void onDialogueClose() {
+            isUIElementActive = false;
+            helpText.hideString();
+        }
+
+        public override void onLeftClick(Game1 game)
+        {
+            this.owner.npc.dialogueButtonPress("help");
+            base.onLeftClick(game);
+
+        }
+    }
 }

@@ -39,6 +39,8 @@ namespace PixelMidpointDisplacement {
         public EvolutionUIController evolutionController;
         public CraftingManager craftingManager;
         public AnimationController animationController;
+        public HouseController housingController;
+        public NPCController npcController;
 
         public WorldContext worldContext;
 
@@ -56,6 +58,8 @@ namespace PixelMidpointDisplacement {
             UIController = new UIController(wc);
             evolutionController = new EvolutionUIController(wc);
             craftingManager = new CraftingManager(wc);
+            housingController = new HouseController(wc);
+            npcController = new NPCController(wc, housingController);
         }
 
 
@@ -169,7 +173,8 @@ namespace PixelMidpointDisplacement {
             //Friction
             //If the acceleration is lesser than the frictional force if the object is stationary. 
             //If the entities velocity is between +-0.3, to stop jitter
-            if (entity.velocityX >= -0.3 && entity.velocityX <= 0.3 && Math.Abs(entity.accelerationX) < frictionMax)
+            const double lowestVelocityToComputeFriction = 0.3;
+            if (entity.velocityX >= -lowestVelocityToComputeFriction && entity.velocityX <= lowestVelocityToComputeFriction && Math.Abs(entity.accelerationX) < frictionMax)
             {
                 entity.accelerationX = 0;
 
@@ -234,9 +239,9 @@ namespace PixelMidpointDisplacement {
                 {
                     if (x >= 0 && y >= 0 && x < worldArray.GetLength(0) && y < worldArray.GetLength(1))
                     {
-                        if (worldArray[x, y].ID != 0) //In game implementation, air can either be null or have a special 'colliderless' block type 
+                        if (worldArray[x, y].ID != (int)blockIDs.air && worldArray[x,y].hasCollisions) //In game implementation, air can either be null or have a special 'colliderless' block type 
                         {
-                            Rectangle blockRect = new Rectangle(x * wc.pixelsPerBlock, y * wc.pixelsPerBlock, wc.pixelsPerBlock, wc.pixelsPerBlock);
+                            Rectangle blockRect = new Rectangle(x * wc.pixelsPerBlock, y * wc.pixelsPerBlock, (int)( worldArray[x,y].blockColliderDimensions.X * wc.pixelsPerBlock), (int)(worldArray[x,y].blockColliderDimensions.Y * wc.pixelsPerBlock));
                             if (blockRect.Intersects(entityCollider))
                             {
 
@@ -937,7 +942,10 @@ namespace PixelMidpointDisplacement {
             }
             for (int i = 0; i < spriteAnimators.Count; i++)
             {
-                spriteAnimators[i].tickAnimation(elapsedTime);
+                if (spriteAnimators[i] != null)
+                {
+                    spriteAnimators[i].tickAnimation(elapsedTime);
+                }
             }
         }
 
@@ -1056,6 +1064,8 @@ namespace PixelMidpointDisplacement {
 
         public RespawnUI respawnUI;
 
+
+
         public PlayerUIController(Player player) {
             this.owner = player;
             wc = owner.worldContext;
@@ -1070,7 +1080,6 @@ namespace PixelMidpointDisplacement {
             wc.engineController.UIController.addUIElement(3, hotbar);
             wc.engineController.UIController.inventoryBackgrounds.Add(hotbar);
             wc.engineController.UIController.addUIElement(4, hotbarSelected);
-
         }
 
         public void damageTaken(object source) {
